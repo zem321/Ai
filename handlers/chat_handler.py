@@ -3,10 +3,12 @@ import base64
 import logging
 import aiohttp
 import json
+import io
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from PIL import Image
 
 from keyboards import cancel_keyboard, model_select_keyboard, MODELS
 from states import BotStates
@@ -24,6 +26,19 @@ VISION_MODELS = {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini"}
 
 def get_history(data): return data.get("chat_history", [])
 def get_model(data): return data.get("selected_model", "gpt-5.4-mini")
+
+
+def compress_image(image_bytes: bytes) -> str:
+    """Сжимаем фото до 800px и качество 70% для экономии токенов"""
+    img = Image.open(io.BytesIO(image_bytes))
+    # Конвертируем в RGB если нужно
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    # Сжимаем до максимум 800px
+    img.thumbnail((800, 800), Image.LANCZOS)
+    output = io.BytesIO()
+    img.save(output, format="JPEG", quality=70)
+    return base64.b64encode(output.getvalue()).decode("utf-8")
 
 
 async def call_ai(model_id: str, messages: list) -> str:
@@ -84,7 +99,8 @@ async def enter_chat_mode(event, state: FSMContext):
     text = (
         f"💬 <b>Режим чата</b>\n\n"
         f"🤖 Модель: <b>{model_name}</b>\n\n"
-        f"Пиши вопросы или отправляй фото с подписью — я отвечу сразу!\n"
+        f"• Пиши любые вопросы\n"
+        f"• Отправляй фото с подписью — отвечу сразу!\n\n"
         f"/clear — очистить историю"
     )
     if isinstance(event, CallbackQuery):
@@ -114,22 +130,25 @@ async def handle_photo(message: Message, state: FSMContext):
 
     if model_id not in VISION_MODELS:
         await message.answer(
-            f"⚠️ Модель <b>{model_name}</b> не поддерживает анализ фото.\nВыбери GPT-5.5 или GPT-5.4.",
+            f"⚠️ Модель <b>{model_name}</b> не поддерживает анализ фото.\n"
+            f"Выбери GPT-5.5 или GPT-5.4.",
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
         return
 
-    caption = message.caption or "Опиши подробно что на этом фото"
+    # Используем подпись как запрос, если нет - просим описать
+    caption = message.caption or "Подробно опиши что на этом фото"
+
     status_msg = await message.answer("🔍 <i>Анализирую фото...</i>", parse_mode="HTML")
 
     try:
-        # Download photo
+        # Скачиваем и сжимаем фото
         photo = message.photo[-1]
         file = await message.bot.get_file(photo.file_id)
         file_bytes = await message.bot.download_file(file.file_path)
-        image_b64 = base64.b64encode(file_bytes.read()).decode("utf-8")
+        image_b64 = compress_image(file_bytes.read())
 
-        # Send to AI with photo (NOT saved to history to save tokens)
+        # Отправляем в AI (фото не сохраняем в историю — экономия токенов!)
         history = get_history(data)
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
         messages.append({
@@ -142,7 +161,7 @@ async def handle_photo(message: Message, state: FSMContext):
 
         reply = await call_ai(model_id, messages)
 
-        # Save only text to history (not the photo - saves tokens!)
+        # В историю сохраняем только текст — не фото!
         history.append({"role": "user", "content": f"[Фото] {caption}"})
         history.append({"role": "assistant", "content": reply})
         if len(history) > MAX_HISTORY:
