@@ -68,7 +68,7 @@ async def cb_model_selected(callback: CallbackQuery, state: FSMContext):
     model_name = MODELS.get(model_id, model_id)
     await state.set_state(BotStates.chat_mode)
     await callback.message.edit_text(
-        f"✅ <b>Модель:</b> {model_name}\n\nПиши сообщения или отправляй фото!",
+        f"✅ <b>Модель:</b> {model_name}\n\nПиши сообщения или отправляй фото с подписью!",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
@@ -84,7 +84,7 @@ async def enter_chat_mode(event, state: FSMContext):
     text = (
         f"💬 <b>Режим чата</b>\n\n"
         f"🤖 Модель: <b>{model_name}</b>\n\n"
-        f"Пиши вопросы или прикрепляй фото с подписью.\n"
+        f"Пиши вопросы или отправляй фото с подписью — я отвечу сразу!\n"
         f"/clear — очистить историю"
     )
     if isinstance(event, CallbackQuery):
@@ -119,17 +119,20 @@ async def handle_photo(message: Message, state: FSMContext):
         )
         return
 
-    caption = message.caption or "Опиши что на фото"
+    caption = message.caption or "Опиши подробно что на этом фото"
     status_msg = await message.answer("🔍 <i>Анализирую фото...</i>", parse_mode="HTML")
 
     try:
+        # Download photo
         photo = message.photo[-1]
         file = await message.bot.get_file(photo.file_id)
         file_bytes = await message.bot.download_file(file.file_path)
         image_b64 = base64.b64encode(file_bytes.read()).decode("utf-8")
 
+        # Send to AI with photo (NOT saved to history to save tokens)
         history = get_history(data)
-        history.append({
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
+        messages.append({
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
@@ -137,9 +140,10 @@ async def handle_photo(message: Message, state: FSMContext):
             ]
         })
 
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
         reply = await call_ai(model_id, messages)
 
+        # Save only text to history (not the photo - saves tokens!)
+        history.append({"role": "user", "content": f"[Фото] {caption}"})
         history.append({"role": "assistant", "content": reply})
         if len(history) > MAX_HISTORY:
             history = history[-MAX_HISTORY:]
