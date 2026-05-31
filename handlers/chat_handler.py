@@ -10,34 +10,30 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from PIL import Image
 
-from keyboards import cancel_keyboard, model_select_keyboard, MODELS
+from keyboards import cancel_keyboard, model_select_keyboard, MODELS, VISION_MODELS
 from states import BotStates
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 API_KEY = os.getenv("API_KEY")
-CHAT_URL = "https://codex.sale/v1/chat/completions"
+CHAT_URL = "https://ai-proxy.izisoft.xyz/v1/chat/completions"
 
 SYSTEM_PROMPT = "Ты полезный ИИ-ассистент. Отвечай на русском языке если вопрос на русском. Будь точным и лаконичным."
 MAX_HISTORY = 20
-
-VISION_MODELS = {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini"}
 
 def get_history(data): return data.get("chat_history", [])
 def get_model(data): return data.get("selected_model", "gpt-5.4-mini")
 
 
 def compress_image(image_bytes: bytes) -> str:
-    """Сжимаем фото до 800px и качество 70% для экономии токенов"""
+    """Сжимаем фото до 512px и качество 60% для экономии токенов"""
     img = Image.open(io.BytesIO(image_bytes))
-    # Конвертируем в RGB если нужно
     if img.mode != "RGB":
         img = img.convert("RGB")
-    # Сжимаем до максимум 800px
-    img.thumbnail((800, 800), Image.LANCZOS)
+    img.thumbnail((512, 512), Image.LANCZOS)
     output = io.BytesIO()
-    img.save(output, format="JPEG", quality=70)
+    img.save(output, format="JPEG", quality=60)
     return base64.b64encode(output.getvalue()).decode("utf-8")
 
 
@@ -131,24 +127,21 @@ async def handle_photo(message: Message, state: FSMContext):
     if model_id not in VISION_MODELS:
         await message.answer(
             f"⚠️ Модель <b>{model_name}</b> не поддерживает анализ фото.\n"
-            f"Выбери GPT-5.5 или GPT-5.4.",
+            f"Выбери Claude или GPT-5.5.",
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
         return
 
-    # Используем подпись как запрос, если нет - просим описать
     caption = message.caption or "Подробно опиши что на этом фото"
-
     status_msg = await message.answer("🔍 <i>Анализирую фото...</i>", parse_mode="HTML")
 
     try:
-        # Скачиваем и сжимаем фото
         photo = message.photo[-1]
         file = await message.bot.get_file(photo.file_id)
         file_bytes = await message.bot.download_file(file.file_path)
+        # Сжимаем фото для экономии токенов
         image_b64 = compress_image(file_bytes.read())
 
-        # Отправляем в AI (фото не сохраняем в историю — экономия токенов!)
         history = get_history(data)
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
         messages.append({
@@ -161,7 +154,7 @@ async def handle_photo(message: Message, state: FSMContext):
 
         reply = await call_ai(model_id, messages)
 
-        # В историю сохраняем только текст — не фото!
+        # Сохраняем только текст в историю — не фото!
         history.append({"role": "user", "content": f"[Фото] {caption}"})
         history.append({"role": "assistant", "content": reply})
         if len(history) > MAX_HISTORY:
