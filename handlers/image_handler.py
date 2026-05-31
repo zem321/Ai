@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 API_KEY = os.getenv("API_KEY")
-IMAGE_URL = "https://ai-proxy.izisoft.xyz/v1/image/generation"
+IMAGE_GEN_URL = "https://ai-proxy.izisoft.xyz/v1/image/generation"
+IMAGE_EDIT_URL = "https://ai-proxy.izisoft.xyz/v1/images/edits"
 
 
 def compress_image(image_bytes: bytes) -> bytes:
-    """Сжимаем фото для редактирования"""
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode != "RGB":
         img = img.convert("RGB")
@@ -30,13 +30,19 @@ def compress_image(image_bytes: bytes) -> bytes:
     return output.getvalue()
 
 
-async def call_image_api(payload: dict) -> bytes:
+async def call_generate(prompt: str, size: str) -> bytes:
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
     }
+    payload = {
+        "model": "gpt-image-2",
+        "prompt": prompt,
+        "size": size,
+        "n": 1,
+    }
     async with aiohttp.ClientSession() as session:
-        async with session.post(IMAGE_URL, json=payload, headers=headers) as resp:
+        async with session.post(IMAGE_GEN_URL, json=payload, headers=headers) as resp:
             text = await resp.text()
             try:
                 data = json.loads(text)
@@ -44,8 +50,39 @@ async def call_image_api(payload: dict) -> bytes:
                 raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
                 raise Exception(data.get("error", {}).get("message", str(data)))
-
             item = data["data"][0]
+            if "url" in item:
+                async with session.get(item["url"]) as img_resp:
+                    return await img_resp.read()
+            elif "b64_json" in item:
+                return base64.b64decode(item["b64_json"])
+            else:
+                raise Exception("Изображение не получено")
+
+
+async def call_edit(image_bytes: bytes, prompt: str, size: str) -> bytes:
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+    data = aiohttp.FormData()
+    data.add_field("model", "gpt-image-2")
+    data.add_field("prompt", prompt)
+    data.add_field("size", size)
+    data.add_field("n", "1")
+    data.add_field(
+        "image",
+        image_bytes,
+        filename="image.png",
+        content_type="image/png"
+    )
+    async with aiohttp.ClientSession() as session:
+        async with session.post(IMAGE_EDIT_URL, data=data, headers=headers) as resp:
+            text = await resp.text()
+            try:
+                result = json.loads(text)
+            except Exception:
+                raise Exception(f"Ответ сервера: {text[:300]}")
+            if resp.status != 200:
+                raise Exception(result.get("error", {}).get("message", str(result)))
+            item = result["data"][0]
             if "url" in item:
                 async with session.get(item["url"]) as img_resp:
                     return await img_resp.read()
@@ -89,13 +126,7 @@ async def do_generate_image(message: Message, state: FSMContext):
     await message.bot.send_chat_action(message.chat.id, "upload_photo")
     status_msg = await message.answer("🎨 <i>Генерирую изображение... ~20 секунд</i>", parse_mode="HTML")
     try:
-        payload = {
-            "model": "gpt-image-2",
-            "prompt": message.text,
-            "size": size,
-            "n": 1,
-        }
-        image_bytes = await call_image_api(payload)
+        image_bytes = await call_generate(message.text, size)
         image_file = BufferedInputFile(image_bytes, filename="generated.png")
         await status_msg.delete()
         await message.answer_photo(
@@ -112,7 +143,7 @@ async def do_generate_image(message: Message, state: FSMContext):
         )
 
 
-# ── Редактирование — фото + текст в одном сообщении ───────────────────────────
+# ── Редактирование ─────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "mode_image_edit")
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
@@ -130,19 +161,16 @@ async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
 
 @router.message(BotStates.image_edit, F.photo)
 async def edit_photo_received(message: Message, state: FSMContext):
-    # Получаем фото и подпись сразу
     caption = message.caption
-
     if not caption:
         await message.answer(
-            "⚠️ Напиши задание прямо под фото как подпись!\n\n"
+            "⚠️ <b>Напиши задание прямо под фото как подпись!</b>\n\n"
             "<i>Зажми фото → добавь подпись → отправь</i>",
             parse_mode="HTML",
             reply_markup=cancel_keyboard()
         )
         return
 
-    # Сохраняем фото и задание
     photo = message.photo[-1]
     file = await message.bot.get_file(photo.file_id)
     file_bytes = await message.bot.download_file(file.file_path)
@@ -154,7 +182,6 @@ async def edit_photo_received(message: Message, state: FSMContext):
         edit_prompt=caption,
         edit_step="waiting_size"
     )
-
     await message.answer(
         f"✅ <b>Фото и задание получены!</b>\n\n"
         f"📝 Задание: <i>{caption}</i>\n\n"
@@ -174,28 +201,19 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     size = callback.data.replace("size_edit_", "")
     await state.update_data(image_size=size, edit_step="processing")
 
-    await callback.message.edit_text(
+    status_msg = await callback.message.edit_text(
         "✏️ <i>Редактирую фото... ~20 секунд</i>",
         parse_mode="HTML"
     )
     await callback.answer()
 
-    # Сразу запускаем редактирование
-    image_b64 = data.get("edit_image_b64")
+    image_bytes = base64.b64decode(data.get("edit_image_b64"))
     prompt = data.get("edit_prompt")
 
     try:
-        payload = {
-            "model": "gpt-image-2",
-            "prompt": prompt,
-            "image": image_b64,
-            "size": size,
-            "n": 1,
-        }
-        image_bytes = await call_image_api(payload)
-        image_file = BufferedInputFile(image_bytes, filename="edited.png")
-
-        await callback.message.delete()
+        result_bytes = await call_edit(image_bytes, prompt, size)
+        image_file = BufferedInputFile(result_bytes, filename="edited.png")
+        await status_msg.delete()
         await callback.message.answer_photo(
             photo=image_file,
             caption=f"✏️ <b>Готово!</b>\n📝 {prompt}",
@@ -203,10 +221,9 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
             reply_markup=cancel_keyboard()
         )
         await state.update_data(edit_step="waiting_photo", edit_image_b64=None, edit_prompt=None)
-
     except Exception as e:
         logger.error(f"Image edit error: {e}")
-        await callback.message.edit_text(
+        await status_msg.edit_text(
             f"❌ <b>Ошибка редактирования:</b>\n<code>{str(e)}</code>",
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
