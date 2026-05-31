@@ -2,33 +2,25 @@ import os
 import base64
 import logging
 import aiohttp
+import json
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
-from keyboards import main_menu_keyboard, cancel_keyboard, model_select_keyboard, MODELS
+from keyboards import cancel_keyboard, model_select_keyboard, MODELS
 from states import BotStates
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 API_KEY = os.getenv("API_KEY")
-API_URL = "https://ai-proxy.izisoft.xyz/v1/chat/completions"
+CHAT_URL = "https://codex.sale/v1/chat/completions"
 
 SYSTEM_PROMPT = "Ты полезный ИИ-ассистент. Отвечай на русском языке если вопрос на русском. Будь точным и лаконичным."
 MAX_HISTORY = 20
 
-VISION_MODELS = {
-    "anthropic/claude-opus-4-8",
-    "anthropic/claude-opus-4-7",
-    "anthropic/claude-opus-4-6",
-    "anthropic/claude-sonnet-4-6",
-    "claude-sonnet-4-5",
-    "claude-haiku-4-5",
-    "gpt-5.5",
-    "gpt-5.4-mini",
-}
+VISION_MODELS = {"gpt-5.5", "gpt-5.4", "gpt-5.4-mini"}
 
 def get_history(data): return data.get("chat_history", [])
 def get_model(data): return data.get("selected_model", "gpt-5.4-mini")
@@ -46,8 +38,12 @@ async def call_ai(model_id: str, messages: list) -> str:
         "temperature": 0.7,
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(API_URL, json=payload, headers=headers) as resp:
-            data = await resp.json()
+        async with session.post(CHAT_URL, json=payload, headers=headers) as resp:
+            text = await resp.text()
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
                 raise Exception(data.get("error", {}).get("message", str(data)))
             return data["choices"][0]["message"]["content"]
@@ -118,7 +114,7 @@ async def handle_photo(message: Message, state: FSMContext):
 
     if model_id not in VISION_MODELS:
         await message.answer(
-            f"⚠️ Модель <b>{model_name}</b> не поддерживает анализ фото.\nВыбери Claude или GPT-5.5.",
+            f"⚠️ Модель <b>{model_name}</b> не поддерживает анализ фото.\nВыбери GPT-5.5 или GPT-5.4.",
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
         return
