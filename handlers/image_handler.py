@@ -2,19 +2,20 @@ import os
 import base64
 import logging
 import aiohttp
+import json
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
-from keyboards import cancel_keyboard, image_size_keyboard, main_menu_keyboard
+from keyboards import cancel_keyboard, image_size_keyboard
 from states import BotStates
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 API_KEY = os.getenv("API_KEY")
-IMAGE_API_URL = "https://ai-proxy.izisoft.xyz/v1/image/generation"
+IMAGE_URL = "https://codex.sale/v1/images/generations"
+IMAGE_EDIT_URL = "https://codex.sale/v1/images/edits"
 
 
 async def generate_image(prompt: str, size: str) -> bytes:
@@ -29,48 +30,62 @@ async def generate_image(prompt: str, size: str) -> bytes:
         "n": 1,
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(IMAGE_API_URL, json=payload, headers=headers) as resp:
+        async with session.post(IMAGE_URL, json=payload, headers=headers) as resp:
             text = await resp.text()
             try:
-                import json
                 data = json.loads(text)
             except Exception:
-                raise Exception(f"Ответ сервера: {text[:200]}")
+                raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
                 raise Exception(data.get("error", {}).get("message", str(data)))
-            image_url = data["data"][0]["url"]
 
-        async with session.get(image_url) as img_resp:
-            return await img_resp.read()
+            item = data["data"][0]
+            if "url" in item:
+                async with session.get(item["url"]) as img_resp:
+                    return await img_resp.read()
+            elif "b64_json" in item:
+                return base64.b64decode(item["b64_json"])
+            else:
+                raise Exception("Изображение не получено от сервера")
 
 
-async def edit_image(image_b64: str, prompt: str, size: str) -> bytes:
+async def edit_image(image_bytes: bytes, prompt: str, size: str) -> bytes:
     headers = {
         "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
     }
-    payload = {
-        "model": "gpt-image-2",
-        "prompt": prompt,
-        "image": image_b64,
-        "size": size,
-        "n": 1,
-    }
+    data = aiohttp.FormData()
+    data.add_field("model", "gpt-image-2")
+    data.add_field("prompt", prompt)
+    data.add_field("size", size)
+    data.add_field("n", "1")
+    data.add_field(
+        "image",
+        image_bytes,
+        filename="image.png",
+        content_type="image/png"
+    )
+
     async with aiohttp.ClientSession() as session:
-        async with session.post(IMAGE_API_URL, json=payload, headers=headers) as resp:
+        async with session.post(IMAGE_EDIT_URL, data=data, headers=headers) as resp:
             text = await resp.text()
             try:
-                import json
-                data = json.loads(text)
+                result = json.loads(text)
             except Exception:
-                raise Exception(f"Ответ сервера: {text[:200]}")
+                raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
-                raise Exception(data.get("error", {}).get("message", str(data)))
-            image_url = data["data"][0]["url"]
+                raise Exception(result.get("error", {}).get("message", str(result)))
 
-        async with session.get(image_url) as img_resp:
-            return await img_resp.read()
+            item = result["data"][0]
+            if "url" in item:
+                async with session.get(item["url"]) as img_resp:
+                    return await img_resp.read()
+            elif "b64_json" in item:
+                return base64.b64decode(item["b64_json"])
+            else:
+                raise Exception("Изображение не получено от сервера")
 
+
+# ── Генерация ──────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "mode_image_gen")
 async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
@@ -121,6 +136,8 @@ async def do_generate_image(message: Message, state: FSMContext):
         )
 
 
+# ── Редактирование ─────────────────────────────────────────────────────────────
+
 @router.callback_query(F.data == "mode_image_edit")
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
@@ -137,15 +154,19 @@ async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
 @router.message(BotStates.image_edit, F.photo)
 async def edit_photo_received(message: Message, state: FSMContext):
     data = await state.get_data()
-    edit_step = data.get("edit_step", "waiting_photo")
-    if edit_step == "waiting_photo":
+    if data.get("edit_step") == "waiting_photo":
         photo = message.photo[-1]
         file = await message.bot.get_file(photo.file_id)
         file_bytes = await message.bot.download_file(file.file_path)
-        image_b64 = base64.b64encode(file_bytes.read()).decode("utf-8")
-        await state.update_data(edit_image_b64=image_b64, edit_step="waiting_prompt")
+        image_bytes = file_bytes.read()
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        await state.update_data(
+            edit_image_b64=image_b64,
+            edit_step="waiting_size"
+        )
         await message.answer(
-            "✅ <b>Фото получено!</b>\n\n📝 Выбери размер результата:",
+            "✅ <b>Фото получено!</b>\n\nВыбери размер результата:",
             reply_markup=image_size_keyboard("edit"),
             parse_mode="HTML"
         )
@@ -154,7 +175,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("size_edit_"))
 async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     size = callback.data.replace("size_edit_", "")
-    await state.update_data(image_size=size)
+    await state.update_data(image_size=size, edit_step="waiting_prompt")
     await callback.message.edit_text(
         f"✅ Размер: <b>{size}</b>\n\n"
         f"📝 <b>Опиши что нужно изменить:</b>\n\n"
@@ -171,14 +192,18 @@ async def do_edit_image(message: Message, state: FSMContext):
     image_b64 = data.get("edit_image_b64")
     edit_step = data.get("edit_step")
     size = data.get("image_size", "1024x1024")
+
     if not image_b64 or edit_step != "waiting_prompt":
         await message.answer("📸 Сначала отправь фото.", reply_markup=cancel_keyboard())
         return
+
     await message.bot.send_chat_action(message.chat.id, "upload_photo")
     status_msg = await message.answer("✏️ <i>Редактирую фото... ~20 секунд</i>", parse_mode="HTML")
+
     try:
-        image_bytes = await edit_image(image_b64, message.text, size)
-        image_file = BufferedInputFile(image_bytes, filename="edited.png")
+        image_bytes = base64.b64decode(image_b64)
+        result_bytes = await edit_image(image_bytes, message.text, size)
+        image_file = BufferedInputFile(result_bytes, filename="edited.png")
         await status_msg.delete()
         await message.answer_photo(
             photo=image_file,
