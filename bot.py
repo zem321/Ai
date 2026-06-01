@@ -19,20 +19,37 @@ if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан!")
 
 
+# Простая проверка работоспособности сервера
 async def health(request):
     return web.Response(text="OK")
 
 
+# Функция для отдачи твоего Mini App интерфейса
+async def web_app_handler(request):
+    # Проверяем, существует ли файл рядом с ботом
+    file_path = "index.html"
+    if os.path.exists(file_path):
+        return web.FileResponse(file_path)
+    else:
+        return web.Response(text="Файл index.html не найден на сервере!", status=404)
+
+
 async def start_web():
     app = web.Application()
+    
+    # Стандартные маршруты
     app.router.add_get("/", health)
     app.router.add_get("/health", health)
+    
+    # НОВЫЙ МАРШРУТ: Открывает интерфейс АрбузAI при переходе по ссылке /app
+    app.router.add_get("/app", web_app_handler)
+    
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logger.info(f"Web server started on port {port}")
+    logger.info(f"Web server started on port {port}. Mini App available at /app")
 
 
 async def set_commands(bot: Bot):
