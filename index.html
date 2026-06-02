@@ -486,7 +486,7 @@ async function doChat(text, imageUrl, docFile) {
   });
   const raw = await resp.text();
   let data; try{data=JSON.parse(raw);}catch(e){throw new Error(raw.substring(0,200));}
-  if(!resp.ok) throw new Error(data.error?.message||"Ошибка API");
+  if(!resp.ok) throw new Error(JSON.stringify(data));
   hideTyping();
   addMsg("assistant", data.choices[0].message.content);
 }
@@ -499,7 +499,7 @@ async function doImageGen(text) {
   });
   const raw = await resp.text();
   let data; try{data=JSON.parse(raw);}catch(e){throw new Error(raw.substring(0,200));}
-  if(!resp.ok) throw new Error(data.error?.message||"Ошибка генерации");
+  if(!resp.ok) throw new Error(JSON.stringify(data));
   hideTyping();
   const item = data.data[0];
   const url = item.url||(item.b64_json?`data:image/png;base64,${item.b64_json}`:null);
@@ -523,7 +523,7 @@ async function doImageEdit(imageUrl, text) {
   });
   const raw = await resp.text();
   let data; try{data=JSON.parse(raw);}catch(e){throw new Error(raw.substring(0,200));}
-  if(!resp.ok) throw new Error(data.error?.message||"Ошибка редактирования");
+  if(!resp.ok) throw new Error(JSON.stringify(data));
   hideTyping();
   const item = data.data[0];
   const url = item.url||(item.b64_json?`data:image/png;base64,${item.b64_json}`:null);
@@ -542,7 +542,7 @@ async function doDocGen(text) {
     body:JSON.stringify({model:currentModel,messages,max_tokens:3000,temperature:0.7})
   });
   const data = await resp.json();
-  if(!resp.ok) throw new Error(data.error?.message||"Ошибка API");
+  if(!resp.ok) throw new Error(JSON.stringify(data));
   const content = data.choices[0].message.content;
   hideTyping();
   const blob = makeDocBlob(content);
