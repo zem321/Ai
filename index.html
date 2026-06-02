@@ -48,16 +48,13 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); c
 
 #app { display: flex; width: 100%; height: 100%; position: relative; }
 
-/* Sidebar */
 #sidebar { width: 280px; background: var(--white); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 10; transition: transform 0.3s cubic-bezier(0.1, 0.9, 0.2, 1); }
 #sidebarOverlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.3); z-index: 9; backdrop-filter: blur(4px); }
 
-/* Header */
 header { height: 60px; background: var(--surface); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; position: absolute; top: 0; left: 0; right: 0; z-index: 5; }
 .nav-btn { width: 38px; height: 38px; border-radius: 50%; border: none; background: transparent; display: flex; align-items: center; justify-content: center; color: var(--text); cursor: pointer; }
 .nav-btn:active { background: var(--surface2); }
 
-/* Badge Picker */
 .model-badge { display: flex; align-items: center; background: var(--surface2); padding: 6px 14px; border-radius: 20px; font-weight: 600; font-size: 13px; cursor: pointer; user-select: none; }
 .picker-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 99; }
 .picker-dropdown { display: none; position: absolute; top: 52px; left: 50%; transform: translateX(-50%) scale(0.95); opacity: 0; width: 290px; background: var(--white); border-radius: var(--radius-sm); border: 1px solid var(--border); box-shadow: var(--shadow); z-index: 100; overflow: hidden; transition: transform 0.15s ease, opacity 0.15s ease; }
@@ -70,11 +67,9 @@ header { height: 60px; background: var(--surface); backdrop-filter: var(--blur);
 .picker-item:active { background: var(--surface2); }
 .model-list-item.selected { color: var(--accent); font-weight: 600; }
 
-/* Chat Main */
 #chatMain { flex: 1; display: flex; flex-direction: column; height: 100%; position: relative; }
 #messages { flex: 1; overflow-y: auto; padding: 76px 16px 20px 16px; display: flex; flex-direction: column; gap: 16px; scroll-behavior: smooth; }
 
-/* Message Bubbles */
 .msg { display: flex; width: 100%; }
 .msg.user { justify-content: flex-end; }
 .msg.ai { justify-content: flex-start; flex-direction: column; align-items: flex-start; }
@@ -90,11 +85,9 @@ header { height: 60px; background: var(--surface); backdrop-filter: var(--blur);
 .msg-actions { display: flex; gap: 8px; margin-top: 4px; margin-bottom: 12px; }
 .msg-action { background: var(--surface2); border: none; padding: 6px 12px; border-radius: 14px; font-size: 12px; font-weight: 500; color: var(--text2); cursor: pointer; }
 
-/* Input Panel */
 #inputPanel { padding: 8px 12px; background: var(--surface); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; z-index: 5; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
 .input-row { display: flex; align-items: flex-end; gap: 8px; }
 .input-wrapper { flex: 1; background: var(--surface2); border-radius: var(--radius); padding: 4px 6px 4px 14px; display: flex; align-items: flex-end; border: 1px solid transparent; }
-.input-wrapper:focus-within { border-color: rgba(0,0,0,0.03); }
 
 textarea { flex: 1; border: none; background: transparent; color: var(--text); font-family: inherit; font-size: 15px; padding: 8px 0; resize: none; max-height: 140px; outline: none; line-height: 1.3; }
 
@@ -103,7 +96,6 @@ textarea { flex: 1; border: none; background: transparent; color: var(--text); f
 #sendBtn { background: var(--accent); color: #fff; }
 #sendBtn:disabled { background: transparent; color: var(--text3); cursor: default; }
 
-/* File Preview */
 #filePreview { display: flex; gap: 8px; overflow-x: auto; padding: 2px 4px; }
 #filePreview:empty { display: none; }
 .preview-item { width: 54px; height: 54px; border-radius: var(--radius-xs); position: relative; background: var(--surface2); border: 1px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
@@ -111,7 +103,6 @@ textarea { flex: 1; border: none; background: transparent; color: var(--text); f
 .preview-item .doc-icon { font-size: 10px; font-weight: 700; color: var(--text2); text-align: center; overflow: hidden; text-overflow: ellipsis; padding: 2px; }
 .preview-item .remove-btn { position: absolute; top: -4px; right: -4px; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,0.5); color: #fff; border: none; font-size: 10px; display: flex; align-items: center; justify-content: center; }
 
-/* Empty & Typing States */
 .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px; color: var(--text2); }
 .empty-logo { font-size: 56px; margin-bottom: 12px; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.05)); }
 .empty-title { font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
@@ -128,7 +119,6 @@ textarea { flex: 1; border: none; background: transparent; color: var(--text); f
 .typing span:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 0% { opacity: .2; transform: scale(0.9); } 20% { opacity: 1; transform: scale(1); } 100% { opacity: .2; transform: scale(0.9); } }
 
-/* Sidebar List */
 .sidebar-header { height: 60px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
 .sidebar-title { font-weight: 700; font-size: 16px; }
 #sidebarChats { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
@@ -137,13 +127,10 @@ textarea { flex: 1; border: none; background: transparent; color: var(--text); f
 .chat-item.active { background: var(--surface2); }
 .chat-item-title { flex: 1; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .chat-item-delete { background: transparent; border: none; color: var(--text3); padding: 4px; font-size: 12px; cursor: pointer; }
-.chat-item-delete:hover { color: #ff3b30; }
 
-/* Toast */
 #toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(0,0,0,0.8); color: #fff; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 500; opacity: 0; z-index: 999; transition: transform 0.2s ease, opacity 0.2s ease; pointer-events: none; backdrop-filter: blur(10px); }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-/* Responsive Mobile Toggle */
 @media (max-width: 768px) {
   #sidebar { position: fixed; top: 0; bottom: 0; left: 0; transform: translateX(-100%); }
   #sidebar.open { transform: translateX(0); }
@@ -205,7 +192,7 @@ code { background: var(--surface2); padding: 2px 5px; border-radius: 4px; font-f
         <button class="action-btn" onclick="document.getElementById('fileInput').click()">📎</button>
         <input type="file" id="fileInput" multiple style="display:none" onchange="handleFiles(this)">
         <div class="input-wrapper">
-          <textarea id="textInput" rows="1" placeholder="Сообщение..." onkeydown="handleKey(e)"></textarea>
+          <textarea id="textInput" rows="1" placeholder="Сообщение..." onkeydown="handleKey(event)"></textarea>
         </div>
         <button class="action-btn" id="sendBtn" onclick="sendMessage()" disabled>▲</button>
       </div>
@@ -413,7 +400,6 @@ async function sendMessage() {
   input.value=""; autoResize(input); clearFiles(); updateSendBtn(); 
   isLoading = true;
 
-  // Идеальный баланс: в историю приложения для юзера пишем красивое исходное фото (originalBase64)
   const userPreviewUrl = hasImage ? files.find(f=>f.base64)?.originalBase64 : null;
   const compressedImageUrl = hasImage ? files.find(f=>f.base64)?.base64 : null;
   const docFile = files.find(f=>f.text!==undefined);
@@ -440,7 +426,6 @@ async function doChat(text, imageUrl, docFile) {
   const history = getMessages().slice(0,-1);
   const messages = [{role:"system",content:"Ты полезный ИИ-ассистент. Отвечай на русском. Будь точным и лаконичным."}];
   
-  // Экономия токенов: В контекст передаем ТОЛЬКО текст реплик без изображений, чтобы не раздувать трафик
   history.slice(-6).forEach(m=>{ if(m.content && m.content !== "[Медиа]") messages.push({role:m.role, content:m.content}); });
 
   let docText = docFile?.text ? "\n\nСодержимое документа:\n"+docFile.text.substring(0,2000) : "";
@@ -528,8 +513,8 @@ async function handleFiles(input) {
     if (attachedFiles.length>=5){showToast("Максимум 5 файлов");break;}
     const fd={name:file.name, type:file.type};
     if (file.type.startsWith("image/")) {
-      fd.base64 = await compressImage(file); // Сжатый вариант для ИИ
-      fd.originalBase64 = await fileToDataUrl(file); // Оригинал для интерфейса
+      fd.base64 = await compressImage(file); 
+      fd.originalBase64 = await fileToDataUrl(file); 
     } else if (file.name.endsWith(".docx")) {
       try{const ab=await file.arrayBuffer(); const r=await mammoth.extractRawText({arrayBuffer:ab}); fd.text=r.value.substring(0,2000);}catch(e){fd.text="[Ошибка чтения]";}
     } else if (file.type==="text/plain"||file.name.endsWith(".txt")) {
@@ -560,14 +545,14 @@ async function compressImage(file) {
     const url = URL.createObjectURL(file);
     img.onload = () => {
       const canvas = document.createElement("canvas");
-      const max = 512; // Экономия токенов: Жесткое ограничение разрешения до 512px экономит кучу трафика
+      const max = 512; 
       let w = img.width, h = img.height;
       if (w > h) { if (w > max) { h = h * max / w; w = max; } }
       else { if (h > max) { w = w * max / h; h = max; } }
       canvas.width = w; canvas.height = h;
       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
       URL.revokeObjectURL(url);
-      r(canvas.toDataURL("image/jpeg", 0.7)); // Снижен шаг качества до 0.7 для сверхлегкого размера
+      r(canvas.toDataURL("image/jpeg", 0.7)); 
     };
     img.src = url;
   });
