@@ -24,7 +24,6 @@ async def health(request):
 
 
 async def miniapp(request):
-    """Отдаём Mini App HTML файл"""
     try:
         with open("index.html", "r", encoding="utf-8") as f:
             content = f.read()
@@ -35,8 +34,9 @@ async def miniapp(request):
 
 async def start_web():
     app = web.Application()
-    app.router.add_get("/", miniapp)        # Mini App по главному URL
-    app.router.add_get("/health", health)   # health check
+    app.router.add_get("/", miniapp)
+    app.router.add_get("/app", miniapp)
+    app.router.add_get("/health", health)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", 8080))
