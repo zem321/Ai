@@ -15,6 +15,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_KEY = os.getenv("API_KEY", "")
+
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан!")
 
@@ -27,6 +29,11 @@ async def miniapp(request):
     try:
         with open("index.html", "r", encoding="utf-8") as f:
             content = f.read()
+        # Подставляем API ключ прямо в HTML
+        content = content.replace(
+            'localStorage.getItem("api_key") || ""',
+            f'localStorage.getItem("api_key") || "{API_KEY}"'
+        )
         return web.Response(text=content, content_type="text/html", charset="utf-8")
     except FileNotFoundError:
         return web.Response(text="Mini App not found", status=404)
