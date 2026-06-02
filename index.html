@@ -126,7 +126,7 @@ textarea { flex: 1; background: none; border: none; resize: none; color: var(--t
 
 <div class="quick-tags" id="quickTags">
   <button class="tag-btn" onclick="setInput('Нарисуй ')">🎨 Нарисуй</button>
-  <button class="tag-btn" onclick="setInput('Сделай document ')">📝 Сделай документ</button>
+  <button class="tag-btn" onclick="setInput('Сделай документ ')">📝 Сделай документ</button>
   <button class="tag-btn" onclick="setInput('Исправь фото ')">✨ Исправь фото</button>
 </div>
 
@@ -165,12 +165,12 @@ textarea { flex: 1; background: none; border: none; resize: none; color: var(--t
 <div id="toast"></div>
 
 <script>
-// ТЕХНИЧЕСКАЯ ЧАСТЬ: Направляем запросы напрямую на ИИ-шлюз для скорости
+// ТЕХНИЧЕСКАЯ ЧАСТЬ: Направляем запросы напрямую на ИИ-шлюз, как в старом боте
 const API_BASE = "https://ai-proxy.izisoft.xyz/v1";
 const IMAGE_GEN_URL = "https://ai-proxy.izisoft.xyz/v1/image/generation";
 const IMAGE_EDIT_URL = "https://ai-proxy.izisoft.xyz/v1/images/edits";
 
-// Сюда бэкенд на Python автоматически пропишет твой ключ при отдаче страницы
+// Сюда Python-бэкенд автоматически пропишет твой ключ при отдаче страницы
 let API_KEY = ""; 
 
 const MODELS = [
@@ -361,7 +361,7 @@ function detectIntent(text, hasImage) {
   return "chat";
 }
 
-// ── Отправка сообщений и логика запросов (ПРЯМЫЕ ЗАПРОСЫ) ──
+// ── Отправка сообщений и логика ПРЯМЫХ запросов на ИИ-прокси ──
 async function sendMessage() {
   if (isLoading) return;
   const input = document.getElementById("textInput");
@@ -398,7 +398,7 @@ async function doChat(text, imageUrl, docFile) {
   const history = getMessages().slice(0,-1);
   const messages = [{role:"system",content:"Ты полезный ИИ-ассистент. Отвечай на русском если вопрос на русском. Будь точным и лаконичным."}];
   
-  // КРИТИЧЕСКАЯ ЭКОНОМИЯ ТОКЕНОВ: История ограничена 3 сообщениями вместо 6, хвост токенов не копится
+  // КРИТИЧЕСКАЯ ЭКОНОМИЯ ТОКЕНОВ: Передаем только 3 последних сообщения вместо 6. Хвост не растет!
   history.slice(-3).forEach(m=>{ if(m.content&&!m.imageUrl) messages.push({role:m.role,content:m.content}); });
 
   let docText = docFile?.text ? "\n\nСодержимое документа:\n"+docFile.text.substring(0,1500) : "";
@@ -418,7 +418,7 @@ async function doChat(text, imageUrl, docFile) {
       "Content-Type":"application/json",
       "Authorization": `Bearer ${API_KEY}`
     },
-    body:JSON.stringify({model:currentModel,messages,max_tokens:700,temperature:0.7})
+    body:JSON.stringify({model:currentModel,messages,max_tokens:700,temperature:0.7}) // Ответ зажат до 700 токенов
   });
   const raw = await resp.text();
   let data; try{data=JSON.parse(raw);}catch(e){throw new Error(raw.substring(0,200));}
