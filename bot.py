@@ -103,9 +103,12 @@ async def proxy_image_edit(request):
         async for field in reader:
             data = await field.read()
             if field.filename:
-                form_data.add_field(field.name, data, filename=field.filename, content_type=field.content_type)
+                # Исправлено: извлекаем content_type из заголовков поля field.headers
+                content_type = field.headers.get(aiohttp.hdrs.CONTENT_TYPE, "image/png")
+                form_data.add_field(field.name, data, filename=field.filename, content_type=content_type)
             else:
-                form_data.add_field(field.name, data.decode())
+                form_data.add_field(field.name, data.decode('utf-8', errors='ignore'))
+        
         headers = {"Authorization": f"Bearer {API_KEY}"}
         async with aiohttp.ClientSession() as session:
             async with session.post(IMAGE_EDIT_URL, data=form_data, headers=headers) as resp:
@@ -117,6 +120,7 @@ async def proxy_image_edit(request):
                     headers={"Access-Control-Allow-Origin": "*"}
                 )
     except Exception as e:
+        logger.error(f"Ошибка в proxy_image_edit: {str(e)}")
         return web.Response(
             text=json.dumps({"error": {"message": str(e)}}),
             content_type="application/json",
@@ -139,21 +143,15 @@ async def handle_options(request):
 
 async def start_web():
     app = web.Application()
-    # Главная страница Mini App теперь доступна и по корню /
     app.router.add_get("/", miniapp)
     app.router.add_get("/app", miniapp)
     app.router.add_get("/health", health)
-    
-    # API эндпоинты для фронтенда index.html
     app.router.add_post("/api/chat", proxy_chat)
     app.router.add_post("/api/image/gen", proxy_image_gen)
     app.router.add_post("/api/image/edit", proxy_image_edit)
-    
-    # Защита CORS preflight запросов
     app.router.add_route("OPTIONS", "/api/chat", handle_options)
     app.router.add_route("OPTIONS", "/api/image/gen", handle_options)
     app.router.add_route("OPTIONS", "/api/image/edit", handle_options)
-    
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", 8080))
