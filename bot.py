@@ -23,10 +23,20 @@ async def health(request):
     return web.Response(text="OK")
 
 
+async def miniapp(request):
+    """Отдаём Mini App HTML файл"""
+    try:
+        with open("index.html", "r", encoding="utf-8") as f:
+            content = f.read()
+        return web.Response(text=content, content_type="text/html", charset="utf-8")
+    except FileNotFoundError:
+        return web.Response(text="Mini App not found", status=404)
+
+
 async def start_web():
     app = web.Application()
-    app.router.add_get("/", health)
-    app.router.add_get("/health", health)
+    app.router.add_get("/", miniapp)        # Mini App по главному URL
+    app.router.add_get("/health", health)   # health check
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", 8080))
