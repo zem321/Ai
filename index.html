@@ -93,7 +93,7 @@ textarea { flex: 1; border: none; background: transparent; color: var(--text); f
 
 .action-btn { width: 36px; height: 36px; border-radius: 50%; border: none; background: transparent; display: flex; align-items: center; justify-content: center; color: var(--text2); cursor: pointer; flex-shrink: 0; margin-bottom: 2px; }
 .action-btn:active { background: rgba(0,0,0,0.04); }
-#sendBtn { background: var(--accent); color: #fff; }
+#sendBtn { background: var(--accent); color: #fff; border: none; }
 #sendBtn:disabled { background: transparent; color: var(--text3); cursor: default; }
 
 #filePreview { display: flex; gap: 8px; overflow-x: auto; padding: 2px 4px; }
@@ -192,7 +192,7 @@ code { background: var(--surface2); padding: 2px 5px; border-radius: 4px; font-f
         <button class="action-btn" onclick="document.getElementById('fileInput').click()">📎</button>
         <input type="file" id="fileInput" multiple style="display:none" onchange="handleFiles(this)">
         <div class="input-wrapper">
-          <textarea id="textInput" rows="1" placeholder="Сообщение..." onkeydown="handleKey(event)"></textarea>
+          <textarea id="textInput" rows="1" placeholder="Сообщение..." oninput="autoResize(this)"></textarea>
         </div>
         <button class="action-btn" id="sendBtn" onclick="sendMessage()" disabled>▲</button>
       </div>
@@ -304,12 +304,23 @@ function renderSidebarChats() {
 }
 
 function loadData() {
-  const s = localStorage.getItem("arbuz_chats");
-  if (s) chats = JSON.parse(s);
+  try {
+    const s = localStorage.getItem("arbuz_chats");
+    if (s) chats = JSON.parse(s);
+  } catch(e) { chats = {}; }
   updateModelBadge();
-  newChat();
+  
+  const ids = Object.keys(chats);
+  if (ids.length > 0) {
+    currentChatId = ids.sort((a,b)=>b-a)[0];
+  } else {
+    newChat();
+  }
+  renderMessages();
 }
+
 function saveData() { localStorage.setItem("arbuz_chats", JSON.stringify(chats)); }
+
 function newChat() {
   currentChatId = Date.now().toString();
   chats[currentChatId] = { title:"Новый чат", messages:[], created:Date.now() };
@@ -322,11 +333,16 @@ function deleteChat(id) {
   renderSidebarChats();
 }
 function getMessages() { return (currentChatId&&chats[currentChatId])?chats[currentChatId].messages:[]; }
+
 function addMsg(role, content, imageUrl=null, fileUrl=null, fileName=null) {
-  if (!currentChatId) newChat();
+  if (!currentChatId || !chats[currentChatId]) {
+    currentChatId = Date.now().toString();
+    chats[currentChatId] = { title:"Новый чат", messages:[], created:Date.now() };
+  }
   chats[currentChatId].messages.push({role,content,imageUrl,fileUrl,fileName,time:Date.now()});
-  if (role==="user" && chats[currentChatId].messages.filter(m=>m.role==="user").length===1)
+  if (role==="user" && chats[currentChatId].messages.filter(m=>m.role==="user").length===1) {
     chats[currentChatId].title = (content||"Медиа").substring(0,35);
+  }
   saveData(); renderMessages();
 }
 
@@ -399,6 +415,7 @@ async function sendMessage() {
 
   input.value=""; autoResize(input); clearFiles(); updateSendBtn(); 
   isLoading = true;
+  updateSendBtn();
 
   const userPreviewUrl = hasImage ? files.find(f=>f.base64)?.originalBase64 : null;
   const compressedImageUrl = hasImage ? files.find(f=>f.base64)?.base64 : null;
@@ -413,8 +430,8 @@ async function sendMessage() {
     else if (intent==="doc") await doDocGen(text);
     else await doChat(text, compressedImageUrl, docFile);
   } catch(e) {
-    console.error("Ошибка:", e);
-    addMsg("assistant", `❌ Ошибка: ${e.message}`);
+    console.error("Ошибка запроса:", e);
+    addMsg("assistant", `❌ Ошибка: ${e.message || "Неизвестная ошибка сервера"}`);
   } finally {
     hideTyping();
     isLoading = false;
@@ -426,7 +443,7 @@ async function doChat(text, imageUrl, docFile) {
   const history = getMessages().slice(0,-1);
   const messages = [{role:"system",content:"Ты полезный ИИ-ассистент. Отвечай на русском. Будь точным и лаконичным."}];
   
-  history.slice(-6).forEach(m=>{ if(m.content && m.content !== "[Медиа]") messages.push({role:m.role, content:m.content}); });
+  history.slice(-6).forEach(m=>{ if(m.content && m.content !== "[Медиа]" && m.role !== "assistant" && !m.content.startsWith("❌")) messages.push({role:m.role, content:m.content}); });
 
   let docText = docFile?.text ? "\n\nСодержимое документа:\n"+docFile.text.substring(0,2000) : "";
 
@@ -436,17 +453,18 @@ async function doChat(text, imageUrl, docFile) {
       {type:"text", text:(text||"Опиши фото")+docText}
     ]});
   } else {
-    messages.push({role:"user", content:text+docText});
+    messages.push({role:"user", content:(text||"")+docText});
   }
 
   const resp = await fetch(CHAT_URL,{
     method:"POST",
     headers: getHeaders({"Content-Type":"application/json"}),
-    body:JSON.stringify({model:currentModel, messages, max_tokens:800, temperature:0.7})
+    body:JSON.stringify({model:currentModel, messages, max_tokens:1000, temperature:0.7})
   });
+  
   const raw = await resp.text();
-  let data; try{data=JSON.parse(raw);}catch(e){throw new Error(raw.substring(0,200));}
-  if(!resp.ok) throw new Error(JSON.stringify(data));
+  let data; try{data=JSON.parse(raw);}catch(e){throw new Error("Неверный ответ сервера: " + raw.substring(0,100));}
+  if(!resp.ok) throw new Error(data?.error?.message || JSON.stringify(data));
   addMsg("assistant", data.choices[0].message.content);
 }
 
@@ -457,8 +475,8 @@ async function doImageGen(text) {
     body:JSON.stringify({model:"gpt-image-2", prompt:text, size:"1024x1024", n:1})
   });
   const raw = await resp.text();
-  let data; try{data=JSON.parse(raw);}catch(e){throw new Error(raw.substring(0,200));}
-  if(!resp.ok) throw new Error(JSON.stringify(data));
+  let data; try{data=JSON.parse(raw);}catch(e){throw new Error(raw.substring(0,100));}
+  if(!resp.ok) throw new Error(data?.error?.message || JSON.stringify(data));
   const item = data.data[0];
   const url = item.url||(item.b64_json?`data:image/png;base64,${item.b64_json}`:null);
   if(!url) throw new Error("Изображение не получено");
@@ -480,8 +498,8 @@ async function doImageEdit(imageUrl, text) {
     body:form
   });
   const raw = await resp.text();
-  let data; try{data=JSON.parse(raw);}catch(e){throw new Error(raw.substring(0,200));}
-  if(!resp.ok) throw new Error(JSON.stringify(data));
+  let data; try{data=JSON.parse(raw);}catch(e){throw new Error(raw.substring(0,100));}
+  if(!resp.ok) throw new Error(data?.error?.message || JSON.stringify(data));
   const item = data.data[0];
   const url = item.url||(item.b64_json?`data:image/png;base64,${item.b64_json}`:null);
   if(!url) throw new Error("Изображение не получено");
@@ -496,10 +514,11 @@ async function doDocGen(text) {
   const resp = await fetch(CHAT_URL,{
     method:"POST",
     headers: getHeaders({"Content-Type":"application/json"}),
-    body:JSON.stringify({model:currentModel, messages, max_tokens:1200, temperature:0.7})
+    body:JSON.stringify({model:currentModel, messages, max_tokens:1500, temperature:0.7})
   });
-  const data = await resp.json();
-  if(!resp.ok) throw new Error(JSON.stringify(data));
+  const raw = await resp.text();
+  let data; try{data=JSON.parse(raw);}catch(e){throw new Error(raw.substring(0,100));}
+  if(!resp.ok) throw new Error(data?.error?.message || JSON.stringify(data));
   const content = data.choices[0].message.content;
   const blob = makeDocBlob(content);
   const url = URL.createObjectURL(blob);
@@ -572,12 +591,19 @@ function showTyping(){if(!typingEl){typingEl=document.createElement("div"); typi
 function hideTyping(){if(typingEl){typingEl.remove(); typingEl=null;}}
 
 function setInput(t){haptic(); const el=document.getElementById("textInput"); el.value=t; el.focus(); autoResize(el); updateSendBtn();}
-function handleKey(e){if(e.key==="Enter" && !e.shiftKey){e.preventDefault(); sendMessage();}}
 function autoResize(el){el.style.height="auto"; el.style.height=Math.min(el.scrollHeight,140)+"px";}
 function updateSendBtn(){const t=document.getElementById("textInput").value.trim(); document.getElementById("sendBtn").disabled=isLoading||(!t && !attachedFiles.length);}
 function showToast(msg){const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2000);}
 function formatText(t){return escapeHtml(t).replace(/```[\w]*\n?([\s\S]*?)```/g,'<pre><code>$1</code></pre>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');}
 function escapeHtml(t){return(t||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+// Обработчик клавиш перенесен на стандартное событие
+document.getElementById("textInput").addEventListener("keydown", function(e) {
+  if(e.key==="Enter" && !e.shiftKey){
+    e.preventDefault(); 
+    sendMessage();
+  }
+});
 
 loadData();
 document.getElementById("textInput").addEventListener("input",updateSendBtn);
