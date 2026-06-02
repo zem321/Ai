@@ -18,17 +18,24 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_KEY", "")
+
+# ИСПРАВЛЕНО: Точные эндпоинты согласно спецификации OpenAI API
 CHAT_URL = "https://ai-proxy.izisoft.xyz/v1/chat/completions"
-IMAGE_GEN_URL = "https://ai-proxy.izisoft.xyz/v1/image/generation"
+IMAGE_GEN_URL = "https://ai-proxy.izisoft.xyz/v1/images/generations"
 IMAGE_EDIT_URL = "https://ai-proxy.izisoft.xyz/v1/images/edits"
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан!")
 
+# Стандартные заголовки для ответов Mini App (решают проблемы с блокировкой браузером)
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization"
+}
 
 async def health(request):
     return web.Response(text="OK")
-
 
 async def miniapp(request):
     try:
@@ -42,9 +49,7 @@ async def miniapp(request):
     except FileNotFoundError:
         return web.Response(text="Mini App not found", status=404)
 
-
 async def proxy_chat(request):
-    """Прокси для чат запросов"""
     try:
         body = await request.json()
         headers = {
@@ -54,110 +59,78 @@ async def proxy_chat(request):
         async with aiohttp.ClientSession() as session:
             async with session.post(CHAT_URL, json=body, headers=headers, timeout=30) as resp:
                 data = await resp.text()
-                
-                # Если сервер вернул пустой или не JSON ответ при ошибке
-                if resp.status != 200:
-                    logger.error(f"Прокси чата вернул статус {resp.status}: {data}")
-                    try:
-                        json.loads(data)
-                        return web.Response(text=data, content_type="application/json", status=resp.status, headers={"Access-Control-Allow-Origin": "*"})
-                    except json.JSONDecodeError:
-                        return web.Response(
-                            text=json.dumps({"error": {"message": f"Ошибка удаленного сервера ({resp.status})"}}),
-                            content_type="application/json",
-                            status=resp.status,
-                            headers={"Access-Control-Allow-Origin": "*"}
-                        )
-                
-                return web.Response(text=data, content_type="application/json", status=200, headers={"Access-Control-Allow-Origin": "*"})
+                return web.Response(text=data, content_type="application/json", status=resp.status, headers=CORS_HEADERS)
     except Exception as e:
         logger.error(f"Исключение в proxy_chat: {str(e)}")
         return web.Response(
             text=json.dumps({"error": {"message": f"Ошибка бэкенда: {str(e)}"}}),
             content_type="application/json",
             status=500,
-            headers={"Access-Control-Allow-Origin": "*"}
+            headers=CORS_HEADERS
         )
 
-
 async def proxy_image_gen(request):
-    """Прокси для генерации изображений"""
     try:
         body = await request.json()
         headers = {
             "Authorization": f"Bearer {API_KEY}",
             "Content-Type": "application/json",
         }
+        logger.info(f"Отправка запроса на генерацию к прокси: {IMAGE_GEN_URL}")
         async with aiohttp.ClientSession() as session:
             async with session.post(IMAGE_GEN_URL, json=body, headers=headers, timeout=60) as resp:
                 data = await resp.text()
-                if resp.status != 200:
-                    logger.error(f"Прокси генерации картинок вернул статус {resp.status}: {data}")
-                    return web.Response(
-                        text=json.dumps({"error": {"message": f"Ошибка генерации ({resp.status})"}}),
-                        content_type="application/json",
-                        status=resp.status,
-                        headers={"Access-Control-Allow-Origin": "*"}
-                    )
-                return web.Response(text=data, content_type="application/json", status=200, headers={"Access-Control-Allow-Origin": "*"}
-                )
+                logger.info(f"Ответ прокси генерации (Статус {resp.status}): {data}")
+                return web.Response(text=data, content_type="application/json", status=resp.status, headers=CORS_HEADERS)
     except Exception as e:
         logger.error(f"Исключение в proxy_image_gen: {str(e)}")
         return web.Response(
             text=json.dumps({"error": {"message": f"Ошибка бэкенда генерации: {str(e)}"}}),
             content_type="application/json",
             status=500,
-            headers={"Access-Control-Allow-Origin": "*"}
+            headers=CORS_HEADERS
         )
 
-
 async def proxy_image_edit(request):
-    """Прокси для редактирования изображений"""
     try:
+        # ИСПРАВЛЕНО: Надежное чтение multipart данных из фронтенда и проброс в FormData
         reader = await request.multipart()
-        form_data = aiohttp.FormData()
+        data_to_forward = aiohttp.FormData()
+        
         async for field in reader:
-            data = await field.read()
+            field_data = await field.read()
             if field.filename:
-                content_type = field.headers.get(aiohttp.hdrs.CONTENT_TYPE, "image/png")
-                form_data.add_field(field.name, data, filename=field.filename, content_type=content_type)
+                # Передаем файл как бинарник с сохранением имени и типа
+                c_type = field.headers.get(aiohttp.hdrs.CONTENT_TYPE, "image/png")
+                data_to_forward.add_field(
+                    field.name, 
+                    field_data, 
+                    filename=field.filename, 
+                    content_type=c_type
+                )
             else:
-                form_data.add_field(field.name, data.decode('utf-8', errors='ignore'))
+                data_to_forward.add_field(field.name, field_data.decode('utf-8', errors='ignore'))
         
         headers = {"Authorization": f"Bearer {API_KEY}"}
+        logger.info("Отправка запроса на редактирование к прокси...")
+        
         async with aiohttp.ClientSession() as session:
-            async with session.post(IMAGE_EDIT_URL, data=form_data, headers=headers, timeout=60) as resp:
+            async with session.post(IMAGE_EDIT_URL, data=data_to_forward, headers=headers, timeout=60) as resp:
                 data = await resp.text()
-                if resp.status != 200:
-                    logger.error(f"Прокси изменения картинок вернул статус {resp.status}: {data}")
-                    return web.Response(
-                        text=json.dumps({"error": {"message": f"Ошибка редактирования ({resp.status})"}}),
-                        content_type="application/json",
-                        status=resp.status,
-                        headers={"Access-Control-Allow-Origin": "*"}
-                    )
-                return web.Response(text=data, content_type="application/json", status=200, headers={"Access-Control-Allow-Origin": "*"})
+                logger.info(f"Ответ прокси редактирования (Статус {resp.status}): {data}")
+                return web.Response(text=data, content_type="application/json", status=resp.status, headers=CORS_HEADERS)
+                
     except Exception as e:
         logger.error(f"Исключение в proxy_image_edit: {str(e)}")
         return web.Response(
             text=json.dumps({"error": {"message": f"Ошибка бэкенда редактирования: {str(e)}"}}),
             content_type="application/json",
             status=500,
-            headers={"Access-Control-Allow-Origin": "*"}
+            headers=CORS_HEADERS
         )
 
-
 async def handle_options(request):
-    """CORS preflight"""
-    return web.Response(
-        status=200,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        }
-    )
-
+    return web.Response(status=200, headers=CORS_HEADERS)
 
 async def start_web():
     app = web.Application()
@@ -167,16 +140,17 @@ async def start_web():
     app.router.add_post("/api/chat", proxy_chat)
     app.router.add_post("/api/image/gen", proxy_image_gen)
     app.router.add_post("/api/image/edit", proxy_image_edit)
-    app.router.add_route("OPTIONS", "/api/chat", handle_options)
-    app.router.add_route("OPTIONS", "/api/image/gen", handle_options)
-    app.router.add_route("OPTIONS", "/api/image/edit", handle_options)
+    
+    # Регистрация OPTIONS запросов для всех эндпоинтов
+    for path in ["/api/chat", "/api/image/gen", "/api/image/edit"]:
+        app.router.add_route("OPTIONS", path, handle_options)
+        
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     logger.info(f"Web server started on port {port}")
-
 
 async def set_commands(bot: Bot):
     await bot.set_my_commands([
@@ -185,7 +159,6 @@ async def set_commands(bot: Bot):
         BotCommand(command="clear", description="🗑 Очистить историю"),
         BotCommand(command="admin", description="🛠 Админ панель"),
     ])
-
 
 async def main():
     await start_web()
@@ -199,7 +172,6 @@ async def main():
     await set_commands(bot)
     logger.info("Бот запущен!")
     await dp.start_polling(bot, skip_updates=True)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
