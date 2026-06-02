@@ -126,7 +126,7 @@ textarea { flex: 1; background: none; border: none; resize: none; color: var(--t
 
 <div class="quick-tags" id="quickTags">
   <button class="tag-btn" onclick="setInput('Нарисуй ')">🎨 Нарисуй</button>
-  <button class="tag-btn" onclick="setInput('Сделай документ ')">📝 Сделай документ</button>
+  <button class="tag-btn" onclick="setInput('Сделай document ')">📝 Сделай документ</button>
   <button class="tag-btn" onclick="setInput('Исправь фото ')">✨ Исправь фото</button>
 </div>
 
@@ -136,7 +136,7 @@ textarea { flex: 1; background: none; border: none; resize: none; color: var(--t
     <button class="action-btn" onclick="triggerUpload()">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
     </button>
-    <textarea id="textInput" placeholder="Сообщение..." rows="1" oninput="autoResize(this); updateSendBtn();" onkeydown="handleKey(e)"></textarea>
+    <textarea id="textInput" placeholder="Сообщение..." rows="1" oninput="autoResize(this); updateSendBtn();" onkeydown="handleKey(event)"></textarea>
     <button class="action-btn" id="sendBtn" disabled onclick="sendMessage()">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
     </button>
@@ -165,7 +165,7 @@ textarea { flex: 1; background: none; border: none; resize: none; color: var(--t
 <div id="toast"></div>
 
 <script>
-// Направляем запросы напрямую на прокси-хаб, минуя Railway бэкенд бота
+// ТЕХНИЧЕСКАЯ ЧАСТЬ: Направляем запросы напрямую на ИИ-шлюз для скорости
 const API_BASE = "https://ai-proxy.izisoft.xyz/v1";
 const IMAGE_GEN_URL = "https://ai-proxy.izisoft.xyz/v1/image/generation";
 const IMAGE_EDIT_URL = "https://ai-proxy.izisoft.xyz/v1/images/edits";
@@ -357,7 +357,7 @@ function detectIntent(text, hasImage) {
   const t = text.toLowerCase();
   if(t.startsWith("нарисуй") || t.startsWith("сгенерируй") || t.startsWith("draw") || t.startsWith("image")) return "image";
   if(hasImage && (t.includes("исправь") || t.includes("измени") || t.includes("edit") || t.includes("замени"))) return "edit";
-  if(t.startsWith("сделай документ") || t.startsWith("создай документ") || t.startsWith("документ")) return "doc";
+  if(t.startsWith("сделай документ") || t.startsWith("создай документ") || t.startsWith("документ") || t.startsWith("сделай document")) return "doc";
   return "chat";
 }
 
@@ -398,7 +398,7 @@ async function doChat(text, imageUrl, docFile) {
   const history = getMessages().slice(0,-1);
   const messages = [{role:"system",content:"Ты полезный ИИ-ассистент. Отвечай на русском если вопрос на русском. Будь точным и лаконичным."}];
   
-  // КРИТИЧЕСКАЯ ЭКОНОМИЯ ТОКЕНОВ: Передаем только 3 последних сообщения вместо 6. Хвост не растет!
+  // КРИТИЧЕСКАЯ ЭКОНОМИЯ ТОКЕНОВ: История ограничена 3 сообщениями вместо 6, хвост токенов не копится
   history.slice(-3).forEach(m=>{ if(m.content&&!m.imageUrl) messages.push({role:m.role,content:m.content}); });
 
   let docText = docFile?.text ? "\n\nСодержимое документа:\n"+docFile.text.substring(0,1500) : "";
@@ -418,7 +418,7 @@ async function doChat(text, imageUrl, docFile) {
       "Content-Type":"application/json",
       "Authorization": `Bearer ${API_KEY}`
     },
-    body:JSON.stringify({model:currentModel,messages,max_tokens:700,temperature:0.7}) // Ответ зажат до 700 токенов
+    body:JSON.stringify({model:currentModel,messages,max_tokens:700,temperature:0.7})
   });
   const raw = await resp.text();
   let data; try{data=JSON.parse(raw);}catch(e){throw new Error(raw.substring(0,200));}
@@ -514,15 +514,15 @@ function openSheet(id) { haptic(); document.getElementById("overlay").classList.
 function closeAllSheets() { document.getElementById("overlay").classList.remove("show"); if(activeSheetId) { document.getElementById(activeSheetId).classList.remove("show"); activeSheetId = null; } }
 
 let typingEl=null;
-function showTyping(){typingEl=document.createElement(\"div\");typingEl.className=\"msg ai\";typingEl.innerHTML=`<div class=\"typing\"><span></span><span></span><span></span></div>`;document.getElementById(\"messages\").appendChild(typingEl);document.getElementById(\"messages\").scrollTop=99999;}
+function showTyping(){typingEl=document.createElement("div");typingEl.className="msg ai";typingEl.innerHTML=`<div class="typing"><span></span><span></span><span></span></div>`;document.getElementById("messages").appendChild(typingEl);document.getElementById("messages").scrollTop=99999;}
 function hideTyping(){if(typingEl){typingEl.remove();typingEl=null;}}
 
-function setInput(t){haptic();const el=document.getElementById(\"textInput\");el.value=t;el.focus();autoResize(el);updateSendBtn();}
-function handleKey(e){if(e.key===\"Enter\"&&!e.shiftKey){e.preventDefault();sendMessage();}}
-function autoResize(el){el.style.height=\"auto\";el.style.height=Math.min(el.scrollHeight,140)+\"px\";}
-function updateSendBtn(){const t=document.getElementById(\"textInput\").value.trim();document.getElementById(\"sendBtn\").disabled=isLoading||(!t&&!attachedFiles.length);}
-function showToast(msg){const t=document.getElementById(\"toast\");t.textContent=msg;t.classList.add(\"show\");setTimeout(()=>t.classList.remove(\"show\"),2000);}
-function formatText(t){return escapeHtml(t).replace(/```[\\w]*\\n?([\\s\\S]*?)```/g,'<pre><code>$1</code></pre>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\\*\\*([^*]+)\\*\\*/g,'<strong>$1</strong>').replace(/\\n/g,'<br>');}
+function setInput(t){haptic();const el=document.getElementById("textInput");el.value=t;el.focus();autoResize(el);updateSendBtn();}
+function handleKey(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}}
+function autoResize(el){el.style.height="auto";el.style.height=Math.min(el.scrollHeight,140)+"px";}
+function updateSendBtn(){const t=document.getElementById("textInput").value.trim();document.getElementById("sendBtn").disabled=isLoading||(!t&&!attachedFiles.length);}
+function showToast(msg){const t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2000);}
+function formatText(t){return escapeHtml(t).replace(/```[\w]*\n?([\s\S]*?)```/g,'<pre><code>$1</code></pre>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');}
 function escapeHtml(t){return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");}
 function previewImage(url){if(tg?.showPopup){tg.showPopup({title:'Просмотр изображения',message:'',buttons:[{type:'close',text:'Закрыть'}]});}}
 </script>
