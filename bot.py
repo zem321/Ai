@@ -52,17 +52,28 @@ async def proxy_chat(request):
             "Content-Type": "application/json",
         }
         async with aiohttp.ClientSession() as session:
-            async with session.post(CHAT_URL, json=body, headers=headers) as resp:
+            async with session.post(CHAT_URL, json=body, headers=headers, timeout=30) as resp:
                 data = await resp.text()
-                return web.Response(
-                    text=data,
-                    content_type="application/json",
-                    status=resp.status,
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
+                
+                # Если сервер вернул пустой или не JSON ответ при ошибке
+                if resp.status != 200:
+                    logger.error(f"Прокси чата вернул статус {resp.status}: {data}")
+                    try:
+                        json.loads(data)
+                        return web.Response(text=data, content_type="application/json", status=resp.status, headers={"Access-Control-Allow-Origin": "*"})
+                    except json.JSONDecodeError:
+                        return web.Response(
+                            text=json.dumps({"error": {"message": f"Ошибка удаленного сервера ({resp.status})"}}),
+                            content_type="application/json",
+                            status=resp.status,
+                            headers={"Access-Control-Allow-Origin": "*"}
+                        )
+                
+                return web.Response(text=data, content_type="application/json", status=200, headers={"Access-Control-Allow-Origin": "*"})
     except Exception as e:
+        logger.error(f"Исключение в proxy_chat: {str(e)}")
         return web.Response(
-            text=json.dumps({"error": {"message": str(e)}}),
+            text=json.dumps({"error": {"message": f"Ошибка бэкенда: {str(e)}"}}),
             content_type="application/json",
             status=500,
             headers={"Access-Control-Allow-Origin": "*"}
@@ -78,17 +89,22 @@ async def proxy_image_gen(request):
             "Content-Type": "application/json",
         }
         async with aiohttp.ClientSession() as session:
-            async with session.post(IMAGE_GEN_URL, json=body, headers=headers) as resp:
+            async with session.post(IMAGE_GEN_URL, json=body, headers=headers, timeout=60) as resp:
                 data = await resp.text()
-                return web.Response(
-                    text=data,
-                    content_type="application/json",
-                    status=resp.status,
-                    headers={"Access-Control-Allow-Origin": "*"}
+                if resp.status != 200:
+                    logger.error(f"Прокси генерации картинок вернул статус {resp.status}: {data}")
+                    return web.Response(
+                        text=json.dumps({"error": {"message": f"Ошибка генерации ({resp.status})"}}),
+                        content_type="application/json",
+                        status=resp.status,
+                        headers={"Access-Control-Allow-Origin": "*"}
+                    )
+                return web.Response(text=data, content_type="application/json", status=200, headers={"Access-Control-Allow-Origin": "*"}
                 )
     except Exception as e:
+        logger.error(f"Исключение в proxy_image_gen: {str(e)}")
         return web.Response(
-            text=json.dumps({"error": {"message": str(e)}}),
+            text=json.dumps({"error": {"message": f"Ошибка бэкенда генерации: {str(e)}"}}),
             content_type="application/json",
             status=500,
             headers={"Access-Control-Allow-Origin": "*"}
@@ -103,7 +119,6 @@ async def proxy_image_edit(request):
         async for field in reader:
             data = await field.read()
             if field.filename:
-                # Исправлено: извлекаем content_type из заголовков поля field.headers
                 content_type = field.headers.get(aiohttp.hdrs.CONTENT_TYPE, "image/png")
                 form_data.add_field(field.name, data, filename=field.filename, content_type=content_type)
             else:
@@ -111,18 +126,21 @@ async def proxy_image_edit(request):
         
         headers = {"Authorization": f"Bearer {API_KEY}"}
         async with aiohttp.ClientSession() as session:
-            async with session.post(IMAGE_EDIT_URL, data=form_data, headers=headers) as resp:
+            async with session.post(IMAGE_EDIT_URL, data=form_data, headers=headers, timeout=60) as resp:
                 data = await resp.text()
-                return web.Response(
-                    text=data,
-                    content_type="application/json",
-                    status=resp.status,
-                    headers={"Access-Control-Allow-Origin": "*"}
-                )
+                if resp.status != 200:
+                    logger.error(f"Прокси изменения картинок вернул статус {resp.status}: {data}")
+                    return web.Response(
+                        text=json.dumps({"error": {"message": f"Ошибка редактирования ({resp.status})"}}),
+                        content_type="application/json",
+                        status=resp.status,
+                        headers={"Access-Control-Allow-Origin": "*"}
+                    )
+                return web.Response(text=data, content_type="application/json", status=200, headers={"Access-Control-Allow-Origin": "*"})
     except Exception as e:
-        logger.error(f"Ошибка в proxy_image_edit: {str(e)}")
+        logger.error(f"Исключение в proxy_image_edit: {str(e)}")
         return web.Response(
-            text=json.dumps({"error": {"message": str(e)}}),
+            text=json.dumps({"error": {"message": f"Ошибка бэкенда редактирования: {str(e)}"}}),
             content_type="application/json",
             status=500,
             headers={"Access-Control-Allow-Origin": "*"}
