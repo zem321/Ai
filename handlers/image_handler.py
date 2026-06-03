@@ -4,7 +4,7 @@ import logging
 import aiohttp
 import json
 import io
-from aiogram import Router, F, Bot  # <-- КЛАСС 'Bot' УСПЕШНО ДОБАВЛЕН СЮДА
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image
@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 API_KEY = os.getenv("API_KEY")
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+IMAGE_GEN_URL = "https://ai-proxy.izisoft.xyz/v1/image/generation"
+IMAGE_EDIT_URL = "https://ai-proxy.izisoft.xyz/v1/images/edits"
 
 
 def compress_image(image_bytes: bytes) -> bytes:
@@ -35,55 +36,60 @@ async def call_generate(prompt: str, size: str) -> bytes:
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "openai/dall-e-3",  
+        "model": "gpt-image-2",
         "prompt": prompt,
         "size": size,
         "n": 1,
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post("https://openrouter.ai/api/v1/images/generations", headers=headers, json=payload) as resp:
+        async with session.post(IMAGE_GEN_URL, json=payload, headers=headers) as resp:
+            text = await resp.text()
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
-                err_text = await resp.text()
-                raise Exception(f"OpenRouter Image Error ({resp.status}): {err_text}")
-            result = await resp.json()
-            b64_data = result["data"][0]["b64_json"]
-            return base64.b64decode(b64_data)
+                raise Exception(data.get("error", {}).get("message", str(data)))
+            item = data["data"][0]
+            if "url" in item:
+                async with session.get(item["url"]) as img_resp:
+                    return await img_resp.read()
+            elif "b64_json" in item:
+                return base64.b64decode(item["b64_json"])
+            else:
+                raise Exception("Изображение не получено")
 
 
 async def call_edit(image_bytes: bytes, prompt: str, size: str) -> bytes:
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-    }
-    compressed = compress_image(image_bytes)
-    b64_image = base64.b64encode(compressed).decode("utf-8")
-
-    payload = {
-        "model": "google/gemini-2.5-pro",  
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": f"Отредактируй это изображение по следующему описанию: {prompt}. Верни только измененное изображение в ответе."},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}}
-                ]
-            }
-        ],
-        "max_tokens": 2000
-    }
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+    data = aiohttp.FormData()
+    data.add_field("model", "gpt-image-2")
+    data.add_field("prompt", prompt)
+    data.add_field("size", size)
+    data.add_field("n", "1")
+    data.add_field(
+        "image",
+        image_bytes,
+        filename="image.png",
+        content_type="image/png"
+    )
     async with aiohttp.ClientSession() as session:
-        async with session.post(OPENROUTER_URL, headers=headers, json=payload) as resp:
-            if resp.status != 200:
-                err_text = await resp.text()
-                raise Exception(f"OpenRouter Edit Error ({resp.status}): {err_text}")
-            result = await resp.json()
+        async with session.post(IMAGE_EDIT_URL, data=data, headers=headers) as resp:
+            text = await resp.text()
             try:
-                content = result["choices"][0]["message"]["content"]
-                if "base64," in content:
-                    content = content.split("base64,")[1].strip()
-                return base64.b64decode(content)
+                result = json.loads(text)
             except Exception:
-                raise Exception("Не удалось распарсить отредактированное изображение от ИИ.")
+                raise Exception(f"Ответ сервера: {text[:300]}")
+            if resp.status != 200:
+                raise Exception(result.get("error", {}).get("message", str(result)))
+            item = result["data"][0]
+            if "url" in item:
+                async with session.get(item["url"]) as img_resp:
+                    return await img_resp.read()
+            elif "b64_json" in item:
+                return base64.b64decode(item["b64_json"])
+            else:
+                raise Exception("Изображение не получено")
 
 
 # ── Генерация ──────────────────────────────────────────────────────────────────
@@ -132,7 +138,7 @@ async def do_generate_image(message: Message, state: FSMContext):
     except Exception as e:
         logger.error(f"Image gen error: {e}")
         await status_msg.edit_text(
-            f"❌ <b>Ошибка генерации:</b>\n<code>{str(e)[:150]}</code>",
+            f"❌ <b>Ошибка генерации:</b>\n<code>{str(e)}</code>",
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
 
@@ -218,7 +224,7 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"Image edit error: {e}")
         await status_msg.edit_text(
-            f"❌ <b>Ошибка редактирования:</b>\n<code>{str(e)[:150]}</code>",
+            f"❌ <b>Ошибка редактирования:</b>\n<code>{str(e)}</code>",
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
         await state.update_data(edit_step="waiting_photo")
