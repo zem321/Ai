@@ -6,9 +6,10 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 from aiogram.fsm.storage.memory import MemoryStorage
 
+# Импортируем все три роутера из папки handlers
 from handlers.start_handler import router as start_router
 from handlers.chat_handler import router as chat_router
-from handlers.image_handler import router as image_router
+from handlers.image_router import router as image_router  # Проверьте имя файла (image_handler.py или image_router.py)
 from middleware import AccessMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -31,7 +32,7 @@ async def miniapp(request):
             content = f.read()
         content = content.replace(
             'localStorage.getItem("api_key") || ""',
-            f'localStorage.getItem("api_key") || "{API_KEY}"'
+            f'localStorage.getItem(\"api_key\") || "{API_KEY}"'
         )
         return web.Response(text=content, content_type="text/html", charset="utf-8")
     except FileNotFoundError:
@@ -64,15 +65,24 @@ async def main():
     await start_web()
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
+    
+    # Подключаем middleware проверки доступа
     dp.message.middleware(AccessMiddleware())
     dp.callback_query.middleware(AccessMiddleware())
+    
+    # ВАЖНО: Подключаем ВСЕ роутеры в диспетчер
     dp.include_router(start_router)
     dp.include_router(chat_router)
     dp.include_router(image_router)
+    
     await set_commands(bot)
-    logger.info("Бот запущен!")
-    await dp.start_polling(bot, skip_updates=True)
-
+    
+    logger.info("Бот запущен и начинает Polling!")
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
