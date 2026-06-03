@@ -6,7 +6,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 
 import database as db
-from keyboards import main_menu_keyboard, admin_notify_keyboard, admin_panel_keyboard
+from keyboards import main_menu_keyboard, admin_notify_keyboard, admin_panel_keyboard, model_select_keyboard, MODELS
 from states import BotStates
 
 logger = logging.getLogger(__name__)
@@ -17,13 +17,12 @@ WELCOME_TEXT = """
 👋 <b>Привет! Я твой ИИ-ассистент</b>
 
 Я умею:
-• 💬 Отвечать на вопросы (с памятью диалога)
-• 🖼 Анализировать фото по твоему запросу
-• 🎨 Генерировать изображения
+• 💬 Свободно общаться на базе топ-моделей (GPT-5.5, Claude 4.8)
+• 🖼 Анализировать фото по твоему запросу (Vision)
+• 🎨 Генерировать изображения с параметром modalities
 • ✏️ Редактировать фото по описанию
-• 🤖 Работать с разными моделями ИИ
 
-Выбери режим 👇
+Выбери режим на панели ниже 👇
 """
 
 
@@ -74,21 +73,56 @@ async def cb_main_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+# ── Добавленные обработчики управления OpenRouter моделями ──────────────────────
+
+@router.callback_query(F.data == "select_model")
+async def cb_select_model(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    current_model = data.get("current_model", "openai/gpt-5.4")
+    await callback.message.edit_text(
+        "🤖 <b>Выберите активную модель OpenRouter:</b>",
+        reply_markup=model_select_keyboard(current_model),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("model_"))
+async def cb_model_picked(callback: CallbackQuery, state: FSMContext):
+    model_id = callback.data.replace("model_", "")
+    await state.update_data(current_model=model_id)
+    friendly_name = MODELS.get(model_id, model_id)
+    await callback.message.edit_text(
+        f"✅ Активная модель изменена на:\n<b>{friendly_name}</b>\n\nОна будет применяться для всех ваших последующих запросов.",
+        reply_markup=main_menu_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "clear_history")
+async def cb_clear_history(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(history=[])
+    await callback.answer("🗑 Контекст диалога успешно очищен!", show_alert=True)
+
+
 @router.callback_query(F.data == "help")
 async def cb_help(callback: CallbackQuery):
     text = (
-        "<b>❓ Помощь</b>\n\n"
-        "💬 <b>Чат</b> — вопросы + фото с подписью для анализа\n"
-        "🎨 <b>Создать картинку</b> — генерация по описанию\n"
-        "✏️ <b>Редактировать фото</b> — отправь фото с подписью-заданием\n"
-        "🤖 <b>Модель</b> — выбери какой ИИ отвечает\n\n"
-        "<b>Команды:</b>\n"
-        "/start — главное меню\n"
-        "/admin — панель администратора"
+        "<b>❓ Помощь по работе с ботом</b>\n\n"
+        "💬 <b>Чат</b> — ведение диалогов с текстовыми LLM\n"
+        "🎨 <b>Создать картинку</b> — генерация графики по промпту через chat/completions\n"
+        "✏️ <b>Редактировать фото</b> — отправка изображения с инструкцией по изменению\n"
+        "🤖 <b>Модель</b> — выбор активной нейросети верхнего уровня\n\n"
+        "<b>Доступные команды:</b>\n"
+        "/start — Главное меню\n"
+        "/admin — Вход в панель администратора"
     )
     await callback.message.edit_text(text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
     await callback.answer()
 
+
+# ── Панель администратора ──────────────────────────────────────────────────────
 
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
