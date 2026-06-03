@@ -6,10 +6,10 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 from aiogram.fsm.storage.memory import MemoryStorage
 
-# Импортируем все три роутера из папки handlers
+# Точные импорты ваших файлов с нижними подчёркиваниями
 from handlers.start_handler import router as start_router
 from handlers.chat_handler import router as chat_router
-from handlers.image_router import router as image_router  # Проверьте имя файла (image_handler.py или image_router.py)
+from handlers.image_handler import router as image_router
 from middleware import AccessMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -57,7 +57,6 @@ async def set_commands(bot: Bot):
         BotCommand(command="start", description="🚀 Главное меню"),
         BotCommand(command="chat", description="💬 Режим чата"),
         BotCommand(command="clear", description="🗑 Очистить историю"),
-        BotCommand(command="admin", description="🛠 Админ панель"),
     ])
 
 
@@ -66,18 +65,18 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
     
-    # Подключаем middleware проверки доступа
+    # Подключаем проверку доступа пользователей
     dp.message.middleware(AccessMiddleware())
     dp.callback_query.middleware(AccessMiddleware())
     
-    # ВАЖНО: Подключаем ВСЕ роутеры в диспетчер
+    # Регистрируем все три роутера в диспетчере
     dp.include_router(start_router)
     dp.include_router(chat_router)
     dp.include_router(image_router)
     
     await set_commands(bot)
     
-    logger.info("Бот запущен и начинает Polling!")
+    logger.info("Бот успешно инициализирован и запущен!")
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
