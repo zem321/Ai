@@ -4,7 +4,6 @@ import logging
 import aiohttp
 import json
 import io
-import re
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
@@ -17,7 +16,8 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 API_KEY = os.getenv("API_KEY")
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+IMAGE_GEN_URL = "https://ai-proxy.izisoft.xyz/v1/image/generation"
+IMAGE_EDIT_URL = "https://ai-proxy.izisoft.xyz/v1/images/edits"
 
 
 def compress_image(image_bytes: bytes) -> bytes:
@@ -30,85 +30,66 @@ def compress_image(image_bytes: bytes) -> bytes:
     return output.getvalue()
 
 
-async def call_generate(prompt: str, size: str, model: str) -> bytes:
+async def call_generate(prompt: str, size: str) -> bytes:
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
     }
-    # Payload переведен на формат Chat Completions + modalities
     payload = {
-        "model": model if ("image" in model or "seedream" in model) else "openai/gpt-5.4-image-2",
-        "modalities": ["image"],
-        "messages": [
-            {
-                "role": "user",
-                "content": f"Generate a high-quality image with aspect ratio/dimensions {size}. Description: {prompt}"
-            }
-        ]
+        "model": "gpt-image-2",
+        "prompt": prompt,
+        "size": size,
+        "n": 1,
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(OPENROUTER_URL, json=payload, headers=headers) as resp:
+        async with session.post(IMAGE_GEN_URL, json=payload, headers=headers) as resp:
             text = await resp.text()
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
-                raise Exception(f"OpenRouter Error {resp.status}: {text[:300]}")
-            
-            data = json.loads(text)
-            content = data["choices"][0]["message"]["content"]
-            
-            # Извлекаем URL-адрес картинки из текста или Markdown разметки
-            urls = re.findall(r'(https?://[^\s\)\"\'\]]+)', content)
-            if not urls:
-                raise Exception(f"Не удалось извлечь URL изображения из ответа: {content[:200]}")
-            
-            img_url = urls[0]
-            async with session.get(img_url) as img_resp:
-                if img_resp.status != 200:
-                    raise Exception("Ошибка при скачивании сгенерированного файла")
-                return await img_resp.read()
+                raise Exception(data.get("error", {}).get("message", str(data)))
+            item = data["data"][0]
+            if "url" in item:
+                async with session.get(item["url"]) as img_resp:
+                    return await img_resp.read()
+            elif "b64_json" in item:
+                return base64.b64decode(item["b64_json"])
+            else:
+                raise Exception("Изображение не получено")
 
 
-async def call_edit(image_bytes: bytes, prompt: str, size: str, model: str) -> bytes:
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-    }
-    base64_image = base64.b64encode(image_bytes).decode("utf-8")
-    
-    # Передача контекста "Изображение + Текст" в структуре messages
-    payload = {
-        "model": model if ("image" in model or "seedream" in model) else "google/gemini-3.1-flash-image-preview",
-        "modalities": ["image"],
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": f"Modify this image based on the instructions. Target size is {size}. Task: {prompt}"},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{base64_image}"}
-                    }
-                ]
-            }
-        ]
-    }
+async def call_edit(image_bytes: bytes, prompt: str, size: str) -> bytes:
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+    data = aiohttp.FormData()
+    data.add_field("model", "gpt-image-2")
+    data.add_field("prompt", prompt)
+    data.add_field("size", size)
+    data.add_field("n", "1")
+    data.add_field(
+        "image",
+        image_bytes,
+        filename="image.png",
+        content_type="image/png"
+    )
     async with aiohttp.ClientSession() as session:
-        async with session.post(OPENROUTER_URL, json=payload, headers=headers) as resp:
+        async with session.post(IMAGE_EDIT_URL, data=data, headers=headers) as resp:
             text = await resp.text()
+            try:
+                result = json.loads(text)
+            except Exception:
+                raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
-                raise Exception(f"OpenRouter Error {resp.status}: {text[:300]}")
-            
-            data = json.loads(text)
-            content = data["choices"][0]["message"]["content"]
-            
-            urls = re.findall(r'(https?://[^\s\)\"\'\]]+)', content)
-            if not urls:
-                raise Exception(f"Не удалось извлечь URL измененного фото: {content[:200]}")
-            
-            img_url = urls[0]
-            async with session.get(img_url) as img_resp:
-                if img_resp.status != 200:
-                    raise Exception("Ошибка при скачивании отредактированного файла")
-                return await img_resp.read()
+                raise Exception(result.get("error", {}).get("message", str(result)))
+            item = result["data"][0]
+            if "url" in item:
+                async with session.get(item["url"]) as img_resp:
+                    return await img_resp.read()
+            elif "b64_json" in item:
+                return base64.b64decode(item["b64_json"])
+            else:
+                raise Exception("Изображение не получено")
 
 
 # ── Генерация ──────────────────────────────────────────────────────────────────
@@ -117,21 +98,21 @@ async def call_edit(image_bytes: bytes, prompt: str, size: str, model: str) -> b
 async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_generate)
     await callback.message.edit_text(
-        "🎨 <b>Генерация изображения (OpenRouter API)</b>\n\nВыбери размер:",
+        "🎨 <b>Генерация изображения</b>\n\nВыбери размер:",
         reply_markup=image_size_keyboard("gen"),
         parse_mode="HTML"
     )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("size_gen_"))
+@router.callback_query(BotStates.image_generate, F.data.startswith("size_gen_"))
 async def size_gen_selected(callback: CallbackQuery, state: FSMContext):
     size = callback.data.replace("size_gen_", "")
     await state.update_data(image_size=size)
     await callback.message.edit_text(
         f"✅ Размер: <b>{size}</b>\n\n"
-        f"📝 <b>Опиши, что хочешь создать:</b>\n\n"
-        f"<i>Пример: Футуристичный мегаполис в стиле киберпанк, неоновое освещение, дождливая ночь</i>",
+        f"📝 <b>Опиши что хочешь создать:</b>\n\n"
+        f"<i>Пример: Закат над морем в стиле аниме</i>",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
@@ -142,17 +123,15 @@ async def size_gen_selected(callback: CallbackQuery, state: FSMContext):
 async def do_generate_image(message: Message, state: FSMContext):
     data = await state.get_data()
     size = data.get("image_size", "1024x1024")
-    current_model = data.get("current_model", "openai/gpt-5.4-image-2")
-
     await message.bot.send_chat_action(message.chat.id, "upload_photo")
-    status_msg = await message.answer("🎨 <i>Генерирую изображение через OpenRouter...</i>", parse_mode="HTML")
+    status_msg = await message.answer("🎨 <i>Генерирую изображение... ~20 секунд</i>", parse_mode="HTML")
     try:
-        image_bytes = await call_generate(message.text, size, current_model)
+        image_bytes = await call_generate(message.text, size)
         image_file = BufferedInputFile(image_bytes, filename="generated.png")
         await status_msg.delete()
         await message.answer_photo(
             photo=image_file,
-            caption=f"🎨 <b>Готово!</b>\n📝 {message.text}\n📐 {size}\n🤖 Модель: <code>{current_model}</code>",
+            caption=f"🎨 <b>Готово!</b>\n📝 {message.text}\n📐 {size}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard()
         )
@@ -171,9 +150,9 @@ async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
     await state.update_data(edit_step="waiting_photo")
     await callback.message.edit_text(
-        "✏️ <b>Редактирование фото (Image-to-Image)</b>\n\n"
+        "✏️ <b>Редактирование фото</b>\n\n"
         "📸 Отправь фото <b>с подписью</b> — напиши задание прямо под фото!\n\n"
-        "<i>Пример подписи: Сделай волосы персонажа синими и добавь очки</i>",
+        "<i>Пример подписи: Сделай фон белым и добавь снег</i>",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
@@ -212,7 +191,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
     )
 
 
-@router.callback_query(F.data.startswith("size_edit_"))
+@router.callback_query(BotStates.image_edit, F.data.startswith("size_edit_"))
 async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     if data.get("edit_step") != "waiting_size":
@@ -223,22 +202,21 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     await state.update_data(image_size=size, edit_step="processing")
 
     status_msg = await callback.message.edit_text(
-        "✏️ <i>Редактирую фото через ИИ...</i>",
+        "✏️ <i>Редактирую фото... ~20 секунд</i>",
         parse_mode="HTML"
     )
     await callback.answer()
 
     image_bytes = base64.b64decode(data.get("edit_image_b64"))
     prompt = data.get("edit_prompt")
-    current_model = data.get("current_model", "google/gemini-3.1-flash-image-preview")
 
     try:
-        result_bytes = await call_edit(image_bytes, prompt, size, current_model)
+        result_bytes = await call_edit(image_bytes, prompt, size)
         image_file = BufferedInputFile(result_bytes, filename="edited.png")
         await status_msg.delete()
         await callback.message.answer_photo(
             photo=image_file,
-            caption=f"✏️ <b>Готово!</b>\n📝 {prompt}\n🤖 Модель: <code>{current_model}</code>",
+            caption=f"✏️ <b>Готово!</b>\n📝 {prompt}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard()
         )
