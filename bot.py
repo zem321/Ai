@@ -64,13 +64,18 @@ async def main():
     await start_web()
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
+    
+    # Регистрация промежуточных слоев (Middleware)
     dp.message.middleware(AccessMiddleware())
     dp.callback_query.middleware(AccessMiddleware())
+    
+    # Включение роутеров из папки handlers
     dp.include_router(start_router)
     dp.include_router(chat_router)
     dp.include_router(image_router)
+    
     await set_commands(bot)
-    logger.info("Бот запущен!")
+    logger.info("Бот успешно запущен!")
     await dp.start_polling(bot, skip_updates=True)
 
 
