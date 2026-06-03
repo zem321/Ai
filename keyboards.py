@@ -1,33 +1,26 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Ведущие текстовые и графические модели OpenRouter (Актуальность: 2026 год)
 MODELS = {
-    # --- ТЕКСТОВЫЕ МОДЕЛИ ---
     "anthropic/claude-opus-4-8": "🔮 Claude Opus 4.8",
+    "anthropic/claude-opus-4-7": "🔮 Claude Opus 4.7",
+    "anthropic/claude-opus-4-6": "🔮 Claude Opus 4.6",
     "anthropic/claude-sonnet-4-6": "✨ Claude Sonnet 4.6",
-    "openai/gpt-5.5": "🧠 GPT-5.5",
-    "openai/gpt-5.4": "🧠 GPT-5.4",
-    "google/gemini-3.5-flash": "⚡️ Gemini 3.5 Flash",
-    "google/gemini-2.5-pro": "🔮 Gemini 2.5 Pro",
-    "deepseek/deepseek-r1": "🐳 DeepSeek R1",
-    "meta/llama-4": "🦬 Llama 4",
-    
-    # --- МЕДИА / ГРАФИЧЕСКИЕ МОДЕЛИ ---
-    "openai/gpt-5.4-image-2": "🎨 GPT-5.4 Image 2",
-    "google/gemini-2.5-flash-image": "🍌 Gemini 2.5 Flash Image",
-    "google/gemini-3.1-flash-image-preview": "📸 Gemini 3.1 Flash Image Preview",
-    "bytedance/seedream-4.5": "🌊 Seedream 4.5"
+    "claude-sonnet-4-5-20250929": "✨ Claude Sonnet 4.5",
+    "claude-haiku-4-5-20251001": "⚡️ Claude Haiku 4.5",
+    "gpt-5.5": "🧠 GPT-5.5",
+    "gpt-5.4-mini": "💨 GPT-5.4 Mini",
+    "codex-auto-review": "🛠 Codex Auto Review",
 }
 
-# Модели с поддержкой Vision (анализ изображений)
 VISION_MODELS = {
     "anthropic/claude-opus-4-8",
+    "anthropic/claude-opus-4-7",
+    "anthropic/claude-opus-4-6",
     "anthropic/claude-sonnet-4-6",
-    "openai/gpt-5.5",
-    "openai/gpt-5.4",
-    "google/gemini-3.5-flash",
-    "google/gemini-2.5-pro",
-    "google/gemini-3.1-flash-image-preview"
+    "claude-sonnet-4-5-20250929",
+    "claude-haiku-4-5-20251001",
+    "gpt-5.5",
+    "gpt-5.4-mini",
 }
 
 
@@ -53,7 +46,7 @@ def model_select_keyboard(current: str = "") -> InlineKeyboardMarkup:
     for model_id, model_name in MODELS.items():
         label = f"✅ {model_name}" if model_id == current else model_name
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="main_menu")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад в меню", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
