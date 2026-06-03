@@ -11,6 +11,8 @@ from states import BotStates
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+# Считываем ID администратора из переменных окружения
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 WELCOME_TEXT = """
@@ -21,9 +23,8 @@ WELCOME_TEXT = """
 • 🖼 Анализировать фото по твоему запросу
 • 🎨 Генерировать изображения
 • ✏️ Редактировать фото по описанию
-• 🤖 Работать с разными моделями ИИ
 
-Выбери режим 👇
+Выбери нужный режим работы ниже 👇
 """
 
 
@@ -41,172 +42,134 @@ async def notify_admin(bot: Bot, user):
     try:
         await bot.send_message(ADMIN_ID, text, reply_markup=admin_notify_keyboard(user.id), parse_mode="HTML")
     except Exception as e:
-        logger.error(f"Admin notify error: {e}")
+        logger.error(f"Не удалось уведомить админа: {e}")
 
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    if user_id == ADMIN_ID:
-        db.approve_user(user_id)
-        await state.set_state(BotStates.main_menu)
-        await message.answer(WELCOME_TEXT, reply_markup=main_menu_keyboard(), parse_mode="HTML")
-        return
-    if db.is_approved(user_id):
-        await state.set_state(BotStates.main_menu)
-        await message.answer(WELCOME_TEXT, reply_markup=main_menu_keyboard(), parse_mode="HTML")
-        return
-    if db.is_pending(user_id):
-        await message.answer("⏳ <b>Запрос уже отправлен!</b> Ожидай одобрения.", parse_mode="HTML")
-        return
-    if db.is_rejected(user_id):
-        await message.answer("🚫 <b>Доступ отклонён.</b>", parse_mode="HTML")
-        return
-    db.add_pending(user_id)
-    await notify_admin(message.bot, message.from_user)
-    await message.answer("📨 <b>Запрос отправлен!</b>\n\nОжидай одобрения от администратора.", parse_mode="HTML")
-
-
-@router.callback_query(F.data == "main_menu")
-async def cb_main_menu(callback: CallbackQuery, state: FSMContext):
+    # Принудительно сбрасываем любые зависшие состояния (важно для iOS-клиентов)
+    await state.clear()
     await state.set_state(BotStates.main_menu)
-    await callback.message.edit_text(WELCOME_TEXT, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+    
+    user_id = message.from_user.id
+
+    # Если это создатель/админ — пускаем без каких-либо проверок базы данных
+    if user_id == ADMIN_ID:
+        await message.answer(
+            WELCOME_TEXT,
+            reply_markup=main_menu_keyboard(is_admin=True),
+            parse_mode="HTML"
+        )
+        return
+
+    # Логика для обычных пользователей
+    if db.is_approved(user_id):
+        await message.answer(
+            WELCOME_TEXT,
+            reply_markup=main_menu_keyboard(is_admin=False),
+            parse_mode="HTML"
+        )
+    elif db.is_pending(user_id):
+        await message.answer("⏳ <b>Твой запрос находится на рассмотрении у администратора.</b>", parse_mode="HTML")
+    elif db.is_rejected(user_id):
+        await message.answer("🚫 <b>Доступ к этому боту для тебя ограничен.</b>", parse_mode="HTML")
+    else:
+        # Если пользователя вообще нет в базе — отправляем запрос админу
+        db.add_pending(user_id)
+        await message.answer(
+            "👋 <b>Привет! Доступ к боту ограничен.</b>\n\n"
+            "Запрос на доступ автоматически отправлен администратору. Ожидайте уведомления.",
+            parse_mode="HTML"
+        )
+        await notify_admin(message.bot, message.from_user)
+
+
+@router.callback_query(F.data == "to_main_menu")
+async def cb_main_menu(callback: CallbackQuery, state: FSMContext):
+    """Хэндлер для кнопки 'Назад в главное меню'"""
+    await state.clear()
+    await state.set_state(BotStates.main_menu)
+    user_id = callback.from_user.id
+    is_admin = (user_id == ADMIN_ID)
+    
+    try:
+        await callback.message.edit_text(
+            WELCOME_TEXT,
+            reply_markup=main_menu_keyboard(is_admin=is_admin),
+            parse_mode="HTML"
+        )
+    except Exception:
+        # Если сообщение нельзя отредактировать (например, там было фото), просто шлем новое
+        await callback.message.answer(
+            WELCOME_TEXT,
+            reply_markup=main_menu_keyboard(is_admin=is_admin),
+            parse_mode="HTML"
+        )
     await callback.answer()
 
 
-@router.callback_query(F.data == "help")
-async def cb_help(callback: CallbackQuery):
-    text = (
-        "<b>❓ Помощь</b>\n\n"
-        "💬 <b>Чат</b> — вопросы + фото с подписью для анализа\n"
-        "🎨 <b>Создать картинку</b> — генерация по описанию\n"
-        "✏️ <b>Редактировать фото</b> — отправь фото с подписью-заданием\n"
-        "🤖 <b>Модель</b> — выбери какой ИИ отвечает\n\n"
-        "<b>Команды:</b>\n"
-        "/start — главное меню\n"
-        "/admin — панель администратора"
-    )
-    await callback.message.edit_text(text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
-    await callback.answer()
-
+# ── АДМИН ПАНЕЛЬ ──────────────────────────────────────────────────────────────
 
 @router.message(Command("admin"))
-async def cmd_admin(message: Message):
+async def cmd_admin(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
-    approved = db.get_all_approved()
-    pending = db.get_all_pending()
-    await message.answer(
-        f"🛠 <b>Панель администратора</b>\n\n✅ Одобрено: <b>{len(approved)}</b>\n⏳ Ожидают: <b>{len(pending)}</b>",
-        reply_markup=admin_panel_keyboard(), parse_mode="HTML"
-    )
-
-
-@router.callback_query(F.data.startswith("approve_"))
-async def cb_approve(callback: CallbackQuery, bot: Bot):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("🚫 Нет доступа", show_alert=True)
-        return
-    user_id = int(callback.data.split("_")[1])
-    db.approve_user(user_id)
-    await callback.message.edit_text(callback.message.text + "\n\n✅ <b>Одобрен!</b>", parse_mode="HTML")
-    await callback.answer("✅ Одобрен!")
-    try:
-        await bot.send_message(user_id, "🎉 <b>Доступ одобрен!</b>\n\nНапиши /start чтобы начать.", parse_mode="HTML")
-    except Exception:
-        pass
-
-
-@router.callback_query(F.data.startswith("reject_"))
-async def cb_reject(callback: CallbackQuery, bot: Bot):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("🚫 Нет доступа", show_alert=True)
-        return
-    user_id = int(callback.data.split("_")[1])
-    db.reject_user(user_id)
-    await callback.message.edit_text(callback.message.text + "\n\n❌ <b>Отклонён.</b>", parse_mode="HTML")
-    await callback.answer("❌ Отклонён")
-    try:
-        await bot.send_message(user_id, "😔 <b>Доступ отклонён.</b>", parse_mode="HTML")
-    except Exception:
-        pass
-
-
-@router.callback_query(F.data.startswith("revoke_"))
-async def cb_revoke(callback: CallbackQuery, bot: Bot):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("🚫 Нет доступа", show_alert=True)
-        return
-    user_id = int(callback.data.split("_")[1])
-    db.revoke_user(user_id)
-    await callback.answer("🚫 Доступ отозван", show_alert=True)
-    await callback.message.edit_text(
-        f"🚫 Доступ пользователя <code>{user_id}</code> отозван.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
-        ]),
-        parse_mode="HTML"
-    )
-    try:
-        await bot.send_message(user_id, "🚫 <b>Ваш доступ отозван.</b>", parse_mode="HTML")
-    except Exception:
-        pass
+    await state.clear()
+    await message.answer("🛠 <b>Панель администратора:</b>", reply_markup=admin_panel_keyboard(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "admin_panel")
-async def cb_admin_panel(callback: CallbackQuery):
+async def cb_admin_panel(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав!", show_alert=True)
         return
-    approved = db.get_all_approved()
-    pending = db.get_all_pending()
-    await callback.message.edit_text(
-        f"🛠 <b>Панель администратора</b>\n\n✅ Одобрено: <b>{len(approved)}</b>\n⏳ Ожидают: <b>{len(pending)}</b>",
-        reply_markup=admin_panel_keyboard(), parse_mode="HTML"
-    )
+    await state.clear()
+    await callback.message.edit_text("🛠 <b>Панель администратора:</b>", reply_markup=admin_panel_keyboard(), parse_mode="HTML")
     await callback.answer()
 
 
-@router.callback_query(F.data == "admin_list_approved")
-async def cb_list_approved(callback: CallbackQuery):
+@router.callback_query(F.data.startswith("admin_approve_"))
+async def cb_approve_notification(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
-    approved = db.get_all_approved()
-    if not approved:
-        await callback.answer("Список пуст", show_alert=True)
-        return
-    buttons = []
-    for uid in approved:
-        buttons.append([
-            InlineKeyboardButton(text=f"🆔 {uid}", callback_data="noop"),
-            InlineKeyboardButton(text="🚫 Отозвать", callback_data=f"revoke_{uid}"),
-        ])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
-    await callback.message.edit_text(
-        f"✅ <b>Одобренные ({len(approved)}):</b>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-        parse_mode="HTML"
-    )
-    await callback.answer()
+    uid = int(callback.data.replace("admin_approve_", ""))
+    db.approve_user(uid)
+    await callback.message.edit_text(f"✅ Пользователь <code>{uid}</code> успешно одобрен!", parse_mode="HTML")
+    await callback.answer("Пользователь одобрен")
+    try:
+        await callback.bot.send_message(uid, "🎉 <b>Администратор одобрил твой доступ к боту!</b>\nНапиши /start для начала работы.", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Не удалось отправить уведомление пользователю: {e}")
 
 
-@router.callback_query(F.data == "admin_list_pending")
-async def cb_list_pending(callback: CallbackQuery):
+@router.callback_query(F.data.startswith("admin_reject_"))
+async def cb_reject_notification(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
-    pending = db.get_all_pending()
+    uid = int(callback.data.replace("admin_reject_", ""))
+    db.reject_user(uid)
+    await callback.message.edit_text(f"❌ Пользователь <code>{uid}</code> отклонён.", parse_mode="HTML")
+    await callback.answer("Пользователь отклонён")
+
+
+@router.callback_query(F.data == "admin_pending")
+async def cb_pending_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    pending = db.get_all_pending() if hasattr(db, "get_all_pending") else []
     if not pending:
-        await callback.answer("Нет ожидающих", show_alert=True)
+        await callback.answer("Заявок на рассмотрении нет", show_alert=True)
         return
     buttons = []
     for uid in pending:
         buttons.append([
             InlineKeyboardButton(text=f"🆔 {uid}", callback_data="noop"),
-            InlineKeyboardButton(text="✅", callback_data=f"approve_{uid}"),
-            InlineKeyboardButton(text="❌", callback_data=f"reject_{uid}"),
+            InlineKeyboardButton(text="✅", callback_data=f"admin_approve_{uid}"),
+            InlineKeyboardButton(text="❌", callback_data=f"admin_reject_{uid}"),
         ])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
     await callback.message.edit_text(
-        f"⏳ <b>Ожидают ({len(pending)}):</b>",
+        f"⏳ <b>Ожидают одобрения ({len(pending)}):</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
         parse_mode="HTML"
     )
@@ -217,18 +180,13 @@ async def cb_list_pending(callback: CallbackQuery):
 async def cb_stats(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
-    approved = db.get_all_approved()
-    pending = db.get_all_pending()
+    approved = db.get_all_approved() if hasattr(db, "get_all_approved") else []
+    pending = db.get_all_pending() if hasattr(db, "get_all_pending") else []
     await callback.message.edit_text(
-        f"📊 <b>Статистика</b>\n\n✅ Одобрено: <b>{len(approved)}</b>\n⏳ Ожидают: <b>{len(pending)}</b>",
+        f"📊 <b>Статистика бота</b>\n\n✅ Одобрено пользователей: <b>{len(approved)}</b>\n⏳ Ожидают проверки: <b>{len(pending)}</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")]
         ]),
         parse_mode="HTML"
     )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "noop")
-async def cb_noop(callback: CallbackQuery):
     await callback.answer()
