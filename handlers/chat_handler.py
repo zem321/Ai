@@ -7,7 +7,7 @@ from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
-from keyboards import cancel_keyboard, main_menu_keyboard
+from keyboards import cancel_keyboard
 from states import BotStates
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ router = Router()
 API_KEY = os.getenv("API_KEY")
 CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Локальная память диалогов (в проде лучше использовать Redis/БД)
+# Локальная память диалогов
 USER_HISTORY = {}
 
 
@@ -34,20 +34,17 @@ async def call_openrouter(model: str, messages: list) -> str:
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://railway.app",  # Необязательно, для статистики OpenRouter
     }
     payload = {
         "model": model,
         "messages": messages,
-        "max_tokens": 1500,  # Защита от резервирования лишних кредитов (ошибка 402)
+        "max_tokens": 1500,  # Защита от ошибки 402
     }
 
     async with aiohttp.ClientSession() as session:
         async with session.post(CHAT_URL, headers=headers, json=payload) as resp:
             if resp.status == 402:
-                err_data = await resp.text()
-                logger.error(f"OpenRouter 402 error: {err_data}")
-                return "❌ Ошибка баланса (код 402): на балансе ключа недостаточно средств для резервирования контекста. Пожалуйста, пополните OpenRouter или уменьшите контекст."
+                return "❌ Ошибка баланса (код 402): на балансе ключа OpenRouter недостаточно средств для этого запроса. Пожалуйста, пополните аккаунт."
             if resp.status != 200:
                 err_data = await resp.text()
                 logger.error(f"OpenRouter error {resp.status}: {err_data}")
@@ -57,10 +54,10 @@ async def call_openrouter(model: str, messages: list) -> str:
             try:
                 return result["choices"][0]["message"]["content"]
             except (KeyError, IndexError):
-                logger.error(f"Invalid OpenRouter response structure: {result}")
                 return "❌ Не удалось прочитать ответ от ИИ."
 
 
+# Обрабатываем нажатие кнопки активации чата
 @router.callback_query(F.data == "chat_mode")
 async def start_chat_mode(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.chat_mode)
@@ -85,12 +82,13 @@ async def handle_chat_text(message: Message, state: FSMContext):
     data = await state.get_data()
     model = data.get("current_model", "gpt-5.4-mini")
 
+    # Включаем анимацию "печатает"
+    await message.bot.send_chat_action(message.chat.id, "typing")
     status_msg = await message.answer("⚡️ <i>ИИ думает...</i>", parse_mode="HTML")
 
     history = get_user_history(message.from_user.id)
     history.append({"role": "user", "content": message.text})
 
-    # Держим последние 15 сообщений для экономии токенов
     if len(history) > 15:
         history = history[-15:]
         USER_HISTORY[message.from_user.id] = history
@@ -112,11 +110,12 @@ async def handle_chat_photo(message: Message, state: FSMContext, bot: Bot):
     from keyboards import VISION_MODELS
     if model not in VISION_MODELS:
         await message.answer(
-            "❌ Выбранная модель не поддерживает анализ изображений. Смени модель или отправь текст.",
+            "❌ Выбранная модель не поддерживает анализ изображений. Смените модель в меню.",
             reply_markup=cancel_keyboard()
         )
         return
 
+    await bot.send_chat_action(message.chat.id, "typing")
     status_msg = await message.answer("📸 <i>Скачиваю и анализирую фото...</i>", parse_mode="HTML")
 
     photo = message.photo[-1]
