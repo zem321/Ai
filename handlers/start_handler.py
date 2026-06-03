@@ -6,7 +6,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 
 import database as db
-from keyboards import main_menu_keyboard, admin_notify_keyboard, admin_panel_keyboard, model_select_keyboard, MODELS
+from keyboards import main_menu_keyboard, admin_notify_keyboard, admin_panel_keyboard
 from states import BotStates
 
 logger = logging.getLogger(__name__)
@@ -74,36 +74,6 @@ async def cb_main_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data == "select_model")
-async def cb_select_model(callback: CallbackQuery):
-    current_model = db.get_user_model(callback.from_user.id)
-    await callback.message.edit_text(
-        "🤖 <b>Выберите желаемую модель ИИ:</b>",
-        reply_markup=model_select_keyboard(current_model),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("model_"))
-async def cb_model_selected(callback: CallbackQuery):
-    model_id = callback.data.replace("model_", "")
-    db.set_user_model(callback.from_user.id, model_id)
-    model_name = MODELS.get(model_id, model_id)
-    await callback.message.edit_text(
-        f"✅ Успешно установлена модель: <b>{model_name}</b>",
-        reply_markup=main_menu_keyboard(),
-        parse_mode="HTML"
-    )
-    await callback.answer(f"Выбрана {model_name}")
-
-
-@router.callback_query(F.data == "clear_history")
-async def cb_clear_history(callback: CallbackQuery):
-    db.clear_history(callback.from_user.id)
-    await callback.answer("🗑 История контекста полностью очищена!", show_alert=True)
-
-
 @router.callback_query(F.data == "help")
 async def cb_help(callback: CallbackQuery):
     text = (
@@ -114,7 +84,6 @@ async def cb_help(callback: CallbackQuery):
         "🤖 <b>Модель</b> — выбери какой ИИ отвечает\n\n"
         "<b>Команды:</b>\n"
         "/start — главное меню\n"
-        "/clear — быстрая очистка контекста\n"
         "/admin — панель администратора"
     )
     await callback.message.edit_text(text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
