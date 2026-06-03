@@ -16,8 +16,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 API_KEY = os.getenv("API_KEY")
-IMAGE_GEN_URL = "https://ai-proxy.izisoft.xyz/v1/image/generation"
-IMAGE_EDIT_URL = "https://ai-proxy.izisoft.xyz/v1/images/edits"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 def compress_image(image_bytes: bytes) -> bytes:
