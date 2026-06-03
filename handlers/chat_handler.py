@@ -3,15 +3,15 @@ import base64
 import logging
 import aiohttp
 import json
-import io
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from PIL import Image
+from aiogram.filters import Command
 
-from keyboards import cancel_keyboard, model_select_keyboard, MODELS, VISION_MODELS
+import database as db
+from keyboards import cancel_keyboard, VISION_MODELS, MODELS
 from states import BotStates
+from handlers.image_handler import compress_image
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -19,187 +19,136 @@ router = Router()
 API_KEY = os.getenv("API_KEY")
 CHAT_URL = "https://ai-proxy.izisoft.xyz/v1/chat/completions"
 
-SYSTEM_PROMPT = "Ты полезный ИИ-ассистент. Отвечай на русском языке если вопрос на русском. Будь точным и лаконичным."
-MAX_HISTORY = 20
 
-def get_history(data): return data.get("chat_history", [])
-def get_model(data): return data.get("selected_model", "gpt-5.4-mini")
-
-
-def compress_image(image_bytes: bytes) -> str:
-    """Сжимаем фото до 512px и качество 60% для экономии токенов"""
-    img = Image.open(io.BytesIO(image_bytes))
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-    img.thumbnail((512, 512), Image.LANCZOS)
-    output = io.BytesIO()
-    img.save(output, format="JPEG", quality=60)
-    return base64.b64encode(output.getvalue()).decode("utf-8")
-
-
-async def call_ai(model_id: str, messages: list) -> str:
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model_id,
-        "messages": messages,
-        "max_tokens": 2000,
-        "temperature": 0.7,
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(CHAT_URL, json=payload, headers=headers) as resp:
-            text = await resp.text()
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Ответ сервера: {text[:300]}")
-            if resp.status != 200:
-                raise Exception(data.get("error", {}).get("message", str(data)))
-            return data["choices"][0]["message"]["content"]
-
-
-@router.callback_query(F.data == "select_model")
-async def cb_select_model(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    current = get_model(data)
+@router.callback_query(F.data == "mode_chat")
+async def enter_chat_mode(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(BotStates.chat_mode)
+    current_model = db.get_user_model(callback.from_user.id)
+    model_name = MODELS.get(current_model, current_model)
     await callback.message.edit_text(
-        "🤖 <b>Выбери модель ИИ:</b>",
-        reply_markup=model_select_keyboard(current),
+        f"💬 <b>Режим чата с ИИ активирован!</b>\n\n"
+        f"🤖 Текущая нейросеть: <b>{model_name}</b>\n"
+        f"✉️ Отправь текстовое сообщение или пришли фотографию для её анализа.",
+        reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("model_"))
-async def cb_model_selected(callback: CallbackQuery, state: FSMContext):
-    model_id = callback.data.replace("model_", "", 1)
-    await state.update_data(selected_model=model_id)
-    model_name = MODELS.get(model_id, model_id)
-    await state.set_state(BotStates.chat_mode)
-    await callback.message.edit_text(
-        f"✅ <b>Модель:</b> {model_name}\n\nПиши сообщения или отправляй фото с подписью!",
-        reply_markup=cancel_keyboard(),
-        parse_mode="HTML"
-    )
-    await callback.answer(f"✅ {model_name}")
-
-
-@router.message(Command("chat"))
-@router.callback_query(F.data == "mode_chat")
-async def enter_chat_mode(event, state: FSMContext):
-    await state.set_state(BotStates.chat_mode)
-    data = await state.get_data()
-    model_name = MODELS.get(get_model(data), get_model(data))
-    text = (
-        f"💬 <b>Режим чата</b>\n\n"
-        f"🤖 Модель: <b>{model_name}</b>\n\n"
-        f"• Пиши любые вопросы\n"
-        f"• Отправляй фото с подписью — отвечу сразу!\n\n"
-        f"/clear — очистить историю"
-    )
-    if isinstance(event, CallbackQuery):
-        await event.message.edit_text(text, reply_markup=cancel_keyboard(), parse_mode="HTML")
-        await event.answer()
-    else:
-        await event.answer(text, reply_markup=cancel_keyboard(), parse_mode="HTML")
-
-
-@router.callback_query(F.data == "clear_history")
 @router.message(Command("clear"))
-async def clear_history(event, state: FSMContext):
-    await state.update_data(chat_history=[])
-    text = "🗑 <b>История очищена!</b>"
-    if isinstance(event, CallbackQuery):
-        await event.message.edit_text(text, reply_markup=cancel_keyboard(), parse_mode="HTML")
-        await event.answer("История очищена!")
-    else:
-        await event.answer(text, reply_markup=cancel_keyboard(), parse_mode="HTML")
+async def cmd_clear(message: Message):
+    db.clear_history(message.from_user.id)
+    await message.answer("🗑 <b>История вашего диалога очищена!</b> Контекст сброшен.", parse_mode="HTML")
+
+
+@router.message(BotStates.chat_mode, F.text)
+async def handle_chat_text(message: Message):
+    user_id = message.from_user.id
+    text = message.text
+
+    await message.bot.send_chat_action(message.chat.id, "typing")
+    status_msg = await message.answer("🤔 <i>Думаю...</i>", parse_mode="HTML")
+
+    current_model = db.get_user_model(user_id)
+    db.add_history_message(user_id, "user", text)
+    history = db.get_history(user_id)
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": current_model,
+            "messages": history
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(CHAT_URL, json=payload, headers=headers) as resp:
+                res_text = await resp.text()
+                if resp.status != 200:
+                    raise Exception(f"Ошибка сервера (код {resp.status}): {res_text[:200]}")
+
+                data = json.loads(res_text)
+                reply = data["choices"][0]["message"]["content"]
+
+                db.add_history_message(user_id, "assistant", reply)
+                await status_msg.delete()
+                await message.answer(reply)
+    except Exception as e:
+        logger.error(f"Chat completion error: {e}")
+        await status_msg.edit_text(
+            f"❌ <b>Ошибка при обработке запроса ИИ:</b>\n<code>{str(e)}</code>",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard()
+        )
 
 
 @router.message(BotStates.chat_mode, F.photo)
-async def handle_photo(message: Message, state: FSMContext):
-    data = await state.get_data()
-    model_id = get_model(data)
-    model_name = MODELS.get(model_id, model_id)
+async def handle_chat_photo(message: Message):
+    user_id = message.from_user.id
+    current_model = db.get_user_model(user_id)
 
-    if model_id not in VISION_MODELS:
+    if current_model not in VISION_MODELS:
         await message.answer(
-            f"⚠️ Модель <b>{model_name}</b> не поддерживает анализ фото.\n"
-            f"Выбери Claude или GPT-5.5.",
-            parse_mode="HTML", reply_markup=cancel_keyboard()
+            f"⚠️ Выбранная модель <b>{MODELS.get(current_model, current_model)}</b> не поддерживает анализ изображений!\n\n"
+            f"Переключитесь на мультимодальную модель (например, GPT-5.5 или Claude Sonnet).",
+            reply_markup=cancel_keyboard(),
+            parse_mode="HTML"
         )
         return
 
-    caption = message.caption or "Подробно опиши что на этом фото"
-    status_msg = await message.answer("🔍 <i>Анализирую фото...</i>", parse_mode="HTML")
+    caption = message.caption or "Проанализируй это изображение."
+    await message.bot.send_chat_action(message.chat.id, "typing")
+    status_msg = await message.answer("📸 <i>Считываю и анализирую изображение...</i>", parse_mode="HTML")
 
     try:
         photo = message.photo[-1]
         file = await message.bot.get_file(photo.file_id)
         file_bytes = await message.bot.download_file(file.file_path)
-        # Сжимаем фото для экономии токенов
-        image_b64 = compress_image(file_bytes.read())
 
-        history = get_history(data)
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
-                {"type": "text", "text": caption}
-            ]
-        })
+        compressed_bytes = compress_image(file_bytes.read())
+        base64_image = base64.b64encode(compressed_bytes).decode("utf-8")
 
-        reply = await call_ai(model_id, messages)
+        # Формируем структуру OpenAI Vision payload
+        vision_content = [
+            {"type": "text", "text": caption},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
+        ]
 
-        # Сохраняем только текст в историю — не фото!
-        history.append({"role": "user", "content": f"[Фото] {caption}"})
-        history.append({"role": "assistant", "content": reply})
-        if len(history) > MAX_HISTORY:
-            history = history[-MAX_HISTORY:]
-        await state.update_data(chat_history=history)
+        # Для отправки в API используем полную историю + картинку в текущем запросе
+        history = db.get_history(user_id)
+        api_messages = history.copy()
+        api_messages.append({"role": "user", "content": vision_content})
 
-        await status_msg.edit_text(
-            f"🖼 <b>Анализ фото:</b>\n\n{reply}\n\n<i>🤖 {model_name}</i>",
-            parse_mode="HTML", reply_markup=cancel_keyboard()
-        )
+        headers = {
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": current_model,
+            "messages": api_messages
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(CHAT_URL, json=payload, headers=headers) as resp:
+                res_text = await resp.text()
+                if resp.status != 200:
+                    raise Exception(f"Ошибка API Vision: {res_text[:200]}")
+
+                data = json.loads(res_text)
+                reply = data["choices"][0]["message"]["content"]
+
+                # Сохраняем в оптимизированную локальную историю текстовый аналог
+                db.add_history_message(user_id, "user", vision_content)
+                db.add_history_message(user_id, "assistant", reply)
+
+                await status_msg.delete()
+                await message.answer(reply)
     except Exception as e:
-        logger.error(f"Photo error: {e}")
+        logger.error(f"Vision error: {e}")
         await status_msg.edit_text(
-            f"❌ <b>Ошибка:</b>\n<code>{str(e)}</code>",
-            parse_mode="HTML", reply_markup=cancel_keyboard()
-        )
-
-
-@router.message(BotStates.chat_mode, F.text)
-async def handle_text(message: Message, state: FSMContext):
-    data = await state.get_data()
-    model_id = get_model(data)
-    model_name = MODELS.get(model_id, model_id)
-
-    await message.bot.send_chat_action(message.chat.id, "typing")
-    status_msg = await message.answer("⏳ <i>Думаю...</i>", parse_mode="HTML")
-
-    try:
-        history = get_history(data)
-        history.append({"role": "user", "content": message.text})
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
-        reply = await call_ai(model_id, messages)
-
-        history.append({"role": "assistant", "content": reply})
-        if len(history) > MAX_HISTORY:
-            history = history[-MAX_HISTORY:]
-        await state.update_data(chat_history=history)
-
-        await status_msg.edit_text(
-            f"{reply}\n\n<i>🤖 {model_name}</i>",
-            parse_mode="HTML", reply_markup=cancel_keyboard()
-        )
-    except Exception as e:
-        logger.error(f"Chat error: {e}")
-        await status_msg.edit_text(
-            f"❌ <b>Ошибка:</b>\n<code>{str(e)}</code>",
-            parse_mode="HTML", reply_markup=cancel_keyboard()
+            f"❌ <b>Ошибка анализа фотографии:</b>\n<code>{str(e)}</code>",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard()
         )
