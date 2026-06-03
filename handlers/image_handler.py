@@ -4,7 +4,7 @@ import logging
 import aiohttp
 import json
 import io
-from aiogram import Router, F
+from aiogram import Router, F, Bot  # <-- КЛАСС 'Bot' УСПЕШНО ДОБАВЛЕН СЮДА
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image
@@ -34,9 +34,8 @@ async def call_generate(prompt: str, size: str) -> bytes:
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
     }
-    # Модели генерации картинок через OpenRouter вызываются через специальный payload
     payload = {
-        "model": "openai/dall-e-3",  # Либо gpt-image-2 / другой поддерживаемый провайдер
+        "model": "openai/dall-e-3",  
         "prompt": prompt,
         "size": size,
         "n": 1,
@@ -59,9 +58,8 @@ async def call_edit(image_bytes: bytes, prompt: str, size: str) -> bytes:
     compressed = compress_image(image_bytes)
     b64_image = base64.b64encode(compressed).decode("utf-8")
 
-    # Использование структуры чата с modalities для редактирования в OpenRouter
     payload = {
-        "model": "google/gemini-2.5-pro",  # Модель, поддерживающая мультимодальное изменение
+        "model": "google/gemini-2.5-pro",  
         "messages": [
             {
                 "role": "user",
@@ -79,7 +77,6 @@ async def call_edit(image_bytes: bytes, prompt: str, size: str) -> bytes:
                 err_text = await resp.text()
                 raise Exception(f"OpenRouter Edit Error ({resp.status}): {err_text}")
             result = await resp.json()
-            # Провайдеры возвращают либо текст, либо ссылку/b64 в зависимости от модели
             try:
                 content = result["choices"][0]["message"]["content"]
                 if "base64," in content:
@@ -89,97 +86,102 @@ async def call_edit(image_bytes: bytes, prompt: str, size: str) -> bytes:
                 raise Exception("Не удалось распарсить отредактированное изображение от ИИ.")
 
 
-@router.callback_query(F.data == "image_generate")
-async def cb_img_gen(callback: CallbackQuery, state: FSMContext):
+# ── Генерация ──────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "mode_image_gen")
+async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_generate)
     await callback.message.edit_text(
-        "🎨 <b>Режим генерации изображений</b>\n\n"
-        "Опиши текстом то, что ты хочешь увидеть на картинке (желательно на английском для лучшего результата):",
-        parse_mode="HTML",
-        reply_markup=cancel_keyboard()
+        "🎨 <b>Генерация изображения</b>\n\nВыбери размер:",
+        reply_markup=image_size_keyboard("gen"),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("size_gen_"))
+async def size_gen_selected(callback: CallbackQuery, state: FSMContext):
+    size = callback.data.replace("size_gen_", "")
+    await state.update_data(image_size=size)
+    await callback.message.edit_text(
+        f"✅ Размер: <b>{size}</b>\n\n"
+        f"📝 <b>Опиши что хочешь создать:</b>\n\n"
+        f"<i>Пример: Закат над морем в стиле аниме</i>",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML"
     )
     await callback.answer()
 
 
 @router.message(BotStates.image_generate, F.text)
-async def img_gen_text(message: Message, state: FSMContext):
-    await state.update_data(gen_prompt=message.text)
-    await message.answer(
-        f"📝 Промпт: <i>«{message.text}»</i>\n\nВыбери желаемое разрешение картинки:",
-        parse_mode="HTML",
-        reply_markup=image_size_keyboard(mode="gen")
-    )
-
-
-@router.callback_query(F.data.startswith("size_gen_"))
-async def size_gen_selected(callback: CallbackQuery, state: FSMContext):
+async def do_generate_image(message: Message, state: FSMContext):
     data = await state.get_data()
-    prompt = data.get("gen_prompt")
-    if not prompt:
-        await callback.answer("Ошибка сессии. Введи промпт заново.", show_alert=True)
-        return
-
-    size = callback.data.replace("size_gen_", "")
-    status_msg = await callback.message.edit_text(
-        "🎨 <i>Генерирую картинку... Ориентировочно ~20 секунд.</i>",
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
+    size = data.get("image_size", "1024x1024")
+    await message.bot.send_chat_action(message.chat.id, "upload_photo")
+    status_msg = await message.answer("🎨 <i>Генерирую изображение... ~20 секунд</i>", parse_mode="HTML")
     try:
-        img_bytes = await call_generate(prompt, size)
-        image_file = BufferedInputFile(img_bytes, filename="generated.png")
+        image_bytes = await call_generate(message.text, size)
+        image_file = BufferedInputFile(image_bytes, filename="generated.png")
         await status_msg.delete()
-        await callback.message.answer_photo(
+        await message.answer_photo(
             photo=image_file,
-            caption=f"🎨 <b>Готово!</b>\n📝 {prompt}",
+            caption=f"🎨 <b>Готово!</b>\n📝 {message.text}\n📐 {size}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard()
         )
     except Exception as e:
-        logger.error(f"Generation error: {e}")
+        logger.error(f"Image gen error: {e}")
         await status_msg.edit_text(
-            f"❌ Произошла ошибка при генерации:\n<code>{str(e)[:100]}</code>",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard()
+            f"❌ <b>Ошибка генерации:</b>\n<code>{str(e)[:150]}</code>",
+            parse_mode="HTML", reply_markup=cancel_keyboard()
         )
 
 
-@router.callback_query(F.data == "image_edit")
-async def cb_img_edit(callback: CallbackQuery, state: FSMContext):
+# ── Редактирование ─────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "mode_image_edit")
+async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
     await state.update_data(edit_step="waiting_photo")
     await callback.message.edit_text(
-        "✏️ <b>Режим умного редактирования</b>\n\n"
-        "Отправь мне фотографию, а в <u>описании к ней (caption)</u> напиши, что именно необходимо изменить или добавить.",
-        parse_mode="HTML",
-        reply_markup=cancel_keyboard()
+        "✏️ <b>Редактирование фото</b>\n\n"
+        "📸 Отправь фото <b>с подписью</b> — напиши задание прямо под фото!\n\n"
+        "<i>Пример подписи: Сделай фон белым и добавь снег</i>",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML"
     )
     await callback.answer()
 
 
 @router.message(BotStates.image_edit, F.photo)
-async def img_edit_received(message: Message, state: FSMContext, bot: Bot):
-    if not message.caption:
-        await message.answer("❌ Пожалуйста, отправь фото повторно, но обязательно добавь текстовое описание изменений в подпись к картинке.")
+async def edit_photo_received(message: Message, state: FSMContext):
+    caption = message.caption
+    if not caption:
+        await message.answer(
+            "⚠️ <b>Напиши задание прямо под фото как подпись!</b>\n\n"
+            "<i>Зажми фото → добавь подпись → отправь</i>",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard()
+        )
         return
 
-    status_msg = await message.answer("📥 <i>Загружаю исходное фото...</i>", parse_mode="HTML")
     photo = message.photo[-1]
-    file_info = await bot.get_file(photo.file_id)
-    file_bytes = await bot.download_file(file_info.file_path)
+    file = await message.bot.get_file(photo.file_id)
+    file_bytes = await message.bot.download_file(file.file_path)
+    image_bytes = compress_image(file_bytes.read())
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-    b64_img = base64.b64encode(file_bytes.read()).decode("utf-8")
     await state.update_data(
-        edit_image_b64=b64_img,
-        edit_prompt=message.caption,
+        edit_image_b64=image_b64,
+        edit_prompt=caption,
         edit_step="waiting_size"
     )
-
-    await status_msg.delete()
     await message.answer(
-        "Выбери итоговое разрешение:",
-        reply_markup=image_size_keyboard(mode="edit")
+        f"✅ <b>Фото и задание получены!</b>\n\n"
+        f"📝 Задание: <i>{caption}</i>\n\n"
+        f"Выбери размер результата:",
+        reply_markup=image_size_keyboard("edit"),
+        parse_mode="HTML"
     )
 
 
@@ -216,7 +218,7 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"Image edit error: {e}")
         await status_msg.edit_text(
-            f"❌ Ошибка при редактировании:\n<code>{str(e)[:100]}</code>",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard()
+            f"❌ <b>Ошибка редактирования:</b>\n<code>{str(e)[:150]}</code>",
+            parse_mode="HTML", reply_markup=cancel_keyboard()
         )
+        await state.update_data(edit_step="waiting_photo")
