@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import database as db
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
@@ -61,6 +62,12 @@ async def set_commands(bot: Bot):
 
 
 async def main():
+    # Автоматически одобряем админа при каждом старте
+    admin_id = int(os.getenv("ADMIN_ID", "0"))
+    if admin_id:
+        db.approve_user(admin_id)
+        logger.info(f"Admin {admin_id} approved on startup")
+
     await start_web()
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
