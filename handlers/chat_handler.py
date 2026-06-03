@@ -5,44 +5,50 @@ import aiohttp
 import json
 import io
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, BufferedInputFile
+from aiogram.types import Message, CallbackQuery
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from PIL import Image
 
-from keyboards import cancel_keyboard, image_size_keyboard
+from keyboards import cancel_keyboard, model_select_keyboard, MODELS, VISION_MODELS
 from states import BotStates
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 API_KEY = os.getenv("API_KEY")
-IMAGE_GEN_URL = "https://ai-proxy.izisoft.xyz/v1/image/generation"
-IMAGE_EDIT_URL = "https://ai-proxy.izisoft.xyz/v1/images/edits"
+CHAT_URL = "https://ai-proxy.izisoft.xyz/v1/chat/completions"
+
+SYSTEM_PROMPT = "Ты полезный ИИ-ассистент. Отвечай на русском языке если вопрос на русском. Будь точным и лаконичным."
+MAX_HISTORY = 20
+
+def get_history(data): return data.get("chat_history", [])
+def get_model(data): return data.get("selected_model", "gpt-5.4-mini")
 
 
-def compress_image(image_bytes: bytes) -> bytes:
+def compress_image(image_bytes: bytes) -> str:
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode != "RGB":
         img = img.convert("RGB")
-    img.thumbnail((1024, 1024), Image.LANCZOS)
+    img.thumbnail((512, 512), Image.LANCZOS)
     output = io.BytesIO()
-    img.save(output, format="PNG")
-    return output.getvalue()
+    img.save(output, format="JPEG", quality=60)
+    return base64.b64encode(output.getvalue()).decode("utf-8")
 
 
-async def call_generate(prompt: str, size: str) -> bytes:
+async def call_ai(model_id: str, messages: list) -> str:
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "gpt-image-2",
-        "prompt": prompt,
-        "size": size,
-        "n": 1,
+        "model": model_id,
+        "messages": messages,
+        "max_tokens": 2000,
+        "temperature": 0.7,
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(IMAGE_GEN_URL, json=payload, headers=headers) as resp:
+        async with session.post(CHAT_URL, json=payload, headers=headers) as resp:
             text = await resp.text()
             try:
                 data = json.loads(text)
@@ -50,181 +56,173 @@ async def call_generate(prompt: str, size: str) -> bytes:
                 raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
                 raise Exception(data.get("error", {}).get("message", str(data)))
-            item = data["data"][0]
-            if "url" in item:
-                async with session.get(item["url"]) as img_resp:
-                    return await img_resp.read()
-            elif "b64_json" in item:
-                return base64.b64decode(item["b64_json"])
-            else:
-                raise Exception("Изображение не получено")
+            return data["choices"][0]["message"]["content"]
 
 
-async def call_edit(image_bytes: bytes, prompt: str, size: str) -> bytes:
-    headers = {"Authorization": f"Bearer {API_KEY}"}
-    data = aiohttp.FormData()
-    data.add_field("model", "gpt-image-2")
-    data.add_field("prompt", prompt)
-    data.add_field("size", size)
-    data.add_field("n", "1")
-    data.add_field(
-        "image",
-        image_bytes,
-        filename="image.png",
-        content_type="image/png"
-    )
-    async with aiohttp.ClientSession() as session:
-        async with session.post(IMAGE_EDIT_URL, data=data, headers=headers) as resp:
-            text = await resp.text()
-            try:
-                result = json.loads(text)
-            except Exception:
-                raise Exception(f"Ответ сервера: {text[:300]}")
-            if resp.status != 200:
-                raise Exception(result.get("error", {}).get("message", str(result)))
-            item = result["data"][0]
-            if "url" in item:
-                async with session.get(item["url"]) as img_resp:
-                    return await img_resp.read()
-            elif "b64_json" in item:
-                return base64.b64decode(item["b64_json"])
-            else:
-                raise Exception("Изображение не получено")
-
-
-# ── Генерация ──────────────────────────────────────────────────────────────────
-
-@router.callback_query(F.data == "mode_image_gen")
-async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(BotStates.image_generate)
-    await callback.message.edit_text(
-        "🎨 <b>Генерация изображения</b>\n\nВыбери размер:",
-        reply_markup=image_size_keyboard("gen"),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("size_gen_"))
-async def size_gen_selected(callback: CallbackQuery, state: FSMContext):
-    size = callback.data.replace("size_gen_", "")
-    await state.update_data(image_size=size)
-    await callback.message.edit_text(
-        f"✅ Размер: <b>{size}</b>\n\n"
-        f"📝 <b>Опиши что хочешь создать:</b>\n\n"
-        f"<i>Пример: Закат над морем в стиле аниме</i>",
-        reply_markup=cancel_keyboard(),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-
-@router.message(BotStates.image_generate, F.text)
-async def do_generate_image(message: Message, state: FSMContext):
+@router.callback_query(F.data == "select_model")
+async def cb_select_model(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    size = data.get("image_size", "1024x1024")
-    await message.bot.send_chat_action(message.chat.id, "upload_photo")
-    status_msg = await message.answer("🎨 <i>Генерирую изображение... ~20 секунд</i>", parse_mode="HTML")
-    try:
-        image_bytes = await call_generate(message.text, size)
-        image_file = BufferedInputFile(image_bytes, filename="generated.png")
-        await status_msg.delete()
-        await message.answer_photo(
-            photo=image_file,
-            caption=f"🎨 <b>Готово!</b>\n📝 {message.text}\n📐 {size}",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard()
-        )
-    except Exception as e:
-        logger.error(f"Image gen error: {e}")
-        await status_msg.edit_text(
-            f"❌ <b>Ошибка генерации:</b>\n<code>{str(e)}</code>",
-            parse_mode="HTML", reply_markup=cancel_keyboard()
-        )
-
-
-# ── Редактирование ─────────────────────────────────────────────────────────────
-
-@router.callback_query(F.data == "mode_image_edit")
-async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(BotStates.image_edit)
-    await state.update_data(edit_step="waiting_photo")
+    current = get_model(data)
     await callback.message.edit_text(
-        "✏️ <b>Редактирование фото</b>\n\n"
-        "📸 Отправь фото <b>с подписью</b> — напиши задание прямо под фото!\n\n"
-        "<i>Пример подписи: Сделай фон белым и добавь снег</i>",
-        reply_markup=cancel_keyboard(),
+        "🤖 <b>Выбери модель ИИ:</b>",
+        reply_markup=model_select_keyboard(current),
         parse_mode="HTML"
     )
     await callback.answer()
 
 
-@router.message(BotStates.image_edit, F.photo)
-async def edit_photo_received(message: Message, state: FSMContext):
-    caption = message.caption
-    if not caption:
-        await message.answer(
-            "⚠️ <b>Напиши задание прямо под фото как подпись!</b>\n\n"
-            "<i>Зажми фото → добавь подпись → отправь</i>",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard()
-        )
-        return
-
-    photo = message.photo[-1]
-    file = await message.bot.get_file(photo.file_id)
-    file_bytes = await message.bot.download_file(file.file_path)
-    image_bytes = compress_image(file_bytes.read())
-    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-
-    await state.update_data(
-        edit_image_b64=image_b64,
-        edit_prompt=caption,
-        edit_step="waiting_size"
+@router.callback_query(F.data.startswith("model_"))
+async def cb_model_selected(callback: CallbackQuery, state: FSMContext):
+    model_id = callback.data.replace("model_", "", 1)
+    await state.update_data(selected_model=model_id)
+    model_name = MODELS.get(model_id, model_id)
+    await state.set_state(BotStates.chat_mode)
+    await callback.message.edit_text(
+        f"✅ <b>Модель:</b> {model_name}\n\nПиши сообщения или отправляй фото с подписью!",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML"
     )
+    await callback.answer(f"✅ {model_name}")
+
+
+# ── Вход в чат — отдельно для команды и для кнопки ──────────────────────────
+
+@router.message(Command("chat"))
+async def enter_chat_mode_cmd(message: Message, state: FSMContext):
+    await state.set_state(BotStates.chat_mode)
+    data = await state.get_data()
+    model_name = MODELS.get(get_model(data), get_model(data))
     await message.answer(
-        f"✅ <b>Фото и задание получены!</b>\n\n"
-        f"📝 Задание: <i>{caption}</i>\n\n"
-        f"Выбери размер результата:",
-        reply_markup=image_size_keyboard("edit"),
+        f"💬 <b>Режим чата</b>\n\n"
+        f"🤖 Модель: <b>{model_name}</b>\n\n"
+        f"• Пиши любые вопросы\n"
+        f"• Отправляй фото с подписью — отвечу сразу!\n\n"
+        f"/clear — очистить историю",
+        reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
 
 
-@router.callback_query(F.data.startswith("size_edit_"))
-async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == "mode_chat")
+async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(BotStates.chat_mode)
     data = await state.get_data()
-    if data.get("edit_step") != "waiting_size":
-        await callback.answer("Сначала отправь фото с подписью!", show_alert=True)
-        return
-
-    size = callback.data.replace("size_edit_", "")
-    await state.update_data(image_size=size, edit_step="processing")
-
-    status_msg = await callback.message.edit_text(
-        "✏️ <i>Редактирую фото... ~20 секунд</i>",
+    model_name = MODELS.get(get_model(data), get_model(data))
+    await callback.message.edit_text(
+        f"💬 <b>Режим чата</b>\n\n"
+        f"🤖 Модель: <b>{model_name}</b>\n\n"
+        f"• Пиши любые вопросы\n"
+        f"• Отправляй фото с подписью — отвечу сразу!\n\n"
+        f"/clear — очистить историю",
+        reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
     await callback.answer()
 
-    image_bytes = base64.b64decode(data.get("edit_image_b64"))
-    prompt = data.get("edit_prompt")
 
-    try:
-        result_bytes = await call_edit(image_bytes, prompt, size)
-        image_file = BufferedInputFile(result_bytes, filename="edited.png")
-        await status_msg.delete()
-        await callback.message.answer_photo(
-            photo=image_file,
-            caption=f"✏️ <b>Готово!</b>\n📝 {prompt}",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard()
-        )
-        await state.update_data(edit_step="waiting_photo", edit_image_b64=None, edit_prompt=None)
-    except Exception as e:
-        logger.error(f"Image edit error: {e}")
-        await status_msg.edit_text(
-            f"❌ <b>Ошибка редактирования:</b>\n<code>{str(e)}</code>",
+# ── Очистка истории — отдельно для команды и для кнопки ─────────────────────
+
+@router.message(Command("clear"))
+async def clear_history_cmd(message: Message, state: FSMContext):
+    await state.update_data(chat_history=[])
+    await message.answer(
+        "🗑 <b>История очищена!</b>",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "clear_history")
+async def clear_history_cb(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(chat_history=[])
+    await callback.message.edit_text(
+        "🗑 <b>История очищена!</b>",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer("История очищена!")
+
+
+@router.message(BotStates.chat_mode, F.photo)
+async def handle_photo(message: Message, state: FSMContext):
+    data = await state.get_data()
+    model_id = get_model(data)
+    model_name = MODELS.get(model_id, model_id)
+
+    if model_id not in VISION_MODELS:
+        await message.answer(
+            f"⚠️ Модель <b>{model_name}</b> не поддерживает анализ фото.\n"
+            f"Выбери Claude или GPT-5.5.",
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
-        await state.update_data(edit_step="waiting_photo")
+        return
+
+    caption = message.caption or "Подробно опиши что на этом фото"
+    status_msg = await message.answer("🔍 <i>Анализирую фото...</i>", parse_mode="HTML")
+
+    try:
+        photo = message.photo[-1]
+        file = await message.bot.get_file(photo.file_id)
+        file_bytes = await message.bot.download_file(file.file_path)
+        image_b64 = compress_image(file_bytes.read())
+
+        history = get_history(data)
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                {"type": "text", "text": caption}
+            ]
+        })
+
+        reply = await call_ai(model_id, messages)
+
+        history.append({"role": "user", "content": f"[Фото] {caption}"})
+        history.append({"role": "assistant", "content": reply})
+        if len(history) > MAX_HISTORY:
+            history = history[-MAX_HISTORY:]
+        await state.update_data(chat_history=history)
+
+        await status_msg.edit_text(
+            f"🖼 <b>Анализ фото:</b>\n\n{reply}\n\n<i>🤖 {model_name}</i>",
+            parse_mode="HTML", reply_markup=cancel_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Photo error: {e}")
+        await status_msg.edit_text(
+            f"❌ <b>Ошибка:</b>\n<code>{str(e)}</code>",
+            parse_mode="HTML", reply_markup=cancel_keyboard()
+        )
+
+
+@router.message(BotStates.chat_mode, F.text)
+async def handle_text(message: Message, state: FSMContext):
+    data = await state.get_data()
+    model_id = get_model(data)
+    model_name = MODELS.get(model_id, model_id)
+
+    await message.bot.send_chat_action(message.chat.id, "typing")
+    status_msg = await message.answer("⏳ <i>Думаю...</i>", parse_mode="HTML")
+
+    try:
+        history = get_history(data)
+        history.append({"role": "user", "content": message.text})
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
+        reply = await call_ai(model_id, messages)
+
+        history.append({"role": "assistant", "content": reply})
+        if len(history) > MAX_HISTORY:
+            history = history[-MAX_HISTORY:]
+        await state.update_data(chat_history=history)
+
+        await status_msg.edit_text(
+            f"{reply}\n\n<i>🤖 {model_name}</i>",
+            parse_mode="HTML", reply_markup=cancel_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        await status_msg.edit_text(
+            f"❌ <b>Ошибка:</b>\n<code>{str(e)}</code>",
+            parse_mode="HTML", reply_markup=cancel_keyboard()
+        )
