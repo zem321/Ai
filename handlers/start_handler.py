@@ -17,12 +17,13 @@ WELCOME_TEXT = """
 👋 <b>Привет! Я твой ИИ-ассистент</b>
 
 Я умею:
-• 💬 Свободно общаться на базе топ-моделей (GPT-5.5, Claude 4.8)
-• 🖼 Анализировать фото по твоему запросу (Vision)
-• 🎨 Генерировать изображения с параметром modalities
+• 💬 Отвечать на вопросы (с памятью диалога)
+• 🖼 Анализировать фото по твоему запросу
+• 🎨 Генерировать изображения
 • ✏️ Редактировать фото по описанию
+• 🤖 Работать с разными моделями ИИ
 
-Выбери режим на панели ниже 👇
+Выбери режим 👇
 """
 
 
@@ -73,14 +74,11 @@ async def cb_main_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# ── Добавленные обработчики управления OpenRouter моделями ──────────────────────
-
 @router.callback_query(F.data == "select_model")
-async def cb_select_model(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    current_model = data.get("current_model", "openai/gpt-5.4")
+async def cb_select_model(callback: CallbackQuery):
+    current_model = db.get_user_model(callback.from_user.id)
     await callback.message.edit_text(
-        "🤖 <b>Выберите активную модель OpenRouter:</b>",
+        "🤖 <b>Выберите желаемую модель ИИ:</b>",
         reply_markup=model_select_keyboard(current_model),
         parse_mode="HTML"
     )
@@ -88,41 +86,40 @@ async def cb_select_model(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("model_"))
-async def cb_model_picked(callback: CallbackQuery, state: FSMContext):
+async def cb_model_selected(callback: CallbackQuery):
     model_id = callback.data.replace("model_", "")
-    await state.update_data(current_model=model_id)
-    friendly_name = MODELS.get(model_id, model_id)
+    db.set_user_model(callback.from_user.id, model_id)
+    model_name = MODELS.get(model_id, model_id)
     await callback.message.edit_text(
-        f"✅ Активная модель изменена на:\n<b>{friendly_name}</b>\n\nОна будет применяться для всех ваших последующих запросов.",
+        f"✅ Успешно установлена модель: <b>{model_name}</b>",
         reply_markup=main_menu_keyboard(),
         parse_mode="HTML"
     )
-    await callback.answer()
+    await callback.answer(f"Выбрана {model_name}")
 
 
 @router.callback_query(F.data == "clear_history")
-async def cb_clear_history(callback: CallbackQuery, state: FSMContext):
-    await state.update_data(history=[])
-    await callback.answer("🗑 Контекст диалога успешно очищен!", show_alert=True)
+async def cb_clear_history(callback: CallbackQuery):
+    db.clear_history(callback.from_user.id)
+    await callback.answer("🗑 История контекста полностью очищена!", show_alert=True)
 
 
 @router.callback_query(F.data == "help")
 async def cb_help(callback: CallbackQuery):
     text = (
-        "<b>❓ Помощь по работе с ботом</b>\n\n"
-        "💬 <b>Чат</b> — ведение диалогов с текстовыми LLM\n"
-        "🎨 <b>Создать картинку</b> — генерация графики по промпту через chat/completions\n"
-        "✏️ <b>Редактировать фото</b> — отправка изображения с инструкцией по изменению\n"
-        "🤖 <b>Модель</b> — выбор активной нейросети верхнего уровня\n\n"
-        "<b>Доступные команды:</b>\n"
-        "/start — Главное меню\n"
-        "/admin — Вход в панель администратора"
+        "<b>❓ Помощь</b>\n\n"
+        "💬 <b>Чат</b> — вопросы + фото с подписью для анализа\n"
+        "🎨 <b>Создать картинку</b> — генерация по описанию\n"
+        "✏️ <b>Редактировать фото</b> — отправь фото с подписью-заданием\n"
+        "🤖 <b>Модель</b> — выбери какой ИИ отвечает\n\n"
+        "<b>Команды:</b>\n"
+        "/start — главное меню\n"
+        "/clear — быстрая очистка контекста\n"
+        "/admin — панель администратора"
     )
     await callback.message.edit_text(text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
     await callback.answer()
 
-
-# ── Панель администратора ──────────────────────────────────────────────────────
 
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
