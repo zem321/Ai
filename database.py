@@ -1,7 +1,16 @@
 import json
 import os
 
-DB_FILE = "users_db.json"
+# Railway: добавь Volume с mount path /data для постоянного хранения
+# Если /data недоступен — используем /tmp (сбросится при рестарте, но админ одобряется автоматически)
+_data_dir = "/data"
+if not os.path.exists(_data_dir):
+    try:
+        os.makedirs(_data_dir, exist_ok=True)
+    except Exception:
+        _data_dir = "/tmp"
+
+DB_FILE = os.path.join(_data_dir, "users_db.json")
 
 
 def _load() -> dict:
@@ -29,35 +38,35 @@ def is_rejected(user_id: int) -> bool:
     return user_id in _load()["rejected"]
 
 def add_pending(user_id: int):
-    db = _load()
-    if user_id not in db["pending"] and user_id not in db["approved"]:
-        db["pending"].append(user_id)
-        _save(db)
+    data = _load()
+    if user_id not in data["pending"] and user_id not in data["approved"]:
+        data["pending"].append(user_id)
+        _save(data)
 
 def approve_user(user_id: int):
-    db = _load()
+    data = _load()
     for key in ["pending", "rejected"]:
-        if user_id in db[key]:
-            db[key].remove(user_id)
-    if user_id not in db["approved"]:
-        db["approved"].append(user_id)
-    _save(db)
+        if user_id in data[key]:
+            data[key].remove(user_id)
+    if user_id not in data["approved"]:
+        data["approved"].append(user_id)
+    _save(data)
 
 def reject_user(user_id: int):
-    db = _load()
-    if user_id in db["pending"]:
-        db["pending"].remove(user_id)
-    if user_id not in db["rejected"]:
-        db["rejected"].append(user_id)
-    _save(db)
+    data = _load()
+    if user_id in data["pending"]:
+        data["pending"].remove(user_id)
+    if user_id not in data["rejected"]:
+        data["rejected"].append(user_id)
+    _save(data)
 
 def revoke_user(user_id: int):
-    db = _load()
-    if user_id in db["approved"]:
-        db["approved"].remove(user_id)
-    if user_id not in db["rejected"]:
-        db["rejected"].append(user_id)
-    _save(db)
+    data = _load()
+    if user_id in data["approved"]:
+        data["approved"].remove(user_id)
+    if user_id not in data["rejected"]:
+        data["rejected"].append(user_id)
+    _save(data)
 
 def get_all_approved() -> list:
     return _load()["approved"]
