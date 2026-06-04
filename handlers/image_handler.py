@@ -9,17 +9,19 @@ from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image
 
-from keyboards import cancel_keyboard, image_size_keyboard
+from keyboards import cancel_keyboard
 from states import BotStates
 
 logger = logging.getLogger(__name__)
 router = Router()
 
-GEMINI_API_KEY = os.getenv("API_KEY")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
-# gemini-2.5-flash-image (Nano Banana) — генерация и редактирование
-IMAGE_MODEL = "gemini-2.5-flash-image"
-IMAGE_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{IMAGE_MODEL}:generateContent"
+# Генерация — Flux.1 (лучшее качество на HF бесплатно)
+GEN_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev"
+
+# Редактирование — SDXL img2img
+EDIT_URL = "https://api-inference.huggingface.co/models/diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
 
 
 def compress_image(image_bytes: bytes) -> bytes:
@@ -33,74 +35,63 @@ def compress_image(image_bytes: bytes) -> bytes:
 
 
 async def call_generate(prompt: str) -> bytes:
-    """Генерация изображения по тексту"""
-    url = f"{IMAGE_URL}?key={GEMINI_API_KEY}"
+    """Генерация через Flux.1-dev"""
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json",
+    }
     payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": prompt}]
-            }
-        ],
-        "generationConfig": {
-            "responseModalities": ["IMAGE", "TEXT"]
+        "inputs": prompt,
+        "parameters": {
+            "num_inference_steps": 30,
+            "guidance_scale": 7.5,
         }
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            text = await resp.text()
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Ответ сервера: {text[:300]}")
+        async with session.post(GEN_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+            if resp.status == 503:
+                # Модель грузится — сообщаем пользователю
+                raise Exception("Модель загружается (~30 сек), попробуй ещё раз через минуту")
             if resp.status != 200:
-                raise Exception(data.get("error", {}).get("message", str(data)))
-            parts = data["candidates"][0]["content"]["parts"]
-            for part in parts:
-                if "inlineData" in part:
-                    return base64.b64decode(part["inlineData"]["data"])
-            raise Exception("Модель не вернула изображение. Попробуй переформулировать запрос.")
+                text = await resp.text()
+                try:
+                    data = json.loads(text)
+                    raise Exception(data.get("error", text[:200]))
+                except json.JSONDecodeError:
+                    raise Exception(text[:200])
+            return await resp.read()
 
 
 async def call_edit(image_bytes: bytes, prompt: str) -> bytes:
-    """Редактирование фото — отправляем фото + текст, получаем изображение"""
-    url = f"{IMAGE_URL}?key={GEMINI_API_KEY}"
+    """Редактирование через FLUX.1-dev img2img"""
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json",
+    }
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
     payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "inlineData": {
-                            "mimeType": "image/png",
-                            "data": image_b64
-                        }
-                    },
-                    {
-                        "text": prompt
-                    }
-                ]
-            }
-        ],
-        "generationConfig": {
-            "responseModalities": ["IMAGE", "TEXT"]
+        "inputs": prompt,
+        "parameters": {
+            "image": image_b64,
+            "strength": 0.75,
+            "num_inference_steps": 30,
+            "guidance_scale": 7.5,
         }
     }
+    # Для img2img используем SDXL
+    edit_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            text = await resp.text()
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Ответ сервера: {text[:300]}")
+        async with session.post(edit_url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+            if resp.status == 503:
+                raise Exception("Модель загружается (~30 сек), попробуй ещё раз через минуту")
             if resp.status != 200:
-                raise Exception(data.get("error", {}).get("message", str(data)))
-            parts = data["candidates"][0]["content"]["parts"]
-            for part in parts:
-                if "inlineData" in part:
-                    return base64.b64decode(part["inlineData"]["data"])
-            raise Exception("Модель не вернула изображение. Попробуй переформулировать запрос.")
+                text = await resp.text()
+                try:
+                    data = json.loads(text)
+                    raise Exception(data.get("error", text[:200]))
+                except json.JSONDecodeError:
+                    raise Exception(text[:200])
+            return await resp.read()
 
 
 # ── Генерация ──────────────────────────────────────────────────────────────────
@@ -121,7 +112,7 @@ async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
 @router.message(BotStates.image_generate, F.text)
 async def do_generate_image(message: Message, state: FSMContext):
     await message.bot.send_chat_action(message.chat.id, "upload_photo")
-    status_msg = await message.answer("🎨 <i>Генерирую изображение... ~20 секунд</i>", parse_mode="HTML")
+    status_msg = await message.answer("🎨 <i>Генерирую изображение... ~30 секунд</i>", parse_mode="HTML")
     try:
         image_bytes = await call_generate(message.text)
         image_file = BufferedInputFile(image_bytes, filename="generated.png")
@@ -149,7 +140,7 @@ async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "✏️ <b>Редактирование фото</b>\n\n"
         "📸 Отправь фото <b>с подписью</b> — напиши задание прямо под фото!\n\n"
-        "<i>Пример: Сделай фон белым и добавь снег</i>",
+        "<i>Пример: Сделай в стиле аниме / Измени фон на закат</i>",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
@@ -168,7 +159,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
         )
         return
 
-    status_msg = await message.answer("✏️ <i>Редактирую фото... ~20 секунд</i>", parse_mode="HTML")
+    status_msg = await message.answer("✏️ <i>Редактирую фото... ~30 секунд</i>", parse_mode="HTML")
 
     try:
         photo = message.photo[-1]
