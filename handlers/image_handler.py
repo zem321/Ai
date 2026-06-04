@@ -19,11 +19,15 @@ router = Router()
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 
 GEN_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
+
+# ВНИМАНИЕ:
+# flux.1-kontext-dev через NVIDIA preview endpoint использует example_id,
+# поэтому для пользовательских Telegram-фото он не подходит.
+# Мы оставляем его в списке, но ниже редактирование идет через multipart/bytes.
 EDIT_URLS = {
     "flux.1-kontext-dev": "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-kontext-dev",
     "flux.2-klein-4b": "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b",
 }
-ASSET_URL = "https://api.nvcf.nvidia.com/v2/nvcf/assets"
 
 
 def compress_image(image_bytes: bytes) -> bytes:
@@ -36,58 +40,17 @@ def compress_image(image_bytes: bytes) -> bytes:
     return output.getvalue()
 
 
-async def upload_asset(image_bytes: bytes) -> str:
-    if not NVIDIA_API_KEY:
-        raise RuntimeError("NVIDIA_API_KEY is not set")
-
-    headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    init_body = {
-        "contentType": "image/png",
-        "description": "edit_image",
-    }
-
-    async with aiohttp.ClientSession() as session:
-        async with session.post(ASSET_URL, json=init_body, headers=headers) as resp:
-            text = await resp.text()
-            logger.info(f"Asset init {resp.status} {text[:300]}")
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Asset init JSON {text[:300]}")
-            if resp.status != 200:
-                raise Exception(f"Asset init failed {resp.status} {data}")
-
-            asset_id = data["assetId"]
-            upload_url = data["uploadUrl"]
-
-        upload_headers = {
-            "Content-Type": "image/png",
-            "x-amz-meta-nvcf-asset-description": "edit_image",
-        }
-
-        async with aiohttp.ClientSession() as session2:
-            async with session2.put(upload_url, data=image_bytes, headers=upload_headers) as resp2:
-                body = await resp2.text()
-                logger.info(f"Asset upload {resp2.status} {body[:100]}")
-                if resp2.status not in (200, 204):
-                    raise Exception(f"Asset upload failed {resp2.status} {body}")
-
-    return asset_id
-
-
 def parse_image_response(data: dict) -> bytes:
     artifacts = data.get("artifacts")
     if artifacts:
         return base64.b64decode(artifacts[0]["base64"])
 
-    if "data" in data:
-        return base64.b64decode(data["data"][0].get("b64_json"))
+    if "data" in data and data["data"]:
+        item = data["data"][0]
+        if "b64_json" in item:
+            return base64.b64decode(item["b64_json"])
 
-    raise Exception(f"Не удалось распарсить ответ модели: {str(data)[:200]}")
+    raise Exception(f"Не удалось распарсить ответ модели: {str(data)[:300]}")
 
 
 async def call_generate(prompt: str) -> bytes:
@@ -119,61 +82,67 @@ async def call_generate(prompt: str) -> bytes:
             try:
                 data = json.loads(text)
             except Exception:
-                raise Exception(f"JSON {resp.status} {text[:300]}")
+                raise Exception(f"JSON {resp.status}: {text[:300]}")
 
             if resp.status != 200:
-                raise Exception(data.get("detail") or str(data))
+                raise Exception(data.get("detail") or data.get("message") or str(data))
 
             return parse_image_response(data)
 
 
-async def call_edit(asset_id: str, prompt: str, model_key: str) -> bytes:
+async def call_edit(image_bytes: bytes, prompt: str, model_key: str) -> bytes:
     if not NVIDIA_API_KEY:
         raise RuntimeError("NVIDIA_API_KEY is not set")
 
     url = EDIT_URLS[model_key]
-    img_ref = f"data:image/png;asset_id,{asset_id}"
-
-    if model_key == "flux.1-kontext-dev":
-        payload = {
-            "prompt": prompt,
-            "image": img_ref,
-            "aspect_ratio": "match_input_image",
-            "steps": 30,
-            "cfg_scale": 3.5,
-            "seed": 0,
-        }
-    else:
-        payload = {
-            "prompt": prompt,
-            "image": img_ref,
-            "width": 1024,
-            "height": 1024,
-            "seed": 0,
-            "steps": 4,
-        }
 
     headers = {
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
         "Accept": "application/json",
-        "Content-Type": "application/json",
-        "NVCF-INPUT-ASSET-REFERENCES": asset_id,
-        "NVCF-FUNCTION-ASSET-IDS": asset_id,
     }
+
+    form = aiohttp.FormData()
+    form.add_field("prompt", prompt)
+
+    if model_key == "flux.1-kontext-dev":
+        # Если у тебя именно NVIDIA preview endpoint, он не примет Telegram-фото как asset_id.
+        # Поэтому тут пробуем передать картинку как файл.
+        form.add_field(
+            "image",
+            image_bytes,
+            filename="image.png",
+            content_type="image/png",
+        )
+        form.add_field("aspect_ratio", "match_input_image")
+        form.add_field("steps", "30")
+        form.add_field("cfg_scale", "3.5")
+        form.add_field("seed", "0")
+    else:
+        form.add_field(
+            "image",
+            image_bytes,
+            filename="image.png",
+            content_type="image/png",
+        )
+        form.add_field("width", "1024")
+        form.add_field("height", "1024")
+        form.add_field("seed", "0")
+        form.add_field("steps", "4")
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
             url,
-            json=payload,
+            data=form,
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=120),
         ) as resp:
             text = await resp.text()
             logger.info(f"Edit response {resp.status} {text[:500]}")
+
             try:
                 data = json.loads(text)
             except Exception:
-                raise Exception(f"JSON {resp.status} {text[:300]}")
+                raise Exception(f"JSON {resp.status}: {text[:300]}")
 
             if resp.status != 200:
                 raise Exception(data.get("detail") or data.get("message") or str(data))
@@ -200,6 +169,7 @@ async def do_generate_image(message: Message, state: FSMContext):
     try:
         image_bytes = await call_generate(message.text)
         image_file = BufferedInputFile(image_bytes, filename="generated.png")
+
         await status_msg.delete()
         await message.answer_photo(
             photo=image_file,
@@ -252,7 +222,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    edit_model = data.get("edit_model", "flux.1-kontext-dev")
+    edit_model = data.get("edit_model", "flux.2-klein-4b")
 
     status_msg = await message.answer("⌛ Обрабатываю фото...", parse_mode="HTML")
 
@@ -262,11 +232,10 @@ async def edit_photo_received(message: Message, state: FSMContext):
         file_bytes = await message.bot.download_file(file.file_path)
 
         image_bytes = compress_image(file_bytes.read())
-        asset_id = await upload_asset(image_bytes)
 
         await status_msg.edit_text("🧠 Отправляю запрос модели...", parse_mode="HTML")
 
-        result_bytes = await call_edit(asset_id, caption, edit_model)
+        result_bytes = await call_edit(image_bytes, caption, edit_model)
         image_file = BufferedInputFile(result_bytes, filename="edited.png")
 
         await status_msg.delete()
