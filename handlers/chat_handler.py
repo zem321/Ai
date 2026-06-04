@@ -16,17 +16,19 @@ from states import BotStates
 logger = logging.getLogger(__name__)
 router = Router()
 
-API_KEY = os.getenv("API_KEY")
-CHAT_URL = "https://ai-proxy.izisoft.xyz/v1/chat/completions"
+GEMINI_API_KEY = os.getenv("API_KEY")
+# OpenAI-совместимый endpoint Google AI Studio
+CHAT_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
 SYSTEM_PROMPT = "Ты полезный ИИ-ассистент. Отвечай на русском языке если вопрос на русском. Будь точным и лаконичным."
 MAX_HISTORY = 20
 
 def get_history(data): return data.get("chat_history", [])
-def get_model(data): return data.get("selected_model", "gpt-5.4-mini")
+def get_model(data): return data.get("selected_model", "gemini-3.5-flash")
 
 
 def compress_image(image_bytes: bytes) -> str:
+    """Сжимаем фото до 512px и качество 60% для экономии токенов"""
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode != "RGB":
         img = img.convert("RGB")
@@ -38,7 +40,7 @@ def compress_image(image_bytes: bytes) -> str:
 
 async def call_ai(model_id: str, messages: list) -> str:
     headers = {
-        "Authorization": f"Bearer {API_KEY}",
+        "Authorization": f"Bearer {GEMINI_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -85,8 +87,6 @@ async def cb_model_selected(callback: CallbackQuery, state: FSMContext):
     await callback.answer(f"✅ {model_name}")
 
 
-# ── Вход в чат — отдельно для команды и для кнопки ──────────────────────────
-
 @router.message(Command("chat"))
 async def enter_chat_mode_cmd(message: Message, state: FSMContext):
     await state.set_state(BotStates.chat_mode)
@@ -120,8 +120,6 @@ async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# ── Очистка истории — отдельно для команды и для кнопки ─────────────────────
-
 @router.message(Command("clear"))
 async def clear_history_cmd(message: Message, state: FSMContext):
     await state.update_data(chat_history=[])
@@ -148,14 +146,6 @@ async def handle_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     model_id = get_model(data)
     model_name = MODELS.get(model_id, model_id)
-
-    if model_id not in VISION_MODELS:
-        await message.answer(
-            f"⚠️ Модель <b>{model_name}</b> не поддерживает анализ фото.\n"
-            f"Выбери Claude или GPT-5.5.",
-            parse_mode="HTML", reply_markup=cancel_keyboard()
-        )
-        return
 
     caption = message.caption or "Подробно опиши что на этом фото"
     status_msg = await message.answer("🔍 <i>Анализирую фото...</i>", parse_mode="HTML")
