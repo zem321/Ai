@@ -24,12 +24,9 @@ EDIT_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b
 
 def compress_image(image_bytes: bytes) -> bytes:
     img = Image.open(io.BytesIO(image_bytes))
-
     if img.mode != "RGB":
         img = img.convert("RGB")
-
     img.thumbnail((1024, 1024), Image.LANCZOS)
-
     output = io.BytesIO()
     img.save(output, format="PNG", optimize=True)
     return output.getvalue()
@@ -48,15 +45,15 @@ def parse_image_response( dict) -> bytes:
     raise Exception(f"Не удалось распарсить ответ модели: {str(data)[:500]}")
 
 
-def extract_error_message( dict) -> str:
-    if not isinstance(data, dict):
-        return str(data)
+def extract_error_message(resp_ dict) -> str:
+    if not isinstance(resp_data, dict):
+        return str(resp_data)
 
-    err = data.get("error")
+    err = resp_data.get("error")
     if isinstance(err, dict):
         return err.get("message") or err.get("type") or str(err)
 
-    return data.get("detail") or data.get("message") or str(data)
+    return resp_data.get("detail") or resp_data.get("message") or str(resp_data)
 
 
 async def call_generate(prompt: str) -> bytes:
@@ -88,14 +85,14 @@ async def call_generate(prompt: str) -> bytes:
             logger.info("Generate response %s %s", resp.status, text[:800])
 
             try:
-                data = json.loads(text)
+                resp_data = json.loads(text)
             except Exception:
                 raise Exception(f"JSON {resp.status}: {text[:300]}")
 
             if resp.status != 200:
-                raise Exception(extract_error_message(data))
+                raise Exception(extract_error_message(resp_data))
 
-            return parse_image_response(data)
+            return parse_image_response(resp_data)
 
 
 async def call_edit(image_bytes: bytes, prompt: str) -> bytes:
@@ -130,14 +127,14 @@ async def call_edit(image_bytes: bytes, prompt: str) -> bytes:
             logger.info("Edit response %s %s", resp.status, text[:1000])
 
             try:
-                data = json.loads(text)
+                resp_data = json.loads(text)
             except Exception:
                 raise Exception(f"JSON {resp.status}: {text[:300]}")
 
             if resp.status != 200:
-                raise Exception(extract_error_message(data))
+                raise Exception(extract_error_message(resp_data))
 
-            return parse_image_response(data)
+            return parse_image_response(resp_data)
 
 
 @router.callback_query(F.data == "mode_image_gen")
@@ -169,7 +166,6 @@ async def do_generate_image(message: Message, state: FSMContext):
         )
     except Exception as e:
         logger.exception("Image generation error")
-
         await status_msg.edit_text(
             f"❌ Ошибка генерации:\n<code>{str(e)}</code>",
             parse_mode="HTML",
@@ -181,12 +177,9 @@ async def do_generate_image(message: Message, state: FSMContext):
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
     await state.update_data(edit_model="flux.2-klein-4b")
-
     await callback.message.edit_text(
         "✏️ Режим редактирования изображений.\n\n"
-        "Пришли фото с подписью, что нужно изменить.\n\n"
-        "Например:\n"
-        "<code>сделай фон ночным городом</code>",
+        "Пришли фото с подписью, что нужно изменить.",
         parse_mode="HTML",
         reply_markup=cancel_keyboard(),
     )
@@ -205,7 +198,6 @@ async def edit_model_selected(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.update_data(edit_model=model_key)
-
     await callback.message.edit_text(
         "📷 Пришли фото с подписью, что нужно изменить.",
         parse_mode="HTML",
@@ -221,7 +213,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
     if not caption:
         await message.answer(
             "❗ Нужно отправить фото с подписью.\n\n"
-            "Пример: <code>сделай волосы синими</code>",
+            "Пример: <code>сделай фон ночным городом</code>",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
@@ -255,7 +247,6 @@ async def edit_photo_received(message: Message, state: FSMContext):
         )
     except Exception as e:
         logger.exception("Image edit error")
-
         await status_msg.edit_text(
             f"❌ Ошибка редактирования:\n<code>{str(e)}</code>",
             parse_mode="HTML",
