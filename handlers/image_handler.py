@@ -45,7 +45,7 @@ async def upload_asset(image_bytes: bytes) -> str:
         # Шаг 1 — запрашиваем presigned upload URL
         async with session.post(
             ASSET_URL,
-            json={"content_type": "image/png", "description": "edit_image"},
+            json={"contentType": "image/png", "description": "edit_image"},
             headers=headers
         ) as resp:
             text = await resp.text()
