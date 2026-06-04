@@ -10,7 +10,7 @@ from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image
 
-from keyboards import cancel_keyboard, edit_model_keyboard
+from keyboards import cancel_keyboard
 from states import BotStates
 
 logger = logging.getLogger(__name__)
@@ -176,30 +176,9 @@ async def do_generate_image(message: Message, state: FSMContext):
 @router.callback_query(F.data == "mode_image_edit")
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
-    await state.update_data(edit_model="flux.2-klein-4b")
     await callback.message.edit_text(
         "✏️ Режим редактирования изображений.\n\n"
         "Пришли фото с подписью, что нужно изменить.",
-        parse_mode="HTML",
-        reply_markup=cancel_keyboard(),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("editmodel_"))
-async def edit_model_selected(callback: CallbackQuery, state: FSMContext):
-    model_key = callback.data.replace("editmodel_", "", 1)
-
-    if model_key != "flux.2-klein-4b":
-        await callback.answer(
-            "Сейчас для редактирования оставлена только Flux.2 Klein.",
-            show_alert=True,
-        )
-        return
-
-    await state.update_data(edit_model=model_key)
-    await callback.message.edit_text(
-        "📷 Пришли фото с подписью, что нужно изменить.",
         parse_mode="HTML",
         reply_markup=cancel_keyboard(),
     )
@@ -212,8 +191,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
 
     if not caption:
         await message.answer(
-            "❗ Нужно отправить фото с подписью.\n\n"
-            "Пример: <code>сделай фон ночным городом</code>",
+            "❗ Нужно отправить фото с подписью.\n\nПример: <code>сделай фон ночным городом</code>",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
@@ -227,11 +205,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
         downloaded = await message.bot.download_file(tg_file.file_path)
         original_bytes = downloaded.read()
 
-        logger.info("Original image bytes: %s", len(original_bytes))
-
         image_bytes = compress_image(original_bytes)
-
-        logger.info("Compressed image bytes: %s", len(image_bytes))
 
         await status_msg.edit_text("🧠 Отправляю запрос модели...", parse_mode="HTML")
 
