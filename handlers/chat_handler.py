@@ -1,9 +1,9 @@
 import os
 import base64
 import logging
-import aiohttp
 import json
 import io
+import aiohttp
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
@@ -16,48 +16,46 @@ from states import BotStates
 logger = logging.getLogger(__name__)
 router = Router()
 
-GEMINI_API_KEY = os.getenv("API_KEY")
-# OpenAI-совместимый endpoint Google AI Studio
-CHAT_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 SYSTEM_PROMPT = "Ты полезный ИИ-ассистент. Отвечай на русском языке если вопрос на русском. Будь точным и лаконичным."
 MAX_HISTORY = 20
 
 def get_history(data): return data.get("chat_history", [])
-def get_model(data): return data.get("selected_model", "gemini-3.5-flash")
+def get_model(data): return data.get("selected_model", "nvidia/llama-3.3-nemotron-super-49b-v1.5")
 
 
 def compress_image(image_bytes: bytes) -> str:
-    """Сжимаем фото до 512px и качество 60% для экономии токенов"""
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode != "RGB":
         img = img.convert("RGB")
-    img.thumbnail((512, 512), Image.LANCZOS)
+    img.thumbnail((1024, 1024), Image.LANCZOS)
     output = io.BytesIO()
-    img.save(output, format="JPEG", quality=60)
+    img.save(output, format="JPEG", quality=85)
     return base64.b64encode(output.getvalue()).decode("utf-8")
 
 
 async def call_ai(model_id: str, messages: list) -> str:
     headers = {
-        "Authorization": f"Bearer {GEMINI_API_KEY}",
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
         "model": model_id,
         "messages": messages,
-        "max_tokens": 2000,
+        "max_tokens": 2048,
         "temperature": 0.7,
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(CHAT_URL, json=payload, headers=headers) as resp:
+        async with session.post(CHAT_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
             text = await resp.text()
             try:
                 data = json.loads(text)
             except Exception:
                 raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
-                raise Exception(data.get("error", {}).get("message", str(data)))
+                raise Exception(data.get("error", {}).get("message", str(data)[:300]))
             return data["choices"][0]["message"]["content"]
 
 
@@ -123,21 +121,13 @@ async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
 @router.message(Command("clear"))
 async def clear_history_cmd(message: Message, state: FSMContext):
     await state.update_data(chat_history=[])
-    await message.answer(
-        "🗑 <b>История очищена!</b>",
-        reply_markup=cancel_keyboard(),
-        parse_mode="HTML"
-    )
+    await message.answer("🗑 <b>История очищена!</b>", reply_markup=cancel_keyboard(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "clear_history")
 async def clear_history_cb(callback: CallbackQuery, state: FSMContext):
     await state.update_data(chat_history=[])
-    await callback.message.edit_text(
-        "🗑 <b>История очищена!</b>",
-        reply_markup=cancel_keyboard(),
-        parse_mode="HTML"
-    )
+    await callback.message.edit_text("🗑 <b>История очищена!</b>", reply_markup=cancel_keyboard(), parse_mode="HTML")
     await callback.answer("История очищена!")
 
 
@@ -146,6 +136,14 @@ async def handle_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     model_id = get_model(data)
     model_name = MODELS.get(model_id, model_id)
+
+    if model_id not in VISION_MODELS:
+        await message.answer(
+            f"⚠️ Модель <b>{model_name}</b> не поддерживает анализ фото.\n"
+            f"Выбери vision-модель из списка.",
+            parse_mode="HTML", reply_markup=cancel_keyboard()
+        )
+        return
 
     caption = message.caption or "Подробно опиши что на этом фото"
     status_msg = await message.answer("🔍 <i>Анализирую фото...</i>", parse_mode="HTML")
@@ -161,8 +159,8 @@ async def handle_photo(message: Message, state: FSMContext):
         messages.append({
             "role": "user",
             "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
-                {"type": "text", "text": caption}
+                {"type": "text", "text": caption},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
             ]
         })
 
