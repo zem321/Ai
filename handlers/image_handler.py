@@ -22,7 +22,7 @@ EDIT_URLS = {
     "flux.1-kontext-dev": "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-kontext-dev",
     "flux.2-klein-4b": "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b",
 }
-ASSET_URL = "https://ai.api.nvidia.com/v1/assets"
+ASSET_URL = "https://api.nvcf.nvidia.com/v2/nvcf/assets"
 
 
 def compress_image(image_bytes: bytes) -> bytes:
