@@ -1,27 +1,15 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 MODELS = {
-    "anthropic/claude-opus-4-8": "🔮 Claude Opus 4.8",
-    "anthropic/claude-opus-4-7": "🔮 Claude Opus 4.7",
-    "anthropic/claude-opus-4-6": "🔮 Claude Opus 4.6",
-    "anthropic/claude-sonnet-4-6": "✨ Claude Sonnet 4.6",
-    "claude-sonnet-4-5-20250929": "✨ Claude Sonnet 4.5",
-    "claude-haiku-4-5-20251001": "⚡️ Claude Haiku 4.5",
-    "gpt-5.5": "🧠 GPT-5.5",
-    "gpt-5.4-mini": "💨 GPT-5.4 Mini",
-    "codex-auto-review": "🛠 Codex Auto Review",
+    "gemini-3.5-flash": "⚡️ Gemini 3.5 Flash",
+    "gemini-3.1-pro-preview": "🔮 Gemini 3.1 Pro",
+    "gemini-2.5-pro": "🧠 Gemini 2.5 Pro",
+    "gemini-2.5-flash": "✨ Gemini 2.5 Flash",
+    "gemini-2.5-flash-lite": "💨 Gemini 2.5 Flash Lite",
 }
 
-VISION_MODELS = {
-    "anthropic/claude-opus-4-8",
-    "anthropic/claude-opus-4-7",
-    "anthropic/claude-opus-4-6",
-    "anthropic/claude-sonnet-4-6",
-    "claude-sonnet-4-5-20250929",
-    "claude-haiku-4-5-20251001",
-    "gpt-5.5",
-    "gpt-5.4-mini",
-}
+# Все Gemini модели поддерживают анализ фото
+VISION_MODELS = set(MODELS.keys())
 
 
 def main_menu_keyboard() -> InlineKeyboardMarkup:
