@@ -1,15 +1,27 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 MODELS = {
-    "gemini-3.5-flash": "⚡️ Gemini 3.5 Flash",
-    "gemini-3.1-pro-preview": "🔮 Gemini 3.1 Pro",
-    "gemini-2.5-pro": "🧠 Gemini 2.5 Pro",
-    "gemini-2.5-flash": "✨ Gemini 2.5 Flash",
-    "gemini-2.5-flash-lite": "💨 Gemini 2.5 Flash Lite",
+    # Топ текстовые + vision
+    "nvidia/llama-3.3-nemotron-super-49b-v1.5": "🔥 Nemotron Super 49B",
+    "nvidia/llama-3.1-nemotron-ultra-253b-v1": "💎 Nemotron Ultra 253B",
+    "meta/llama-4-maverick-17b-128e-instruct": "🦙 Llama 4 Maverick",
+    "moonshotai/kimi-k2.6": "🌙 Kimi K2.6",
+    "deepseek-ai/deepseek-v4-pro": "🧠 DeepSeek V4 Pro",
+    "mistralai/mistral-large-3-675b-instruct-2512": "🌊 Mistral Large 3",
+    "qwen/qwen3.5-397b-a17b": "⚡️ Qwen 3.5 397B",
+    "mistralai/magistral-small-2506": "✨ Magistral Small",
+    "meta/llama-3.2-90b-vision-instruct": "👁 Llama 3.2 90B Vision",
+    "microsoft/phi-4-multimodal-instruct": "🔬 Phi-4 Multimodal",
 }
 
-# Все Gemini модели поддерживают анализ фото
-VISION_MODELS = set(MODELS.keys())
+# Модели поддерживающие анализ фото
+VISION_MODELS = {
+    "meta/llama-4-maverick-17b-128e-instruct",
+    "meta/llama-3.2-90b-vision-instruct",
+    "microsoft/phi-4-multimodal-instruct",
+    "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+    "qwen/qwen3.5-397b-a17b",
+}
 
 
 def main_menu_keyboard() -> InlineKeyboardMarkup:
