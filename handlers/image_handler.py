@@ -26,7 +26,7 @@ def compress_image(image_bytes: bytes) -> bytes:
     if img.mode != "RGB":
         img = img.convert("RGB")
 
-    # Исправлено на Image.Resampling.LANCZOS для совместимости с Pillow 10+
+    # Исправлено на Image.Resampling.LANCZOS
     img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
 
     output = io.BytesIO()
