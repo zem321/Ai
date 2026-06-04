@@ -17,11 +17,9 @@ router = Router()
 
 GEMINI_API_KEY = os.getenv("API_KEY")
 
-# Imagen 3 — генерация с нуля
-IMAGE_GEN_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict"
-
-# Gemini 2.0 Flash — редактирование фото (нативный API)
-IMAGE_EDIT_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent"
+# gemini-2.5-flash-image (Nano Banana) — генерация и редактирование
+IMAGE_MODEL = "gemini-2.5-flash-image"
+IMAGE_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{IMAGE_MODEL}:generateContent"
 
 
 def compress_image(image_bytes: bytes) -> bytes:
@@ -35,11 +33,18 @@ def compress_image(image_bytes: bytes) -> bytes:
 
 
 async def call_generate(prompt: str) -> bytes:
-    """Генерация через Imagen 3"""
-    url = f"{IMAGE_GEN_URL}?key={GEMINI_API_KEY}"
+    """Генерация изображения по тексту"""
+    url = f"{IMAGE_URL}?key={GEMINI_API_KEY}"
     payload = {
-        "instances": [{"prompt": prompt}],
-        "parameters": {"sampleCount": 1}
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": prompt}]
+            }
+        ],
+        "generationConfig": {
+            "responseModalities": ["IMAGE", "TEXT"]
+        }
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload) as resp:
@@ -50,23 +55,25 @@ async def call_generate(prompt: str) -> bytes:
                 raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
                 raise Exception(data.get("error", {}).get("message", str(data)))
-            b64 = data["predictions"][0]["bytesBase64Encoded"]
-            return base64.b64decode(b64)
+            parts = data["candidates"][0]["content"]["parts"]
+            for part in parts:
+                if "inlineData" in part:
+                    return base64.b64decode(part["inlineData"]["data"])
+            raise Exception("Модель не вернула изображение. Попробуй переформулировать запрос.")
 
 
 async def call_edit(image_bytes: bytes, prompt: str) -> bytes:
-    """Редактирование через Gemini 2.0 Flash Image Generation (нативный API)"""
-    url = f"{IMAGE_EDIT_URL}?key={GEMINI_API_KEY}"
+    """Редактирование фото — отправляем фото + текст, получаем изображение"""
+    url = f"{IMAGE_URL}?key={GEMINI_API_KEY}"
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-
     payload = {
         "contents": [
             {
                 "role": "user",
                 "parts": [
                     {
-                        "inline_data": {
-                            "mime_type": "image/png",
+                        "inlineData": {
+                            "mimeType": "image/png",
                             "data": image_b64
                         }
                     },
@@ -77,10 +84,9 @@ async def call_edit(image_bytes: bytes, prompt: str) -> bytes:
             }
         ],
         "generationConfig": {
-            "responseModalities": ["TEXT", "IMAGE"]
+            "responseModalities": ["IMAGE", "TEXT"]
         }
     }
-
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload) as resp:
             text = await resp.text()
@@ -90,13 +96,10 @@ async def call_edit(image_bytes: bytes, prompt: str) -> bytes:
                 raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
                 raise Exception(data.get("error", {}).get("message", str(data)))
-
-            # Ищем изображение в частях ответа
             parts = data["candidates"][0]["content"]["parts"]
             for part in parts:
                 if "inlineData" in part:
                     return base64.b64decode(part["inlineData"]["data"])
-
             raise Exception("Модель не вернула изображение. Попробуй переформулировать запрос.")
 
 
