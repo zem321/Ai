@@ -64,7 +64,8 @@ async def cb_select_model(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     current = get_model(data)
     await callback.message.edit_text(
-        "🤖 <b>Выбери модель ИИ:</b>",
+        "🤖 <b>Выбери модель ИИ:</b>\n\n"
+        "👁 <i>Vision-модели поддерживают анализ фото</i>",
         reply_markup=model_select_keyboard(current),
         parse_mode="HTML"
     )
@@ -76,9 +77,11 @@ async def cb_model_selected(callback: CallbackQuery, state: FSMContext):
     model_id = callback.data.replace("model_", "", 1)
     await state.update_data(selected_model=model_id)
     model_name = MODELS.get(model_id, model_id)
+    is_vision = model_id in VISION_MODELS
+    vision_note = "\n👁 <i>Поддерживает анализ фото</i>" if is_vision else "\n📝 <i>Только текст</i>"
     await state.set_state(BotStates.chat_mode)
     await callback.message.edit_text(
-        f"✅ <b>Модель:</b> {model_name}\n\nПиши сообщения или отправляй фото с подписью!",
+        f"✅ <b>Модель:</b> {model_name}{vision_note}\n\nПиши сообщения!",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
@@ -89,12 +92,15 @@ async def cb_model_selected(callback: CallbackQuery, state: FSMContext):
 async def enter_chat_mode_cmd(message: Message, state: FSMContext):
     await state.set_state(BotStates.chat_mode)
     data = await state.get_data()
-    model_name = MODELS.get(get_model(data), get_model(data))
+    model_id = get_model(data)
+    model_name = MODELS.get(model_id, model_id)
+    is_vision = model_id in VISION_MODELS
+    vision_note = "• Отправляй фото с подписью — отвечу!\n" if is_vision else "• Для анализа фото выбери Vision-модель\n"
     await message.answer(
         f"💬 <b>Режим чата</b>\n\n"
         f"🤖 Модель: <b>{model_name}</b>\n\n"
         f"• Пиши любые вопросы\n"
-        f"• Отправляй фото с подписью — отвечу сразу!\n\n"
+        f"{vision_note}\n"
         f"/clear — очистить историю",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
@@ -105,12 +111,15 @@ async def enter_chat_mode_cmd(message: Message, state: FSMContext):
 async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.chat_mode)
     data = await state.get_data()
-    model_name = MODELS.get(get_model(data), get_model(data))
+    model_id = get_model(data)
+    model_name = MODELS.get(model_id, model_id)
+    is_vision = model_id in VISION_MODELS
+    vision_note = "• Отправляй фото с подписью — отвечу!\n" if is_vision else "• Для анализа фото выбери Vision-модель\n"
     await callback.message.edit_text(
         f"💬 <b>Режим чата</b>\n\n"
         f"🤖 Модель: <b>{model_name}</b>\n\n"
         f"• Пиши любые вопросы\n"
-        f"• Отправляй фото с подписью — отвечу сразу!\n\n"
+        f"{vision_note}\n"
         f"/clear — очистить историю",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
@@ -139,8 +148,8 @@ async def handle_photo(message: Message, state: FSMContext):
 
     if model_id not in VISION_MODELS:
         await message.answer(
-            f"⚠️ Модель <b>{model_name}</b> не поддерживает анализ фото.\n"
-            f"Выбери vision-модель из списка.",
+            f"⚠️ Модель <b>{model_name}</b> не поддерживает фото.\n\n"
+            f"Нажми 🤖 Сменить модель и выбери одну из <b>Vision</b>-моделей.",
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
         return
