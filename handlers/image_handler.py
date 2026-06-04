@@ -15,9 +15,13 @@ from states import BotStates
 logger = logging.getLogger(__name__)
 router = Router()
 
-API_KEY = os.getenv("API_KEY")
-IMAGE_GEN_URL = "https://ai-proxy.izisoft.xyz/v1/image/generation"
-IMAGE_EDIT_URL = "https://ai-proxy.izisoft.xyz/v1/images/edits"
+GEMINI_API_KEY = os.getenv("API_KEY")
+
+# Imagen 3 — генерация с нуля
+IMAGE_GEN_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict"
+
+# Gemini 2.0 Flash — редактирование фото (нативный API)
+IMAGE_EDIT_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent"
 
 
 def compress_image(image_bytes: bytes) -> bytes:
@@ -30,19 +34,15 @@ def compress_image(image_bytes: bytes) -> bytes:
     return output.getvalue()
 
 
-async def call_generate(prompt: str, size: str) -> bytes:
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-    }
+async def call_generate(prompt: str) -> bytes:
+    """Генерация через Imagen 3"""
+    url = f"{IMAGE_GEN_URL}?key={GEMINI_API_KEY}"
     payload = {
-        "model": "gpt-image-2",
-        "prompt": prompt,
-        "size": size,
-        "n": 1,
+        "instances": [{"prompt": prompt}],
+        "parameters": {"sampleCount": 1}
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(IMAGE_GEN_URL, json=payload, headers=headers) as resp:
+        async with session.post(url, json=payload) as resp:
             text = await resp.text()
             try:
                 data = json.loads(text)
@@ -50,46 +50,54 @@ async def call_generate(prompt: str, size: str) -> bytes:
                 raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
                 raise Exception(data.get("error", {}).get("message", str(data)))
-            item = data["data"][0]
-            if "url" in item:
-                async with session.get(item["url"]) as img_resp:
-                    return await img_resp.read()
-            elif "b64_json" in item:
-                return base64.b64decode(item["b64_json"])
-            else:
-                raise Exception("Изображение не получено")
+            b64 = data["predictions"][0]["bytesBase64Encoded"]
+            return base64.b64decode(b64)
 
 
-async def call_edit(image_bytes: bytes, prompt: str, size: str) -> bytes:
-    headers = {"Authorization": f"Bearer {API_KEY}"}
-    data = aiohttp.FormData()
-    data.add_field("model", "gpt-image-2")
-    data.add_field("prompt", prompt)
-    data.add_field("size", size)
-    data.add_field("n", "1")
-    data.add_field(
-        "image",
-        image_bytes,
-        filename="image.png",
-        content_type="image/png"
-    )
+async def call_edit(image_bytes: bytes, prompt: str) -> bytes:
+    """Редактирование через Gemini 2.0 Flash Image Generation (нативный API)"""
+    url = f"{IMAGE_EDIT_URL}?key={GEMINI_API_KEY}"
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": "image/png",
+                            "data": image_b64
+                        }
+                    },
+                    {
+                        "text": prompt
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"]
+        }
+    }
+
     async with aiohttp.ClientSession() as session:
-        async with session.post(IMAGE_EDIT_URL, data=data, headers=headers) as resp:
+        async with session.post(url, json=payload) as resp:
             text = await resp.text()
             try:
-                result = json.loads(text)
+                data = json.loads(text)
             except Exception:
                 raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
-                raise Exception(result.get("error", {}).get("message", str(result)))
-            item = result["data"][0]
-            if "url" in item:
-                async with session.get(item["url"]) as img_resp:
-                    return await img_resp.read()
-            elif "b64_json" in item:
-                return base64.b64decode(item["b64_json"])
-            else:
-                raise Exception("Изображение не получено")
+                raise Exception(data.get("error", {}).get("message", str(data)))
+
+            # Ищем изображение в частях ответа
+            parts = data["candidates"][0]["content"]["parts"]
+            for part in parts:
+                if "inlineData" in part:
+                    return base64.b64decode(part["inlineData"]["data"])
+
+            raise Exception("Модель не вернула изображение. Попробуй переформулировать запрос.")
 
 
 # ── Генерация ──────────────────────────────────────────────────────────────────
@@ -98,21 +106,9 @@ async def call_edit(image_bytes: bytes, prompt: str, size: str) -> bytes:
 async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_generate)
     await callback.message.edit_text(
-        "🎨 <b>Генерация изображения</b>\n\nВыбери размер:",
-        reply_markup=image_size_keyboard("gen"),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("size_gen_"))
-async def size_gen_selected(callback: CallbackQuery, state: FSMContext):
-    size = callback.data.replace("size_gen_", "")
-    await state.update_data(image_size=size)
-    await callback.message.edit_text(
-        f"✅ Размер: <b>{size}</b>\n\n"
-        f"📝 <b>Опиши что хочешь создать:</b>\n\n"
-        f"<i>Пример: Закат над морем в стиле аниме</i>",
+        "🎨 <b>Генерация изображения</b>\n\n"
+        "📝 Опиши что хочешь создать:\n\n"
+        "<i>Пример: Закат над морем в стиле аниме</i>",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
@@ -121,17 +117,15 @@ async def size_gen_selected(callback: CallbackQuery, state: FSMContext):
 
 @router.message(BotStates.image_generate, F.text)
 async def do_generate_image(message: Message, state: FSMContext):
-    data = await state.get_data()
-    size = data.get("image_size", "1024x1024")
     await message.bot.send_chat_action(message.chat.id, "upload_photo")
     status_msg = await message.answer("🎨 <i>Генерирую изображение... ~20 секунд</i>", parse_mode="HTML")
     try:
-        image_bytes = await call_generate(message.text, size)
+        image_bytes = await call_generate(message.text)
         image_file = BufferedInputFile(image_bytes, filename="generated.png")
         await status_msg.delete()
         await message.answer_photo(
             photo=image_file,
-            caption=f"🎨 <b>Готово!</b>\n📝 {message.text}\n📐 {size}",
+            caption=f"🎨 <b>Готово!</b>\n📝 {message.text}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard()
         )
@@ -152,7 +146,7 @@ async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "✏️ <b>Редактирование фото</b>\n\n"
         "📸 Отправь фото <b>с подписью</b> — напиши задание прямо под фото!\n\n"
-        "<i>Пример подписи: Сделай фон белым и добавь снег</i>",
+        "<i>Пример: Сделай фон белым и добавь снег</i>",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
@@ -171,56 +165,24 @@ async def edit_photo_received(message: Message, state: FSMContext):
         )
         return
 
-    photo = message.photo[-1]
-    file = await message.bot.get_file(photo.file_id)
-    file_bytes = await message.bot.download_file(file.file_path)
-    image_bytes = compress_image(file_bytes.read())
-    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-
-    await state.update_data(
-        edit_image_b64=image_b64,
-        edit_prompt=caption,
-        edit_step="waiting_size"
-    )
-    await message.answer(
-        f"✅ <b>Фото и задание получены!</b>\n\n"
-        f"📝 Задание: <i>{caption}</i>\n\n"
-        f"Выбери размер результата:",
-        reply_markup=image_size_keyboard("edit"),
-        parse_mode="HTML"
-    )
-
-
-@router.callback_query(F.data.startswith("size_edit_"))
-async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    if data.get("edit_step") != "waiting_size":
-        await callback.answer("Сначала отправь фото с подписью!", show_alert=True)
-        return
-
-    size = callback.data.replace("size_edit_", "")
-    await state.update_data(image_size=size, edit_step="processing")
-
-    status_msg = await callback.message.edit_text(
-        "✏️ <i>Редактирую фото... ~20 секунд</i>",
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-    image_bytes = base64.b64decode(data.get("edit_image_b64"))
-    prompt = data.get("edit_prompt")
+    status_msg = await message.answer("✏️ <i>Редактирую фото... ~20 секунд</i>", parse_mode="HTML")
 
     try:
-        result_bytes = await call_edit(image_bytes, prompt, size)
+        photo = message.photo[-1]
+        file = await message.bot.get_file(photo.file_id)
+        file_bytes = await message.bot.download_file(file.file_path)
+        image_bytes = compress_image(file_bytes.read())
+
+        result_bytes = await call_edit(image_bytes, caption)
         image_file = BufferedInputFile(result_bytes, filename="edited.png")
         await status_msg.delete()
-        await callback.message.answer_photo(
+        await message.answer_photo(
             photo=image_file,
-            caption=f"✏️ <b>Готово!</b>\n📝 {prompt}",
+            caption=f"✏️ <b>Готово!</b>\n📝 {caption}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard()
         )
-        await state.update_data(edit_step="waiting_photo", edit_image_b64=None, edit_prompt=None)
+        await state.update_data(edit_step="waiting_photo")
     except Exception as e:
         logger.error(f"Image edit error: {e}")
         await status_msg.edit_text(
