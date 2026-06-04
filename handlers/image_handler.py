@@ -95,9 +95,11 @@ async def call_edit(image_bytes: bytes, prompt: str) -> bytes:
 @router.callback_query(F.data == "mode_image_gen")
 async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_generate)
-    await callback.message.edit_text("🖼 Режим генерации изображений.
-
-Отправь текстовый запрос.", parse_mode="HTML", reply_markup=cancel_keyboard())
+    await callback.message.edit_text(
+        "🖼 Режим генерации изображений.\n\nОтправь текстовый запрос.",
+        parse_mode="HTML",
+        reply_markup=cancel_keyboard(),
+    )
     await callback.answer()
 
 
@@ -109,21 +111,29 @@ async def do_generate_image(message: Message, state: FSMContext):
         image_bytes = await call_generate(message.text)
         image_file = BufferedInputFile(image_bytes, filename="generated.png")
         await status_msg.delete()
-        await message.answer_photo(photo=image_file, caption=f"✅ Готово!
-
-<b>Запрос:</b> {message.text}", parse_mode="HTML", reply_markup=cancel_keyboard())
+        await message.answer_photo(
+            photo=image_file,
+            caption=f"✅ Готово!\n\n<b>Запрос:</b> {message.text}",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard(),
+        )
     except Exception as e:
         logger.exception("Image generation error")
-        await status_msg.edit_text(f"❌ Ошибка генерации:
-<code>{str(e)}</code>", parse_mode="HTML", reply_markup=cancel_keyboard())
+        await status_msg.edit_text(
+            f"❌ Ошибка генерации:\n<code>{str(e)}</code>",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard(),
+        )
 
 
 @router.callback_query(F.data == "mode_image_edit")
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
-    await callback.message.edit_text("✏️ Режим редактирования изображений.
-
-Пришли фото с подписью, что нужно изменить.", parse_mode="HTML", reply_markup=cancel_keyboard())
+    await callback.message.edit_text(
+        "✏️ Режим редактирования изображений.\n\nПришли фото с подписью, что нужно изменить.",
+        parse_mode="HTML",
+        reply_markup=cancel_keyboard(),
+    )
     await callback.answer()
 
 
@@ -131,9 +141,11 @@ async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
 async def edit_photo_received(message: Message, state: FSMContext):
     caption = (message.caption or "").strip()
     if not caption:
-        await message.answer("❗ Нужно отправить фото с подписью.
-
-Пример: <code>сделай фон ночным городом</code>", parse_mode="HTML", reply_markup=cancel_keyboard())
+        await message.answer(
+            "❗ Нужно отправить фото с подписью.\n\nПример: <code>сделай фон ночным городом</code>",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard(),
+        )
         return
     status_msg = await message.answer("⌛ Обрабатываю фото...", parse_mode="HTML")
     try:
@@ -145,10 +157,16 @@ async def edit_photo_received(message: Message, state: FSMContext):
         result_bytes = await call_edit(image_bytes, caption)
         image_file = BufferedInputFile(result_bytes, filename="edited.png")
         await status_msg.delete()
-        await message.answer_photo(photo=image_file, caption=f"✅ Готово!
-
-<b>Запрос:</b> {caption}", parse_mode="HTML", reply_markup=cancel_keyboard())
+        await message.answer_photo(
+            photo=image_file,
+            caption=f"✅ Готово!\n\n<b>Запрос:</b> {caption}",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard(),
+        )
     except Exception as e:
         logger.exception("Image edit error")
-        await status_msg.edit_text(f"❌ Ошибка редактирования:
-<code>{str(e)}</code>", parse_mode="HTML", reply_markup=cancel_keyboard())
+        await status_msg.edit_text(
+            f"❌ Ошибка редактирования:\n<code>{str(e)}</code>",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard(),
+        )
