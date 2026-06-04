@@ -122,7 +122,7 @@ async def call_edit(asset_id: str, prompt: str, model_key: str) -> bytes:
     if model_key == "flux.1-kontext-dev":
         payload = {
             "prompt": prompt,
-            "image": f"data:image/png;asset_id,{asset_id}",
+            "image": f"data:image/png;example_id,{asset_id}",
             "aspect_ratio": "match_input_image",
             "steps": 30,
             "cfg_scale": 3.5,
@@ -131,7 +131,7 @@ async def call_edit(asset_id: str, prompt: str, model_key: str) -> bytes:
     else:
         payload = {
             "prompt": prompt,
-            "image": [f"data:image/png;asset_id,{asset_id}"],
+            "image": [f"data:image/png;example_id,{asset_id}"],
             "width": 1024,
             "height": 1024,
             "seed": 0,
