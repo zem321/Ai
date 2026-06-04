@@ -35,32 +35,27 @@ def compress_image(image_bytes: bytes) -> bytes:
     return output.getvalue()
 
 
-def parse_image_response(data: dict) -> bytes:
-    artifacts = data.get("artifacts", [])
-    if artifacts:
-        return base64.b64decode(artifacts[0]["base64"])
-    if "data" in data:
-        return base64.b64decode(data["data"][0].get("b64_json", ""))
-    raise Exception("Изображение не получено от сервера")
-
-
 async def upload_asset(image_bytes: bytes) -> str:
-    """Загружаем фото на NVIDIA и получаем example_id"""
+    """Загружаем фото на NVIDIA и получаем asset_id"""
     headers = {
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
         "Content-Type": "application/json",
     }
-    # Шаг 1 — запрашиваем upload URL
     async with aiohttp.ClientSession() as session:
+        # Шаг 1 — запрашиваем presigned upload URL
         async with session.post(
             ASSET_URL,
             json={"content_type": "image/png", "description": "edit_image"},
             headers=headers
         ) as resp:
             text = await resp.text()
-            data = json.loads(text)
+            logger.info(f"Asset init response [{resp.status}]: {text[:500]}")
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"Asset init не JSON: {text[:300]}")
             if resp.status != 200:
-                raise Exception(f"Asset upload init failed: {data}")
+                raise Exception(f"Asset init failed [{resp.status}]: {data}")
             asset_id = data["assetId"]
             upload_url = data["uploadUrl"]
 
@@ -68,12 +63,26 @@ async def upload_asset(image_bytes: bytes) -> str:
         async with session.put(
             upload_url,
             data=image_bytes,
-            headers={"Content-Type": "image/png", "x-amz-meta-nvcf-asset-description": "edit_image"}
+            headers={
+                "Content-Type": "image/png",
+                "x-amz-meta-nvcf-asset-description": "edit_image"
+            }
         ) as resp:
+            body = await resp.text()
+            logger.info(f"Asset upload response [{resp.status}]: {body[:200]}")
             if resp.status not in (200, 204):
-                raise Exception(f"Asset upload failed: status {resp.status}")
+                raise Exception(f"Asset upload failed [{resp.status}]: {body[:200]}")
 
     return asset_id
+
+
+def parse_image_response(data: dict) -> bytes:
+    artifacts = data.get("artifacts", [])
+    if artifacts:
+        return base64.b64decode(artifacts[0]["base64"])
+    if "data" in data:
+        return base64.b64decode(data["data"][0].get("b64_json", ""))
+    raise Exception(f"Нет изображения в ответе: {str(data)[:200]}")
 
 
 async def call_generate(prompt: str) -> bytes:
@@ -92,57 +101,53 @@ async def call_generate(prompt: str) -> bytes:
     async with aiohttp.ClientSession() as session:
         async with session.post(GEN_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
             text = await resp.text()
-            data = json.loads(text)
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"Ответ не JSON: {text[:300]}")
             if resp.status != 200:
                 raise Exception(data.get("detail", str(data)[:300]))
             return parse_image_response(data)
 
 
-async def call_edit_kontext(asset_id: str, prompt: str) -> bytes:
+async def call_edit(asset_id: str, prompt: str, model_key: str) -> bytes:
+    url = EDIT_URLS[model_key]
     headers = {
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
         "Accept": "application/json",
         "Content-Type": "application/json",
         "NVCF-INPUT-ASSET-REFERENCES": asset_id,
     }
-    payload = {
-        "prompt": prompt,
-        "image": f"data:image/png;asset_id,{asset_id}",
-        "aspect_ratio": "match_input_image",
-        "steps": 30,
-        "cfg_scale": 3.5,
-        "seed": 0,
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(EDIT_URLS["flux.1-kontext-dev"], json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
-            text = await resp.text()
-            data = json.loads(text)
-            if resp.status != 200:
-                raise Exception(data.get("detail", str(data)[:300]))
-            return parse_image_response(data)
 
+    if model_key == "flux.1-kontext-dev":
+        payload = {
+            "prompt": prompt,
+            "image": f"data:image/png;asset_id,{asset_id}",
+            "aspect_ratio": "match_input_image",
+            "steps": 30,
+            "cfg_scale": 3.5,
+            "seed": 0,
+        }
+    else:
+        payload = {
+            "prompt": prompt,
+            "image": [f"data:image/png;asset_id,{asset_id}"],
+            "width": 1024,
+            "height": 1024,
+            "seed": 0,
+            "steps": 4,
+        }
 
-async def call_edit_klein(asset_id: str, prompt: str) -> bytes:
-    headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "NVCF-INPUT-ASSET-REFERENCES": asset_id,
-    }
-    payload = {
-        "prompt": prompt,
-        "image": [f"data:image/png;asset_id,{asset_id}"],
-        "width": 1024,
-        "height": 1024,
-        "seed": 0,
-        "steps": 4,
-    }
     async with aiohttp.ClientSession() as session:
-        async with session.post(EDIT_URLS["flux.2-klein-4b"], json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+        async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
             text = await resp.text()
-            data = json.loads(text)
+            logger.info(f"Edit response [{resp.status}]: {text[:500]}")
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"Ответ не JSON [{resp.status}]: {text[:300]}")
             if resp.status != 200:
-                raise Exception(data.get("detail", str(data)[:300]))
+                raise Exception(data.get("detail", data.get("message", str(data)[:300])))
             return parse_image_response(data)
 
 
@@ -231,14 +236,10 @@ async def edit_photo_received(message: Message, state: FSMContext):
         file_bytes = await message.bot.download_file(file.file_path)
         image_bytes = compress_image(file_bytes.read())
 
-        # Загружаем фото и получаем asset_id
         asset_id = await upload_asset(image_bytes)
         await status_msg.edit_text("✏️ <i>Редактирую фото...</i>", parse_mode="HTML")
 
-        if edit_model == "flux.1-kontext-dev":
-            result_bytes = await call_edit_kontext(asset_id, caption)
-        else:
-            result_bytes = await call_edit_klein(asset_id, caption)
+        result_bytes = await call_edit(asset_id, caption, edit_model)
 
         image_file = BufferedInputFile(result_bytes, filename="edited.png")
         await status_msg.delete()
