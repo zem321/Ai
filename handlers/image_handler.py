@@ -9,14 +9,22 @@ from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image
 
-from keyboards import cancel_keyboard
+from keyboards import cancel_keyboard, edit_model_keyboard
 from states import BotStates
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-NVIDIA_BASE = "https://integrate.api.nvidia.com/v1/chat/completions"
+
+# Генерация
+GEN_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
+
+# Редактирование — два варианта
+EDIT_URLS = {
+    "flux.1-kontext-dev": "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-kontext-dev",
+    "flux.2-klein-4b": "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b",
+}
 
 
 def compress_image(image_bytes: bytes) -> bytes:
@@ -25,60 +33,102 @@ def compress_image(image_bytes: bytes) -> bytes:
         img = img.convert("RGB")
     img.thumbnail((1024, 1024), Image.LANCZOS)
     output = io.BytesIO()
-    img.save(output, format="JPEG", quality=85)
+    img.save(output, format="PNG")
     return output.getvalue()
 
 
-async def call_nvidia_image(model: str, messages: list) -> bytes:
+def parse_image_response(data: dict) -> bytes:
+    """Парсим ответ NVIDIA genai — возвращает artifacts[].base64"""
+    artifacts = data.get("artifacts", [])
+    if artifacts:
+        return base64.b64decode(artifacts[0]["base64"])
+    # Fallback
+    if "data" in data:
+        return base64.b64decode(data["data"][0].get("b64_json", ""))
+    raise Exception("Изображение не получено от сервера")
+
+
+async def call_generate(prompt: str) -> bytes:
     headers = {
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Accept": "application/json",
         "Content-Type": "application/json",
     }
     payload = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": 1024,
+        "prompt": prompt,
+        "width": 1024,
+        "height": 1024,
+        "seed": 0,
+        "steps": 4,
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(NVIDIA_BASE, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+        async with session.post(GEN_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
             text = await resp.text()
             try:
                 data = json.loads(text)
             except Exception:
                 raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
-                raise Exception(data.get("error", {}).get("message", str(data)[:300]))
-
-            content = data["choices"][0]["message"]["content"]
-
-            # Декодируем base64 из ответа
-            if "data:image" in content:
-                b64 = content.split(",", 1)[1]
-                return base64.b64decode(b64)
-            # Если чистый base64
-            try:
-                return base64.b64decode(content)
-            except Exception:
-                raise Exception(f"Модель вернула текст вместо изображения: {content[:200]}")
+                raise Exception(data.get("detail", str(data)[:300]))
+            return parse_image_response(data)
 
 
-async def call_generate(prompt: str) -> bytes:
-    messages = [{"role": "user", "content": prompt}]
-    return await call_nvidia_image("qwen/qwen-image", messages)
-
-
-async def call_edit(image_bytes: bytes, prompt: str) -> bytes:
+async def call_edit_kontext(image_bytes: bytes, prompt: str) -> bytes:
+    """Flux.1 Kontext — точное редактирование по инструкции"""
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
-            ]
-        }
-    ]
-    return await call_nvidia_image("qwen/qwen-image-edit", messages)
+    payload = {
+        "prompt": prompt,
+        "image": f"data:image/png;base64,{image_b64}",
+        "aspect_ratio": "match_input_image",
+        "steps": 30,
+        "cfg_scale": 3.5,
+        "seed": 0,
+    }
+    url = EDIT_URLS["flux.1-kontext-dev"]
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+            text = await resp.text()
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"Ответ сервера: {text[:300]}")
+            if resp.status != 200:
+                raise Exception(data.get("detail", str(data)[:300]))
+            return parse_image_response(data)
+
+
+async def call_edit_klein(image_bytes: bytes, prompt: str) -> bytes:
+    """Flux.2 Klein — быстрое редактирование"""
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    payload = {
+        "prompt": prompt,
+        "image": [f"data:image/png;base64,{image_b64}"],
+        "width": 1024,
+        "height": 1024,
+        "seed": 0,
+        "steps": 4,
+    }
+    url = EDIT_URLS["flux.2-klein-4b"]
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+            text = await resp.text()
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"Ответ сервера: {text[:300]}")
+            if resp.status != 200:
+                raise Exception(data.get("detail", str(data)[:300]))
+            return parse_image_response(data)
 
 
 # ── Генерация ──────────────────────────────────────────────────────────────────
@@ -102,7 +152,7 @@ async def do_generate_image(message: Message, state: FSMContext):
     status_msg = await message.answer("🎨 <i>Генерирую изображение...</i>", parse_mode="HTML")
     try:
         image_bytes = await call_generate(message.text)
-        image_file = BufferedInputFile(image_bytes, filename="generated.jpg")
+        image_file = BufferedInputFile(image_bytes, filename="generated.png")
         await status_msg.delete()
         await message.answer_photo(
             photo=image_file,
@@ -123,11 +173,23 @@ async def do_generate_image(message: Message, state: FSMContext):
 @router.callback_query(F.data == "mode_image_edit")
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
-    await state.update_data(edit_step="waiting_photo")
+    await state.update_data(edit_step="choose_model")
     await callback.message.edit_text(
         "✏️ <b>Редактирование фото</b>\n\n"
+        "Выбери модель редактирования:",
+        reply_markup=edit_model_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("editmodel_"))
+async def edit_model_selected(callback: CallbackQuery, state: FSMContext):
+    model_key = callback.data.replace("editmodel_", "")
+    await state.update_data(edit_model=model_key, edit_step="waiting_photo")
+    await callback.message.edit_text(
         "📸 Отправь фото <b>с подписью</b> — напиши задание прямо под фото!\n\n"
-        "<i>Пример: Замени фон на сад / Сделай ночным</i>",
+        "<i>Пример: Замени фон на сад / Измени цвет машины на красный</i>",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
@@ -146,6 +208,9 @@ async def edit_photo_received(message: Message, state: FSMContext):
         )
         return
 
+    data = await state.get_data()
+    edit_model = data.get("edit_model", "flux.1-kontext-dev")
+
     status_msg = await message.answer("✏️ <i>Редактирую фото...</i>", parse_mode="HTML")
 
     try:
@@ -154,8 +219,12 @@ async def edit_photo_received(message: Message, state: FSMContext):
         file_bytes = await message.bot.download_file(file.file_path)
         image_bytes = compress_image(file_bytes.read())
 
-        result_bytes = await call_edit(image_bytes, caption)
-        image_file = BufferedInputFile(result_bytes, filename="edited.jpg")
+        if edit_model == "flux.1-kontext-dev":
+            result_bytes = await call_edit_kontext(image_bytes, caption)
+        else:
+            result_bytes = await call_edit_klein(image_bytes, caption)
+
+        image_file = BufferedInputFile(result_bytes, filename="edited.png")
         await status_msg.delete()
         await message.answer_photo(
             photo=image_file,
