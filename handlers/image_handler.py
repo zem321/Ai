@@ -35,7 +35,7 @@ def compress_image(image_bytes: bytes) -> bytes:
 
 def parse_image_response( dict) -> bytes:
     artifacts = data.get("artifacts")
-    if artifacts and artifacts[0].get("base64"):
+    if artifacts and len(artifacts) > 0 and artifacts[0].get("base64"):
         return base64.b64decode(artifacts[0]["base64"])
 
     if "data" in data and data["data"]:
@@ -183,8 +183,7 @@ async def do_generate_image(message: Message, state: FSMContext):
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
     await callback.message.edit_text(
-        "✏️ Режим редактирования изображений.\n\n"
-        "Пришли фото с подписью, что нужно изменить.",
+        "✏️ Режим редактирования изображений.\n\nПришли фото с подписью, что нужно изменить.",
         parse_mode="HTML",
         reply_markup=cancel_keyboard(),
     )
@@ -197,8 +196,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
 
     if not caption:
         await message.answer(
-            "❗ Нужно отправить фото с подписью.\n\n"
-            "Пример: <code>сделай фон ночным городом</code>",
+            "❗ Нужно отправить фото с подписью.\n\nПример: <code>сделай фон ночным городом</code>",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
