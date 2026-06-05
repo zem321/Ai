@@ -1,26 +1,23 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# Все модели через NVIDIA API
 MODELS = {
-    "anthropic/claude-opus-4-8": "🔮 Claude Opus 4.8",
-    "anthropic/claude-opus-4-7": "🔮 Claude Opus 4.7",
-    "anthropic/claude-opus-4-6": "🔮 Claude Opus 4.6",
-    "anthropic/claude-sonnet-4-6": "✨ Claude Sonnet 4.6",
-    "claude-sonnet-4-5-20250929": "✨ Claude Sonnet 4.5",
-    "claude-haiku-4-5-20251001": "⚡️ Claude Haiku 4.5",
-    "gpt-5.5": "🧠 GPT-5.5",
-    "gpt-5.4-mini": "💨 GPT-5.4 Mini",
-    "codex-auto-review": "🛠 Codex Auto Review",
+    "meta/llama-3.2-11b-vision-instruct": "⚡ Llama 3.2 11B Vision",
+    "meta/llama-3.1-8b-instruct":          "⚡ Llama 3.1 8B",
+    "microsoft/phi-3.5-mini-instruct":      "⚡ Phi-3.5 Mini",
+    "meta/llama-3.1-70b-instruct":          "🟡 Llama 3.1 70B",
+    "nvidia/llama-3.1-nemotron-70b-instruct": "🟡 Nemotron 70B",
+    "meta/llama-3.2-90b-vision-instruct":   "🟡 Llama 3.2 90B Vision",
+    "mistralai/mistral-large-2-instruct":   "🟡 Mistral Large 2",
+    "deepseek-ai/deepseek-r1":              "🔴 DeepSeek R1",
+    "meta/llama-3.1-405b-instruct":         "🔴 Llama 3.1 405B",
+    "nvidia/llama-3.1-nemotron-ultra-253b-v1": "🔴 Nemotron Ultra 253B",
 }
 
+# Модели поддерживающие фото (vision)
 VISION_MODELS = {
-    "anthropic/claude-opus-4-8",
-    "anthropic/claude-opus-4-7",
-    "anthropic/claude-opus-4-6",
-    "anthropic/claude-sonnet-4-6",
-    "claude-sonnet-4-5-20250929",
-    "claude-haiku-4-5-20251001",
-    "gpt-5.5",
-    "gpt-5.4-mini",
+    "meta/llama-3.2-11b-vision-instruct",
+    "meta/llama-3.2-90b-vision-instruct",
 }
 
 
@@ -28,14 +25,13 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="💬 Чат с ИИ", callback_data="mode_chat"),
-            InlineKeyboardButton(text="🎨 Создать картинку", callback_data="mode_image_gen"),
-        ],
-        [
             InlineKeyboardButton(text="✏️ Редактировать фото", callback_data="mode_image_edit"),
-            InlineKeyboardButton(text="🤖 Выбрать модель", callback_data="select_model"),
         ],
         [
+            InlineKeyboardButton(text="🤖 Выбрать модель", callback_data="select_model"),
             InlineKeyboardButton(text="🗑 Очистить историю", callback_data="clear_history"),
+        ],
+        [
             InlineKeyboardButton(text="❓ Помощь", callback_data="help"),
         ]
     ])
@@ -45,6 +41,9 @@ def model_select_keyboard(current: str = "") -> InlineKeyboardMarkup:
     buttons = []
     for model_id, model_name in MODELS.items():
         label = f"✅ {model_name}" if model_id == current else model_name
+        # Пометим vision модели
+        if model_id in VISION_MODELS and model_id != current:
+            label = f"📷 {model_name}"
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -59,7 +58,7 @@ def cancel_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def image_size_keyboard(mode: str = "gen") -> InlineKeyboardMarkup:
+def image_size_keyboard(mode: str = "edit") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="1024×1024", callback_data=f"size_{mode}_1024x1024"),
