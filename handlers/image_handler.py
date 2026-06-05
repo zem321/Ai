@@ -1,7 +1,6 @@
 import os
 import base64
 import logging
-import asyncio
 import aiohttp
 import json
 import io
@@ -9,7 +8,6 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image
-from rembg import remove as rembg_remove
 
 from keyboards import cancel_keyboard, image_size_keyboard
 from states import BotStates
@@ -17,7 +15,15 @@ from states import BotStates
 logger = logging.getLogger(__name__)
 router = Router()
 
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+NVIDIA_VISION_MODEL = "meta/llama-3.2-11b-vision-instruct"
+
 HF_TOKEN = os.getenv("HF_TOKEN")
+
+# img2img модель: берёт оригинальное фото + промт, меняет только то что нужно
+HF_IMG2IMG_URL = "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-refiner-1.0"
+# Fallback: text-to-image если img2img не сработает
 HF_FLUX_URL = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
 
 SIZE_MAP = {
@@ -27,103 +33,167 @@ SIZE_MAP = {
 }
 
 
-def prepare_image(image_bytes: bytes, max_size: int = 1024) -> bytes:
+def prepare_image(image_bytes: bytes, target_size: tuple = (1024, 1024)) -> bytes:
+    """Подгоняем под нужный размер для img2img."""
     img = Image.open(io.BytesIO(image_bytes))
-    if img.mode not in ("RGB", "RGBA"):
+    if img.mode != "RGB":
         img = img.convert("RGB")
-    img.thumbnail((max_size, max_size), Image.LANCZOS)
+    # Для img2img нужны кратные 8 размеры
+    w, h = target_size
+    img = img.resize((w, h), Image.LANCZOS)
     output = io.BytesIO()
     img.save(output, format="PNG")
     return output.getvalue()
 
 
-def _remove_bg_sync(image_bytes: bytes) -> bytes:
-    """Синхронное удаление фона через rembg (локально, без API)."""
-    result = rembg_remove(image_bytes)
-    return result
+async def describe_clothing_short(image_bytes: bytes) -> str:
+    """Краткое описание одежды для усиления промта."""
+    if not NVIDIA_API_KEY:
+        return "clothing item"
 
-
-async def remove_background(image_bytes: bytes) -> bytes:
-    """Запускает rembg в отдельном потоке чтобы не блокировать бота."""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _remove_bg_sync, image_bytes)
-
-
-async def generate_background(prompt: str, size: tuple[int, int]) -> bytes:
-    """Генерирует новый фон через FLUX.1-schnell (HuggingFace)."""
-    if not HF_TOKEN:
-        raise Exception(
-            "HF_TOKEN не задан!\n"
-            "huggingface.co → Settings → Access Tokens → New token (Read)\n"
-            "Добавь HF_TOKEN в переменные Railway."
-        )
-    w, h = size
-    full_prompt = (
-        f"{prompt}, professional product photography background, "
-        f"clean, high quality, no people, no clothing, no objects"
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    prompt = (
+        "Describe this clothing item in 1 short sentence for an image prompt. "
+        "Include: garment type, main color, key details. "
+        "Example: 'black leather jacket with silver zippers'. "
+        "Output ONLY the description, no other text."
     )
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+            {"type": "text", "text": prompt},
+        ],
+    }]
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": NVIDIA_VISION_MODEL,
+        "messages": messages,
+        "max_tokens": 80,
+        "temperature": 0.2,
+        "stream": False,
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                NVIDIA_CHAT_URL, json=payload, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                data = await resp.json()
+                return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        logger.warning(f"NVIDIA description failed: {e}")
+        return "clothing item"
+
+
+async def img2img_hf(image_bytes: bytes, prompt: str, negative_prompt: str) -> bytes:
+    """
+    img2img через SDXL Refiner.
+    strength=0.35 — сохраняет ~65% оригинала, меняет только фон/стиль.
+    """
+    if not HF_TOKEN:
+        raise Exception("HF_TOKEN не задан в переменных Railway.")
+
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json",
         "x-wait-for-model": "true",
     }
     payload = {
-        "inputs": full_prompt,
-        "parameters": {"width": min(w, 1024), "height": min(h, 1024)},
+        "inputs": image_b64,
+        "parameters": {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "strength": 0.38,          # низкое значение = сохраняем форму одежды
+            "num_inference_steps": 30,
+            "guidance_scale": 7.5,
+        },
     }
+
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            HF_FLUX_URL,
+            HF_IMG2IMG_URL,
             json=payload,
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=120),
         ) as resp:
             content_type = resp.headers.get("Content-Type", "")
             if resp.status == 503:
-                raise Exception("FLUX модель прогревается. Попробуй снова через 30 секунд.")
+                raise Exception("Модель прогревается. Попробуй снова через 30 секунд.")
             if resp.status == 401:
-                raise Exception("Неверный HF_TOKEN. Проверь токен на huggingface.co.")
+                raise Exception("Неверный HF_TOKEN.")
             if "application/json" in content_type:
                 data = await resp.json()
-                raise Exception(f"HuggingFace FLUX: {data.get('error', str(data))}")
+                err = data.get("error", str(data))
+                # Если модель не поддерживает img2img — пробуем fallback
+                if "not supported" in err.lower() or "pipeline" in err.lower():
+                    raise ValueError(f"img2img_not_supported: {err}")
+                raise Exception(f"HuggingFace SDXL: {err}")
             if resp.status != 200:
                 text = await resp.text()
-                raise Exception(f"HuggingFace FLUX {resp.status}: {text[:200]}")
+                if "not supported" in text.lower():
+                    raise ValueError(f"img2img_not_supported")
+                raise Exception(f"HuggingFace SDXL {resp.status}: {text[:200]}")
             result = await resp.read()
             if len(result) < 5000:
-                raise Exception("Пустой ответ от FLUX. Попробуй ещё раз.")
+                raise Exception("Пустой ответ. Попробуй ещё раз.")
             return result
 
 
-def composite(fg_bytes: bytes, bg_bytes: bytes, target_size: tuple[int, int]) -> bytes:
-    """Накладывает одежду (прозрачный фон) на новый фон."""
-    fg = Image.open(io.BytesIO(fg_bytes)).convert("RGBA")
-    bg = Image.open(io.BytesIO(bg_bytes)).convert("RGBA").resize(fg.size, Image.LANCZOS)
-    bg.paste(fg, (0, 0), fg)
-    w, h = target_size
-    result = bg.resize((w, h), Image.LANCZOS)
-    output = io.BytesIO()
-    result.convert("RGB").save(output, format="JPEG", quality=92)
-    return output.getvalue()
+async def text2img_flux_fallback(prompt: str, size: tuple) -> bytes:
+    """Fallback на FLUX если SDXL img2img не поддерживается."""
+    if not HF_TOKEN:
+        raise Exception("HF_TOKEN не задан.")
+    w, h = size
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json",
+        "x-wait-for-model": "true",
+    }
+    payload = {
+        "inputs": prompt,
+        "parameters": {"width": min(w, 1024), "height": min(h, 1024)},
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            HF_FLUX_URL, json=payload, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=120),
+        ) as resp:
+            content_type = resp.headers.get("Content-Type", "")
+            if "application/json" in content_type:
+                data = await resp.json()
+                raise Exception(f"FLUX: {data.get('error', str(data))}")
+            if resp.status != 200:
+                text = await resp.text()
+                raise Exception(f"FLUX {resp.status}: {text[:200]}")
+            result = await resp.read()
+            if len(result) < 5000:
+                raise Exception("Пустой ответ от FLUX.")
+            return result
 
 
-# ── Вход в режим редактирования ───────────────────────────────────────────────
+# ── Вход в режим ──────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "mode_image_edit")
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
     await state.update_data(edit_step="waiting_photo")
     await callback.message.edit_text(
-        "🖼 <b>Смена фона (AI)</b>\n\n"
+        "🛍 <b>Смена фона для товара</b>\n\n"
         "📸 Отправь фото одежды <b>с подписью</b> — опиши желаемый фон!\n\n"
         "<i>Примеры:\n"
         "• white studio background\n"
-        "• outdoor nature green park\n"
-        "• minimalist grey gradient\n"
-        "• urban street background\n"
-        "• luxury marble floor\n"
-        "• beach sunset background</i>\n\n"
-        "✂️ AI вырежет одежду и поместит на новый фон",
+        "• minimalist grey gradient background\n"
+        "• luxury dark background with soft lighting\n"
+        "• flat lay on marble surface\n"
+        "• outdoor nature background\n"
+        "• beige aesthetic background</i>\n\n"
+        "✅ Форма и цвет одежды сохранятся",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
@@ -135,7 +205,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
     caption = message.caption
     if not caption:
         await message.answer(
-            "⚠️ <b>Напиши описание нового фона прямо под фото!</b>\n\n"
+            "⚠️ <b>Напиши описание фона прямо под фото!</b>\n\n"
             "<i>Зажми фото → добавь подпись → отправь</i>\n\n"
             "Например: <code>white studio background</code>",
             parse_mode="HTML",
@@ -146,7 +216,14 @@ async def edit_photo_received(message: Message, state: FSMContext):
     photo = message.photo[-1]
     file = await message.bot.get_file(photo.file_id)
     file_bytes = await message.bot.download_file(file.file_path)
-    image_bytes = prepare_image(file_bytes.read())
+
+    img = Image.open(io.BytesIO(file_bytes.read()))
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    img.thumbnail((1024, 1024), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    image_bytes = buf.getvalue()
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
     await state.update_data(
@@ -156,8 +233,8 @@ async def edit_photo_received(message: Message, state: FSMContext):
     )
     await message.answer(
         f"✅ <b>Фото получено!</b>\n\n"
-        f"🎨 Новый фон: <i>{caption}</i>\n\n"
-        f"Выбери размер результата:",
+        f"🎨 Фон: <i>{caption}</i>\n\n"
+        f"Выбери размер:",
         reply_markup=image_size_keyboard("edit"),
         parse_mode="HTML"
     )
@@ -175,7 +252,7 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     await state.update_data(image_size=size_str, edit_step="processing")
 
     status_msg = await callback.message.edit_text(
-        "✂️ <i>Шаг 1/3: Вырезаю фон...\n⏱ ~10-20 секунд</i>",
+        "🔍 <i>Анализирую одежду...</i>",
         parse_mode="HTML"
     )
     await callback.answer()
@@ -184,23 +261,44 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     bg_prompt = data.get("edit_prompt")
 
     try:
-        fg_bytes = await remove_background(image_bytes)
+        # Получаем краткое описание одежды
+        clothing_desc = await describe_clothing_short(image_bytes)
+        logger.info(f"Clothing: {clothing_desc}")
+
+        # Промт: сохранить одежду, поменять фон
+        full_prompt = (
+            f"Professional product photo of {clothing_desc}, "
+            f"{bg_prompt}, "
+            f"high quality, sharp details, commercial photography, fashion catalog"
+        )
+        negative_prompt = (
+            "blurry, low quality, distorted clothing, changed outfit, "
+            "different clothes, deformed fabric, wrong colors"
+        )
 
         await status_msg.edit_text(
-            "🎨 <i>Шаг 2/3: Генерирую новый фон...\n⏱ ~20-40 секунд</i>",
+            "🎨 <i>Меняю фон, сохраняю одежду...\n⏱ ~30-60 секунд</i>",
             parse_mode="HTML"
         )
 
-        bg_bytes = await generate_background(bg_prompt, target_size)
+        # Ресайз фото под нужный размер
+        img_resized = prepare_image(image_bytes, target_size)
 
-        await status_msg.edit_text(
-            "🔧 <i>Шаг 3/3: Склеиваю...</i>",
-            parse_mode="HTML"
-        )
+        try:
+            # Пробуем img2img (сохраняет форму оригинала)
+            result_bytes = await img2img_hf(img_resized, full_prompt, negative_prompt)
+            method = "img2img"
+        except ValueError:
+            # Если img2img не поддерживается — FLUX text2img
+            logger.info("img2img not supported, falling back to FLUX")
+            await status_msg.edit_text(
+                "🎨 <i>Генерирую через FLUX...\n⏱ ~20-40 секунд</i>",
+                parse_mode="HTML"
+            )
+            result_bytes = await text2img_flux_fallback(full_prompt, target_size)
+            method = "FLUX"
 
-        result_bytes = composite(fg_bytes, bg_bytes, target_size)
-
-        image_file = BufferedInputFile(result_bytes, filename="result.jpg")
+        image_file = BufferedInputFile(result_bytes, filename="product.jpg")
         await status_msg.delete()
         await callback.message.answer_photo(
             photo=image_file,
