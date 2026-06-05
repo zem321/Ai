@@ -49,7 +49,7 @@ async def call_edit_hf(image_bytes: bytes, prompt: str, size: str) -> bytes:
     Редактирование фото через HuggingFace InstructPix2Pix.
     Бесплатно: 1000 запросов/день. Токен: huggingface.co → Settings → Access Tokens.
     """
-    if not HF_TOKEN:
+    if not HF_TOKEN: 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
         raise Exception(
             "HF_TOKEN не задан!\n"
             "1. Зайди на huggingface.co\n"
