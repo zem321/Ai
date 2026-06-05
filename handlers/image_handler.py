@@ -40,21 +40,35 @@ def composite_fg_on_bg(fg_bytes: bytes, bg_bytes: bytes, output_size: tuple) -> 
     """
     Накладывает foreground (PNG с прозрачным фоном) на background.
     Одежда и человек сохраняются pixel-perfect.
+    Фон обрезается по центру (не растягивается) → нет сплюснутости.
     """
+    from PIL import ImageOps
+
     fg = Image.open(io.BytesIO(fg_bytes)).convert("RGBA")
-    bg = Image.open(io.BytesIO(bg_bytes)).convert("RGBA")
+    bg = Image.open(io.BytesIO(bg_bytes)).convert("RGB")
 
-    # Подгоняем фон под размер переднего плана
-    bg = bg.resize(fg.size, Image.LANCZOS)
+    out_w, out_h = output_size
 
-    # Склеиваем: человек поверх нового фона
-    result = bg.copy()
-    result.paste(fg, (0, 0), mask=fg)
+    # Фон: обрезаем по центру под нужный размер (crop to fill, без искажений)
+    bg_fit = ImageOps.fit(bg, (out_w, out_h), method=Image.LANCZOS, centering=(0.5, 0.5))
 
-    # Финальный ресайз
-    result = result.resize(output_size, Image.LANCZOS)
+    # Человек: вписываем в output_size сохраняя пропорции, прижимаем к низу
+    fg_w, fg_h = fg.size
+    scale = min(out_w / fg_w, out_h / fg_h)
+    new_w = int(fg_w * scale)
+    new_h = int(fg_h * scale)
+    fg_scaled = fg.resize((new_w, new_h), Image.LANCZOS)
+
+    # Центрируем по горизонтали, прижимаем к низу
+    x = (out_w - new_w) // 2
+    y = out_h - new_h  # ноги внизу, голова вверху
+
+    # Создаём финальную картинку
+    canvas = bg_fit.convert("RGBA")
+    canvas.paste(fg_scaled, (x, y), mask=fg_scaled)
+
     buf = io.BytesIO()
-    result.convert("RGB").save(buf, format="JPEG", quality=93)
+    canvas.convert("RGB").save(buf, format="JPEG", quality=93)
     return buf.getvalue()
 
 
@@ -64,13 +78,35 @@ def _rembg_sync(image_bytes: bytes) -> bytes:
     """
     Запускается в отдельном потоке.
     rembg импортируется здесь — бот не упадёт если библиотека не установлена.
+    u2net_human_seg — специальная модель для людей, лучше распознаёт ноги/руки.
     """
     try:
+        import numpy as np
         from rembg import remove, new_session
-        # u2net — лучшая модель для людей и одежды
-        session = new_session("u2net")
-        result = remove(image_bytes, session=session)
-        return result
+
+        # u2net_human_seg специально обучена на людях — ноги/руки не обрезает
+        session = new_session("u2net_human_seg")
+        result_bytes = remove(image_bytes, session=session)
+
+        # Чистим маску: убираем полупрозрачность
+        # Пиксели с alpha > 10 → полностью непрозрачные (255)
+        # Пиксели с alpha <= 10 → полностью прозрачные (0)
+        img = Image.open(io.BytesIO(result_bytes)).convert("RGBA")
+        r, g, b, a = img.split()
+        a_arr = np.array(a)
+        a_arr = np.where(a_arr > 10, 255, 0).astype(np.uint8)
+
+        # Небольшое сглаживание краёв чтобы не было резких пикселей
+        a_clean = Image.fromarray(a_arr).filter(ImageFilter.GaussianBlur(radius=1))
+        a_arr2 = np.array(a_clean)
+        a_arr2 = np.where(a_arr2 > 128, 255, 0).astype(np.uint8)
+        a_final = Image.fromarray(a_arr2)
+
+        img.putalpha(a_final)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+
     except ImportError:
         raise Exception(
             "rembg не установлен.\n"
