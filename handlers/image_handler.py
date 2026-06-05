@@ -15,13 +15,12 @@ from states import BotStates
 logger = logging.getLogger(__name__)
 router = Router()
 
-# Получи бесплатный токен на huggingface.co → Settings → Access Tokens → New token (Read)
 HF_TOKEN = os.getenv("HF_TOKEN")
-HF_EDIT_URL = "https://api-inference.huggingface.co/models/timbrooks/instruct-pix2pix"
+# Новый роутер HuggingFace (старый api-inference.huggingface.co больше не работает)
+HF_EDIT_URL = "https://router.huggingface.co/hf-inference/models/timbrooks/instruct-pix2pix"
 
 
 def compress_image(image_bytes: bytes, max_size: int = 512) -> bytes:
-    """Уменьшаем до 512px — HuggingFace лучше работает с небольшими фото."""
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode != "RGB":
         img = img.convert("RGB")
@@ -32,7 +31,6 @@ def compress_image(image_bytes: bytes, max_size: int = 512) -> bytes:
 
 
 def resize_image(image_bytes: bytes, size_str: str) -> bytes:
-    """Меняет размер результата под выбранный пользователем формат."""
     try:
         w, h = map(int, size_str.split("x"))
     except Exception:
@@ -45,10 +43,6 @@ def resize_image(image_bytes: bytes, size_str: str) -> bytes:
 
 
 async def call_edit_hf(image_bytes: bytes, prompt: str, size: str) -> bytes:
-    """
-    Редактирование фото через HuggingFace InstructPix2Pix.
-    Бесплатно: 1000 запросов/день. Токен: huggingface.co → Settings → Access Tokens.
-    """
     if not HF_TOKEN:
         raise Exception(
             "HF_TOKEN не задан!\n"
@@ -60,23 +54,21 @@ async def call_edit_hf(image_bytes: bytes, prompt: str, size: str) -> bytes:
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json",
+        # Новый способ ждать прогрева модели — через заголовок, а не в теле запроса
+        "x-wait-for-model": "true",
     }
 
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
+    # Новый формат запроса: inputs — base64 картинка, prompt — в parameters
     payload = {
-        "inputs": {
-            "image": image_b64,
-            "prompt": prompt,
-        },
+        "inputs": image_b64,
         "parameters": {
+            "prompt": prompt,
             "num_inference_steps": 20,
             "image_guidance_scale": 1.5,
             "guidance_scale": 7.5,
         },
-        "options": {
-            "wait_for_model": True,
-        }
     }
 
     async with aiohttp.ClientSession() as session:
@@ -86,17 +78,23 @@ async def call_edit_hf(image_bytes: bytes, prompt: str, size: str) -> bytes:
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=180),
         ) as resp:
-            # HF возвращает сырые байты изображения (не JSON)
             content_type = resp.headers.get("Content-Type", "")
 
             if resp.status == 503:
-                # Модель "спит" — повторяем запрос через wait_for_model
                 raise Exception(
-                    "Модель прогревается (~20 сек). Попробуй отправить фото снова через 20 секунд."
+                    "Модель прогревается (~30 сек). Попробуй снова через полминуты."
                 )
 
+            if resp.status == 401:
+                raise Exception(
+                    "Неверный HF_TOKEN. Проверь токен на huggingface.co → Settings → Access Tokens."
+                )
+
+            if resp.status == 422:
+                text = await resp.text()
+                raise Exception(f"Неверный формат запроса к HuggingFace: {text[:300]}")
+
             if "application/json" in content_type:
-                # Ошибка пришла в JSON
                 data = await resp.json()
                 err = data.get("error", str(data))
                 raise Exception(f"HuggingFace API: {err}")
@@ -108,7 +106,7 @@ async def call_edit_hf(image_bytes: bytes, prompt: str, size: str) -> bytes:
             result_bytes = await resp.read()
 
             if len(result_bytes) < 1000:
-                raise Exception(f"Получен пустой ответ от API. Попробуй ещё раз.")
+                raise Exception("Получен пустой ответ от API. Попробуй ещё раз.")
 
             return resize_image(result_bytes, size)
 
