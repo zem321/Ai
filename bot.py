@@ -9,7 +9,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from handlers.start_handler import router as start_router
 from handlers.chat_handler import router as chat_router
-from handlers.image_handler import router as image_router
+from handlers.image_handler import router as image_router, warmup_rembg
 from middleware import AccessMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -77,6 +77,10 @@ async def main():
     dp.include_router(chat_router)
     dp.include_router(image_router)
     await set_commands(bot)
+
+    # Прогрев rembg в фоне — модель загрузится пока бот принимает сообщения
+    asyncio.create_task(warmup_rembg())
+
     logger.info("Бот запущен!")
     await dp.start_polling(bot, skip_updates=True)
 
