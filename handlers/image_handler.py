@@ -74,33 +74,42 @@ def composite_fg_on_bg(fg_bytes: bytes, bg_bytes: bytes, output_size: tuple) -> 
 
 # ── Удаление фона через rembg (локально, без лимитов) ────────────────────────
 
+# Сессия кэшируется: загружается один раз, потом мгновенно
+_rembg_session_cache = None
+
+
 def _rembg_sync(image_bytes: bytes) -> bytes:
     """
     Запускается в отдельном потоке.
     rembg импортируется здесь — бот не упадёт если библиотека не установлена.
-    u2net_human_seg — специальная модель для людей, лучше распознаёт ноги/руки.
+    birefnet-portrait — самая точная модель для людей, убирает тени и даёт чёткий контур.
+    Сессия кэшируется глобально — модель загружается один раз, все следующие фото быстро.
     """
+    global _rembg_session_cache
     try:
         import numpy as np
         from rembg import remove, new_session
 
-        # u2net_human_seg специально обучена на людях — ноги/руки не обрезает
-        session = new_session("u2net_human_seg")
+        # Загружаем модель только при первом вызове, потом переиспользуем
+        if _rembg_session_cache is None:
+            _rembg_session_cache = new_session("birefnet-portrait")
+
+        session = _rembg_session_cache
         result_bytes = remove(image_bytes, session=session)
 
-        # Чистим маску: убираем полупрозрачность
-        # Пиксели с alpha > 10 → полностью непрозрачные (255)
-        # Пиксели с alpha <= 10 → полностью прозрачные (0)
         img = Image.open(io.BytesIO(result_bytes)).convert("RGBA")
         r, g, b, a = img.split()
         a_arr = np.array(a)
-        a_arr = np.where(a_arr > 10, 255, 0).astype(np.uint8)
 
-        # Небольшое сглаживание краёв чтобы не было резких пикселей
-        a_clean = Image.fromarray(a_arr).filter(ImageFilter.GaussianBlur(radius=1))
-        a_arr2 = np.array(a_clean)
-        a_arr2 = np.where(a_arr2 > 128, 255, 0).astype(np.uint8)
-        a_final = Image.fromarray(a_arr2)
+        # Тени имеют alpha 20-100 — порог 127 их срезает
+        # Сам человек имеет alpha 200-255 — сохраняется
+        a_hard = np.where(a_arr > 127, 255, 0).astype(np.uint8)
+
+        # Лёгкое сглаживание краёв (убирает пиксельные зазубрины)
+        a_smooth = Image.fromarray(a_hard).filter(ImageFilter.GaussianBlur(radius=0.8))
+        a_arr2 = np.array(a_smooth)
+        a_final_arr = np.where(a_arr2 > 100, 255, 0).astype(np.uint8)
+        a_final = Image.fromarray(a_final_arr)
 
         img.putalpha(a_final)
         buf = io.BytesIO()
@@ -121,6 +130,25 @@ async def remove_background(image_bytes: bytes) -> bytes:
     """Асинхронная обёртка — не блокирует бота пока rembg работает."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _rembg_sync, image_bytes)
+
+
+def _warmup_sync():
+    """Загружает модель в память при старте бота (в фоне)."""
+    global _rembg_session_cache
+    try:
+        from rembg import new_session
+        if _rembg_session_cache is None:
+            logger.info("Прогрев rembg: загружаю birefnet-portrait...")
+            _rembg_session_cache = new_session("birefnet-portrait")
+            logger.info("Прогрев rembg: готово, модель в памяти")
+    except Exception as e:
+        logger.warning(f"Прогрев rembg не удался (не критично): {e}")
+
+
+async def warmup_rembg():
+    """Вызывается при старте бота — загружает модель заранее."""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _warmup_sync)
 
 
 # ── Генерация нового фона через FLUX ─────────────────────────────────────────
