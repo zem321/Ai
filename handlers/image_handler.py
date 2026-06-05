@@ -15,11 +15,13 @@ from states import BotStates
 logger = logging.getLogger(__name__)
 router = Router()
 
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-NVIDIA_EDIT_URL = "https://ai.api.nvidia.com/v1/genai/timbrooks/instruct-pix2pix"
+# Получи бесплатный токен на huggingface.co → Settings → Access Tokens → New token (Read)
+HF_TOKEN = os.getenv("HF_TOKEN")
+HF_EDIT_URL = "https://api-inference.huggingface.co/models/timbrooks/instruct-pix2pix"
 
 
-def compress_image(image_bytes: bytes, max_size: int = 1024) -> bytes:
+def compress_image(image_bytes: bytes, max_size: int = 512) -> bytes:
+    """Уменьшаем до 512px — HuggingFace лучше работает с небольшими фото."""
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode != "RGB":
         img = img.convert("RGB")
@@ -30,6 +32,7 @@ def compress_image(image_bytes: bytes, max_size: int = 1024) -> bytes:
 
 
 def resize_image(image_bytes: bytes, size_str: str) -> bytes:
+    """Меняет размер результата под выбранный пользователем формат."""
     try:
         w, h = map(int, size_str.split("x"))
     except Exception:
@@ -41,48 +44,72 @@ def resize_image(image_bytes: bytes, size_str: str) -> bytes:
     return output.getvalue()
 
 
-async def call_edit_nvidia(image_bytes: bytes, prompt: str, size: str) -> bytes:
-    if not NVIDIA_API_KEY:
-        raise Exception("NVIDIA_API_KEY не задан! Добавь переменную окружения.")
+async def call_edit_hf(image_bytes: bytes, prompt: str, size: str) -> bytes:
+    """
+    Редактирование фото через HuggingFace InstructPix2Pix.
+    Бесплатно: 1000 запросов/день. Токен: huggingface.co → Settings → Access Tokens.
+    """
+    if not HF_TOKEN:
+        raise Exception(
+            "HF_TOKEN не задан!\n"
+            "1. Зайди на huggingface.co\n"
+            "2. Settings → Access Tokens → New token (Read)\n"
+            "3. Добавь переменную окружения HF_TOKEN"
+        )
+
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json",
+    }
 
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-    headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
     payload = {
-        "image": image_b64,
-        "prompt": prompt,
-        "image_strength": 0.5,
-        "cfg_scale": 9.0,
-        "seed": 0,
-        "steps": 50,
+        "inputs": {
+            "image": image_b64,
+            "prompt": prompt,
+        },
+        "parameters": {
+            "num_inference_steps": 20,
+            "image_guidance_scale": 1.5,
+            "guidance_scale": 7.5,
+        },
+        "options": {
+            "wait_for_model": True,
+        }
     }
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            NVIDIA_EDIT_URL,
+            HF_EDIT_URL,
             json=payload,
             headers=headers,
-            timeout=aiohttp.ClientTimeout(total=120),
+            timeout=aiohttp.ClientTimeout(total=180),
         ) as resp:
-            text = await resp.text()
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Ответ NVIDIA: {text[:300]}")
+            # HF возвращает сырые байты изображения (не JSON)
+            content_type = resp.headers.get("Content-Type", "")
+
+            if resp.status == 503:
+                # Модель "спит" — повторяем запрос через wait_for_model
+                raise Exception(
+                    "Модель прогревается (~20 сек). Попробуй отправить фото снова через 20 секунд."
+                )
+
+            if "application/json" in content_type:
+                # Ошибка пришла в JSON
+                data = await resp.json()
+                err = data.get("error", str(data))
+                raise Exception(f"HuggingFace API: {err}")
 
             if resp.status != 200:
-                detail = data.get("detail") or data.get("error") or str(data)
-                raise Exception(f"NVIDIA API ошибка {resp.status}: {detail}")
+                text = await resp.text()
+                raise Exception(f"HuggingFace API {resp.status}: {text[:200]}")
 
-            artifacts = data.get("artifacts", [])
-            if not artifacts:
-                raise Exception("NVIDIA не вернула изображение")
+            result_bytes = await resp.read()
 
-            result_bytes = base64.b64decode(artifacts[0]["base64"])
+            if len(result_bytes) < 1000:
+                raise Exception(f"Получен пустой ответ от API. Попробуй ещё раз.")
+
             return resize_image(result_bytes, size)
 
 
@@ -93,13 +120,14 @@ async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
     await state.update_data(edit_step="waiting_photo")
     await callback.message.edit_text(
-        "✏️ <b>Редактирование фото (NVIDIA AI)</b>\n\n"
+        "✏️ <b>Редактирование фото (HuggingFace AI)</b>\n\n"
         "📸 Отправь фото <b>с подписью</b> — напиши задание прямо под фото!\n\n"
-        "<i>Примеры заданий:\n"
+        "<i>Примеры:\n"
         "• Change background to forest\n"
-        "• Make the sky pink\n"
-        "• Add snow\n"
-        "• Change shirt color to red</i>\n\n"
+        "• Make the sky pink at sunset\n"
+        "• Add snow to the scene\n"
+        "• Change the shirt color to red\n"
+        "• Make it look like winter</i>\n\n"
         "💡 <b>Совет:</b> задание лучше писать на английском для точности",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
@@ -150,7 +178,9 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     await state.update_data(image_size=size, edit_step="processing")
 
     status_msg = await callback.message.edit_text(
-        "✏️ <i>Редактирую фото через NVIDIA AI...\n\n⏱ Обычно 30–60 секунд</i>",
+        "✏️ <i>Редактирую фото через HuggingFace AI...\n\n"
+        "⏱ Обычно 20–60 секунд\n"
+        "⚠️ Первый запрос за день может занять чуть дольше (прогрев модели)</i>",
         parse_mode="HTML"
     )
     await callback.answer()
@@ -159,7 +189,7 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     prompt = data.get("edit_prompt")
 
     try:
-        result_bytes = await call_edit_nvidia(image_bytes, prompt, size)
+        result_bytes = await call_edit_hf(image_bytes, prompt, size)
         image_file = BufferedInputFile(result_bytes, filename="edited.png")
         await status_msg.delete()
         await callback.message.answer_photo(
