@@ -4,6 +4,7 @@ import logging
 import aiohttp
 import json
 import io
+import urllib.parse
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
@@ -15,9 +16,18 @@ from states import BotStates
 logger = logging.getLogger(__name__)
 router = Router()
 
-HF_TOKEN = os.getenv("HF_TOKEN")
-# Новый роутер HuggingFace (старый api-inference.huggingface.co больше не работает)
-HF_EDIT_URL = "https://router.huggingface.co/hf-inference/models/timbrooks/instruct-pix2pix"
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+NVIDIA_VISION_MODEL = "meta/llama-3.2-11b-vision-instruct"
+
+# Pollinations — бесплатно, без API ключа
+POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}"
+
+SIZE_MAP = {
+    "1024x1024": (1024, 1024),
+    "1792x1024": (1792, 1024),
+    "1024x1792": (1024, 1792),
+}
 
 
 def compress_image(image_bytes: bytes, max_size: int = 512) -> bytes:
@@ -26,89 +36,91 @@ def compress_image(image_bytes: bytes, max_size: int = 512) -> bytes:
         img = img.convert("RGB")
     img.thumbnail((max_size, max_size), Image.LANCZOS)
     output = io.BytesIO()
-    img.save(output, format="PNG")
+    img.save(output, format="JPEG", quality=85)
     return output.getvalue()
 
 
-def resize_image(image_bytes: bytes, size_str: str) -> bytes:
-    try:
-        w, h = map(int, size_str.split("x"))
-    except Exception:
-        return image_bytes
-    img = Image.open(io.BytesIO(image_bytes))
-    img = img.resize((w, h), Image.LANCZOS)
-    output = io.BytesIO()
-    img.save(output, format="PNG")
-    return output.getvalue()
-
-
-async def call_edit_hf(image_bytes: bytes, prompt: str, size: str) -> bytes:
-    if not HF_TOKEN:
-        raise Exception(
-            "HF_TOKEN не задан!\n"
-            "1. Зайди на huggingface.co\n"
-            "2. Settings → Access Tokens → New token (Read)\n"
-            "3. Добавь переменную окружения HF_TOKEN"
-        )
-
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}",
-        "Content-Type": "application/json",
-        # Новый способ ждать прогрева модели — через заголовок, а не в теле запроса
-        "x-wait-for-model": "true",
-    }
+async def describe_image_nvidia(image_bytes: bytes, edit_prompt: str) -> str:
+    """
+    Шаг 1: NVIDIA Vision описывает фото и составляет prompt для генерации
+    с учётом пожелания пользователя.
+    """
+    if not NVIDIA_API_KEY:
+        raise Exception("NVIDIA_API_KEY не задан.")
 
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-    # Новый формат запроса: inputs — base64 картинка, prompt — в parameters
+    instruction = (
+        f"Describe this photo in great detail for use as an image generation prompt. "
+        f"Include: subjects, their appearance, clothing, poses, background, lighting, colors, style, mood, and atmosphere. "
+        f"Then apply this edit request to the description: '{edit_prompt}'. "
+        f"Output ONLY the final image generation prompt in English, 2-4 sentences, no explanations."
+    )
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
+                },
+                {"type": "text", "text": instruction}
+            ]
+        }
+    ]
+
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Content-Type": "application/json",
+    }
     payload = {
-        "inputs": image_b64,
-        "parameters": {
-            "prompt": prompt,
-            "num_inference_steps": 20,
-            "image_guidance_scale": 1.5,
-            "guidance_scale": 7.5,
-        },
+        "model": NVIDIA_VISION_MODEL,
+        "messages": messages,
+        "max_tokens": 300,
+        "temperature": 0.5,
+        "stream": False,
     }
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            HF_EDIT_URL,
+            NVIDIA_CHAT_URL,
             json=payload,
             headers=headers,
-            timeout=aiohttp.ClientTimeout(total=180),
+            timeout=aiohttp.ClientTimeout(total=60),
         ) as resp:
-            content_type = resp.headers.get("Content-Type", "")
-
-            if resp.status == 503:
-                raise Exception(
-                    "Модель прогревается (~30 сек). Попробуй снова через полминуты."
-                )
-
-            if resp.status == 401:
-                raise Exception(
-                    "Неверный HF_TOKEN. Проверь токен на huggingface.co → Settings → Access Tokens."
-                )
-
-            if resp.status == 422:
-                text = await resp.text()
-                raise Exception(f"Неверный формат запроса к HuggingFace: {text[:300]}")
-
-            if "application/json" in content_type:
-                data = await resp.json()
-                err = data.get("error", str(data))
-                raise Exception(f"HuggingFace API: {err}")
-
+            text = await resp.text()
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"NVIDIA ответ: {text[:200]}")
             if resp.status != 200:
-                text = await resp.text()
-                raise Exception(f"HuggingFace API {resp.status}: {text[:200]}")
+                detail = data.get("detail") or data.get("error", {}).get("message") or str(data)
+                raise Exception(f"NVIDIA API {resp.status}: {detail}")
+            return data["choices"][0]["message"]["content"].strip()
 
-            result_bytes = await resp.read()
 
-            if len(result_bytes) < 1000:
-                raise Exception("Получен пустой ответ от API. Попробуй ещё раз.")
+async def generate_image_pollinations(prompt: str, size: str) -> bytes:
+    """
+    Шаг 2: Pollinations.ai генерирует изображение по prompt.
+    Бесплатно, без API ключа.
+    """
+    w, h = SIZE_MAP.get(size, (1024, 1024))
+    encoded = urllib.parse.quote(prompt)
+    url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width={w}&height={h}&nologo=true&enhance=true"
 
-            return resize_image(result_bytes, size)
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            url,
+            timeout=aiohttp.ClientTimeout(total=120),
+            allow_redirects=True,
+        ) as resp:
+            if resp.status != 200:
+                raise Exception(f"Pollinations API {resp.status}")
+            image_bytes = await resp.read()
+            if len(image_bytes) < 5000:
+                raise Exception("Получен пустой ответ от Pollinations. Попробуй ещё раз.")
+            return image_bytes
 
 
 # ── Вход в режим редактирования ───────────────────────────────────────────────
@@ -118,15 +130,16 @@ async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
     await state.update_data(edit_step="waiting_photo")
     await callback.message.edit_text(
-        "✏️ <b>Редактирование фото (HuggingFace AI)</b>\n\n"
+        "✏️ <b>Редактирование фото (AI)</b>\n\n"
         "📸 Отправь фото <b>с подписью</b> — напиши задание прямо под фото!\n\n"
         "<i>Примеры:\n"
         "• Change background to forest\n"
         "• Make the sky pink at sunset\n"
         "• Add snow to the scene\n"
         "• Change the shirt color to red\n"
-        "• Make it look like winter</i>\n\n"
-        "💡 <b>Совет:</b> задание лучше писать на английском для точности",
+        "• Make it look like winter\n"
+        "• Make it look like an oil painting</i>\n\n"
+        "💡 <b>Как работает:</b> AI анализирует фото → создаёт описание → генерирует изменённую версию",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML"
     )
@@ -176,9 +189,7 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     await state.update_data(image_size=size, edit_step="processing")
 
     status_msg = await callback.message.edit_text(
-        "✏️ <i>Редактирую фото через HuggingFace AI...\n\n"
-        "⏱ Обычно 20–60 секунд\n"
-        "⚠️ Первый запрос за день может занять чуть дольше (прогрев модели)</i>",
+        "🔍 <i>Шаг 1/2: AI анализирует фото...</i>",
         parse_mode="HTML"
     )
     await callback.answer()
@@ -187,16 +198,34 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     prompt = data.get("edit_prompt")
 
     try:
-        result_bytes = await call_edit_hf(image_bytes, prompt, size)
+        # Шаг 1: NVIDIA Vision описывает фото и применяет правки
+        gen_prompt = await describe_image_nvidia(image_bytes, prompt)
+        logger.info(f"Generated prompt: {gen_prompt}")
+
+        await status_msg.edit_text(
+            f"🎨 <i>Шаг 2/2: Генерирую изображение...\n\n"
+            f"⏱ Обычно 15–30 секунд</i>",
+            parse_mode="HTML"
+        )
+
+        # Шаг 2: Pollinations генерирует изображение
+        result_bytes = await generate_image_pollinations(gen_prompt, size)
+
         image_file = BufferedInputFile(result_bytes, filename="edited.png")
         await status_msg.delete()
         await callback.message.answer_photo(
             photo=image_file,
-            caption=f"✏️ <b>Готово!</b>\n📝 {prompt}\n📐 {size}",
+            caption=(
+                f"✏️ <b>Готово!</b>\n"
+                f"📝 Задание: {prompt}\n"
+                f"📐 {size}\n\n"
+                f"<i>🤖 Описание: {gen_prompt[:120]}{'...' if len(gen_prompt) > 120 else ''}</i>"
+            ),
             parse_mode="HTML",
             reply_markup=cancel_keyboard()
         )
         await state.update_data(edit_step="waiting_photo", edit_image_b64=None, edit_prompt=None)
+
     except Exception as e:
         logger.error(f"Image edit error: {e}")
         await status_msg.edit_text(
