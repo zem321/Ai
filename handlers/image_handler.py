@@ -1,6 +1,7 @@
 import os
 import base64
 import logging
+import asyncio
 import aiohttp
 import json
 import io
@@ -8,6 +9,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image
+from rembg import remove as rembg_remove
 
 from keyboards import cancel_keyboard, image_size_keyboard
 from states import BotStates
@@ -16,8 +18,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 HF_TOKEN = os.getenv("HF_TOKEN")
-HF_RMBG_URL   = "https://router.huggingface.co/hf-inference/models/briaai/RMBG-1.4"
-HF_FLUX_URL    = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
+HF_FLUX_URL = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
 
 SIZE_MAP = {
     "1024x1024": (1024, 1024),
@@ -36,52 +37,31 @@ def prepare_image(image_bytes: bytes, max_size: int = 1024) -> bytes:
     return output.getvalue()
 
 
-def _check_hf_token():
+def _remove_bg_sync(image_bytes: bytes) -> bytes:
+    """Синхронное удаление фона через rembg (локально, без API)."""
+    result = rembg_remove(image_bytes)
+    return result
+
+
+async def remove_background(image_bytes: bytes) -> bytes:
+    """Запускает rembg в отдельном потоке чтобы не блокировать бота."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _remove_bg_sync, image_bytes)
+
+
+async def generate_background(prompt: str, size: tuple[int, int]) -> bytes:
+    """Генерирует новый фон через FLUX.1-schnell (HuggingFace)."""
     if not HF_TOKEN:
         raise Exception(
             "HF_TOKEN не задан!\n"
             "huggingface.co → Settings → Access Tokens → New token (Read)\n"
             "Добавь HF_TOKEN в переменные Railway."
         )
-
-
-async def remove_background(image_bytes: bytes) -> bytes:
-    """Вырезает фон через briaai/RMBG-1.4 — возвращает PNG с прозрачным фоном."""
-    _check_hf_token()
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}",
-        "Content-Type": "image/png",
-        "x-wait-for-model": "true",
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
-            HF_RMBG_URL,
-            data=image_bytes,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=120),
-        ) as resp:
-            content_type = resp.headers.get("Content-Type", "")
-            if resp.status == 503:
-                raise Exception("Модель прогревается. Попробуй снова через 30 секунд.")
-            if resp.status == 401:
-                raise Exception("Неверный HF_TOKEN. Проверь токен на huggingface.co.")
-            if "application/json" in content_type:
-                data = await resp.json()
-                raise Exception(f"HuggingFace RMBG: {data.get('error', str(data))}")
-            if resp.status != 200:
-                text = await resp.text()
-                raise Exception(f"HuggingFace RMBG {resp.status}: {text[:200]}")
-            result = await resp.read()
-            if len(result) < 1000:
-                raise Exception("Пустой ответ от RMBG. Попробуй ещё раз.")
-            return result
-
-
-async def generate_background(prompt: str, size: tuple[int, int]) -> bytes:
-    """Генерирует фон через FLUX.1-schnell."""
-    _check_hf_token()
     w, h = size
-    full_prompt = f"Clean studio background, {prompt}, high quality, professional product photography background, no people, no objects"
+    full_prompt = (
+        f"{prompt}, professional product photography background, "
+        f"clean, high quality, no people, no clothing, no objects"
+    )
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json",
@@ -101,6 +81,8 @@ async def generate_background(prompt: str, size: tuple[int, int]) -> bytes:
             content_type = resp.headers.get("Content-Type", "")
             if resp.status == 503:
                 raise Exception("FLUX модель прогревается. Попробуй снова через 30 секунд.")
+            if resp.status == 401:
+                raise Exception("Неверный HF_TOKEN. Проверь токен на huggingface.co.")
             if "application/json" in content_type:
                 data = await resp.json()
                 raise Exception(f"HuggingFace FLUX: {data.get('error', str(data))}")
@@ -114,21 +96,12 @@ async def generate_background(prompt: str, size: tuple[int, int]) -> bytes:
 
 
 def composite(fg_bytes: bytes, bg_bytes: bytes, target_size: tuple[int, int]) -> bytes:
-    """Накладывает одежду (fg с прозрачным фоном) на новый фон (bg)."""
+    """Накладывает одежду (прозрачный фон) на новый фон."""
     fg = Image.open(io.BytesIO(fg_bytes)).convert("RGBA")
-    bg = Image.open(io.BytesIO(bg_bytes)).convert("RGBA")
-
-    # Подгоняем фон под размер foreground
-    bg = bg.resize(fg.size, Image.LANCZOS)
-
-    # Склеиваем
-    result = bg.copy()
-    result.paste(fg, (0, 0), fg)
-
-    # Ресайз до целевого размера
+    bg = Image.open(io.BytesIO(bg_bytes)).convert("RGBA").resize(fg.size, Image.LANCZOS)
+    bg.paste(fg, (0, 0), fg)
     w, h = target_size
-    result = result.resize((w, h), Image.LANCZOS)
-
+    result = bg.resize((w, h), Image.LANCZOS)
     output = io.BytesIO()
     result.convert("RGB").save(output, format="JPEG", quality=92)
     return output.getvalue()
@@ -202,7 +175,7 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     await state.update_data(image_size=size_str, edit_step="processing")
 
     status_msg = await callback.message.edit_text(
-        "✂️ <i>Шаг 1/3: Вырезаю фон...</i>",
+        "✂️ <i>Шаг 1/3: Вырезаю фон...\n⏱ ~10-20 секунд</i>",
         parse_mode="HTML"
     )
     await callback.answer()
@@ -211,15 +184,13 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
     bg_prompt = data.get("edit_prompt")
 
     try:
-        # Шаг 1: Удаляем фон
         fg_bytes = await remove_background(image_bytes)
 
         await status_msg.edit_text(
-            "🎨 <i>Шаг 2/3: Генерирую новый фон...</i>",
+            "🎨 <i>Шаг 2/3: Генерирую новый фон...\n⏱ ~20-40 секунд</i>",
             parse_mode="HTML"
         )
 
-        # Шаг 2: Генерируем новый фон
         bg_bytes = await generate_background(bg_prompt, target_size)
 
         await status_msg.edit_text(
@@ -227,7 +198,6 @@ async def size_edit_selected(callback: CallbackQuery, state: FSMContext):
             parse_mode="HTML"
         )
 
-        # Шаг 3: Накладываем одежду на новый фон
         result_bytes = composite(fg_bytes, bg_bytes, target_size)
 
         image_file = BufferedInputFile(result_bytes, filename="result.jpg")
