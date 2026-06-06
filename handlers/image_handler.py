@@ -92,8 +92,9 @@ def _rembg_sync(image_bytes: bytes) -> bytes:
         from rembg import remove, new_session
 
         # Загружаем модель только при первом вызове, потом переиспользуем
+        # isnet-general-use: лучшее качество из лёгких моделей (~176MB)
         if _rembg_session_cache is None:
-            _rembg_session_cache = new_session("birefnet-portrait")
+            _rembg_session_cache = new_session("isnet-general-use")
 
         session = _rembg_session_cache
         result_bytes = remove(image_bytes, session=session)
@@ -139,8 +140,8 @@ def _warmup_sync():
     try:
         from rembg import new_session
         if _rembg_session_cache is None:
-            logger.info("Прогрев rembg: загружаю birefnet-portrait...")
-            _rembg_session_cache = new_session("birefnet-portrait")
+            logger.info("Прогрев rembg: загружаю isnet-general-use...")
+            _rembg_session_cache = new_session("isnet-general-use")
             logger.info("Прогрев rembg: готово, модель в памяти")
     except Exception as e:
         logger.warning(f"Прогрев rembg не удался (не критично): {e}")
