@@ -17,15 +17,14 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_KEY", "")
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан!")
-if not NVIDIA_API_KEY:
-    logger.warning("⚠️ NVIDIA_API_KEY не задан! Модели NVIDIA не будут работать.")
+
 
 async def health(request):
     return web.Response(text="OK")
+
 
 async def miniapp(request):
     try:
@@ -39,6 +38,7 @@ async def miniapp(request):
     except FileNotFoundError:
         return web.Response(text="OK")
 
+
 async def start_web():
     app = web.Application()
     app.router.add_get("/", miniapp)
@@ -51,6 +51,7 @@ async def start_web():
     await site.start()
     logger.info(f"Web server started on port {port}")
 
+
 async def set_commands(bot: Bot):
     await bot.set_my_commands([
         BotCommand(command="start", description="🚀 Главное меню"),
@@ -59,7 +60,9 @@ async def set_commands(bot: Bot):
         BotCommand(command="admin", description="🛠 Админ панель"),
     ])
 
+
 async def main():
+    # Автоматически одобряем админа при каждом старте
     admin_id = int(os.getenv("ADMIN_ID", "0"))
     if admin_id:
         db.approve_user(admin_id)
@@ -76,6 +79,7 @@ async def main():
     await set_commands(bot)
     logger.info("Бот запущен!")
     await dp.start_polling(bot, skip_updates=True)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
