@@ -17,11 +17,13 @@ router = Router()
 
 API_KEY = os.getenv("API_KEY", "")
 
+# 🎯 Официальные и проверенные эндпоинты NVIDIA API Catalog
 NVIDIA_GEN_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux-1-dev"
-NVIDIA_ANIMATE_URL = "https://ai.api.nvidia.com/v1/genai/nvidia/cosmos-1-0-i2v-7b"
+NVIDIA_ANIMATE_URL = "https://ai.api.nvidia.com/v1/genai/nvidia/cosmos-1.0-i2v-7b"
 
 
 def compress_image(image_bytes: bytes) -> bytes:
+    """Сжимаем изображение перед отправкой в нейросеть"""
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode != "RGB":
         img = img.convert("RGB")
@@ -34,36 +36,37 @@ def compress_image(image_bytes: bytes) -> bytes:
 async def call_generate(prompt: str) -> bytes:
     if not API_KEY:
         raise Exception("Переменная API_KEY пустая! Добавьте её в Railway Variables.")
-    if not API_KEY.startswith("nvapi-"):
-        raise Exception(f"Неверный формат ключа! Он должен начинаться с 'nvapi-'.")
 
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Accept": "application/json",
         "Content-Type": "application/json",
     }
-    payload = {"prompt": prompt, "seed": 0}
+    
+    # Strict payload для NVIDIA Flux
+    payload = {
+        "prompt": prompt,
+        "image_format": "PNG",
+        "height": 1024,
+        "width": 1024
+    }
     
     async with aiohttp.ClientSession() as session:
         async with session.post(NVIDIA_GEN_URL, json=payload, headers=headers) as resp:
             text = await resp.text()
-            if resp.status == 401:
-                raise Exception("NVIDIA отклонила ключ (401 Unauthorized) при генерации фото.")
             if resp.status != 200:
-                raise Exception(f"NVIDIA API Error {resp.status}: {text[:300]}")
+                raise Exception(f"NVIDIA Flux Error {resp.status}: {text[:200]}")
             try:
                 data = json.loads(text)
                 base64_str = data["artifacts"][0]["base64"]
                 return base64.b64decode(base64_str)
             except Exception as e:
-                raise Exception(f"Ошибка получения картинки от сервера: {str(e)}")
+                raise Exception(f"Ошибка парсинга ответа Flux: {str(e)}")
 
 
 async def call_edit(image_bytes: bytes, prompt: str) -> bytes:
     if not API_KEY:
         raise Exception("Переменная API_KEY пустая! Добавьте её в Railway Variables.")
-    if not API_KEY.startswith("nvapi-"):
-        raise Exception(f"Неверный формат ключа! Он должен начинаться с 'nvapi-'.")
 
     headers = {
         "Authorization": f"Bearer {API_KEY}",
@@ -71,28 +74,28 @@ async def call_edit(image_bytes: bytes, prompt: str) -> bytes:
         "Content-Type": "application/json",
     }
     encoded_image = base64.b64encode(image_bytes).decode("utf-8")
+    
+    # Payload для Cosmos (Image-to-Video)
     payload = {
         "image": f"data:image/png;base64,{encoded_image}",
         "prompt": prompt or "Animate this image smoothly",
-        "negative_prompt": "static, ugly",
+        "negative_prompt": "static, ugly, blurry",
     }
     
     async with aiohttp.ClientSession() as session:
         async with session.post(NVIDIA_ANIMATE_URL, json=payload, headers=headers) as resp:
             text = await resp.text()
-            if resp.status == 401:
-                raise Exception("NVIDIA отклонила ключ (401 Unauthorized) при создании видео.")
             if resp.status != 200:
-                raise Exception(f"NVIDIA Cosmos Error {resp.status}: {text[:300]}")
+                raise Exception(f"NVIDIA Cosmos Error {resp.status}: {text[:200]}")
             try:
                 data = json.loads(text)
                 base64_str = data["artifacts"][0]["base64"]
                 return base64.b64decode(base64_str)
             except Exception as e:
-                raise Exception(f"Ошибка получения видео от сервера: {str(e)}")
+                raise Exception(f"Ошибка парсинга ответа Cosmos: {str(e)}")
 
 
-# ── Разделы хэндлеров Flux и Cosmos без изменений ──────────────────────────────
+# ── ХЭНДЛЕРЫ ──────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "mode_image_gen")
 async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
@@ -107,7 +110,7 @@ async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
 @router.message(BotStates.image_generate, F.text)
 async def do_generate_image(message: Message, state: FSMContext):
     await message.bot.send_chat_action(message.chat.id, "upload_photo")
-    status_msg = await message.answer("🎨 <i>Нейросеть рисует... (~15 секунд)</i>", parse_mode="HTML")
+    status_msg = await message.answer("🎨 <i>Нейросеть Flux рисует... (~15 секунд)</i>", parse_mode="HTML")
     try:
         image_bytes = await call_generate(message.text)
         image_file = BufferedInputFile(image_bytes, filename="generated.png")
@@ -118,14 +121,14 @@ async def do_generate_image(message: Message, state: FSMContext):
         )
     except Exception as e:
         logger.error(f"Image gen error: {e}")
-        await status_msg.edit_text(f"❌ <b>Ошибка:</b>\n<code>{str(e)}</code>", parse_mode="HTML", reply_markup=cancel_keyboard())
+        await status_msg.edit_text(f"❌ <b>Ошибка Flux:</b>\n<code>{str(e)}</code>", parse_mode="HTML", reply_markup=cancel_keyboard())
 
 
 @router.callback_query(F.data == "mode_image_edit")
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
     await callback.message.edit_text(
-        "🎬 <b>Оживление фото (NVIDIA Cosmos)</b>\n\n📸 Отправь фото <b>с подписью</b>!",
+        "🎬 <b>Оживление фото (NVIDIA Cosmos)</b>\n\n📸 Отправь фото <b>с подписью в том же сообщении</b>!",
         reply_markup=cancel_keyboard(), parse_mode="HTML"
     )
     await callback.answer()
@@ -139,14 +142,17 @@ async def edit_photo_received(message: Message, state: FSMContext):
         return
 
     await message.bot.send_chat_action(message.chat.id, "upload_video")
-    status_msg = await message.answer("🚀 <i>Оживляю фото... (~30-45 секунд)</i>", parse_mode="HTML")
+    status_msg = await message.answer("🚀 <i>Оживляю фото через Cosmos... (~30 секунд)</i>", parse_mode="HTML")
 
     try:
         photo = message.photo[-1]
         file = await message.bot.get_file(photo.file_id)
-        file_bytes = await message.bot.download_file(file.file_path)
+        file_io = await message.bot.download_file(file.file_path)
         
-        image_bytes = compress_image(file_bytes.read())
+        # 🔥 ФИКС: Используем .getvalue() вместо .read()
+        raw_bytes = file_io.getvalue()
+        
+        image_bytes = compress_image(raw_bytes)
         result_bytes = await call_edit(image_bytes, caption)
         await status_msg.delete()
         
@@ -159,4 +165,4 @@ async def edit_photo_received(message: Message, state: FSMContext):
             await message.answer_photo(photo=image_file, caption=f"✏️ <b>Готово!</b>", parse_mode="HTML", reply_markup=cancel_keyboard())
     except Exception as e:
         logger.error(f"NVIDIA Cosmos error: {e}")
-        await status_msg.edit_text(f"❌ <b>Ошибка:</b>\n<code>{str(e)}</code>", parse_mode="HTML", reply_markup=cancel_keyboard())
+        await status_msg.edit_text(f"❌ <b>Ошибка Cosmos:</b>\n<code>{str(e)}</code>", parse_mode="HTML", reply_markup=cancel_keyboard())
