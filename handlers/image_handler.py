@@ -18,7 +18,7 @@ router = Router()
 
 HF_TOKEN = os.getenv("HF_TOKEN")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-NVIDIA_IMG_URL = "https://ai.api.nvidia.com/v1/genai/stabilityai/sdxl-turbo"
+HF_FLUX_URL = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
 
 SIZE_MAP = {
     "1024x1024": (1024, 1024),
@@ -162,48 +162,46 @@ async def warmup_rembg():
         logger.warning(f"Прогрев завершился с ошибкой (не критично): {e}")
 
 
-# ── Генерация нового фона через NVIDIA SDXL Turbo ────────────────────────────
+# ── Генерация нового фона через HuggingFace FLUX ─────────────────────────────
 
 async def generate_background(prompt: str, size: tuple) -> bytes:
-    if not NVIDIA_API_KEY:
-        raise Exception("NVIDIA_API_KEY не задан в переменных Railway.")
+    if not HF_TOKEN:
+        raise Exception("HF_TOKEN не задан в переменных Railway.")
 
+    w, h = size
     full_prompt = (
         f"{prompt}, professional product photography background, "
         f"clean, high quality, no people, no objects, no text"
     )
     headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json",
-        "Accept": "application/json",
+        "x-wait-for-model": "true",
     }
     payload = {
-        "text_prompts": [{"text": full_prompt, "weight": 1}],
-        "cfg_scale": 5,
-        "seed": 0,
-        "steps": 4,
-        "sampler": "K_EULER_ANCESTRAL",
+        "inputs": full_prompt,
+        "parameters": {"width": min(w, 1024), "height": min(h, 1024)},
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            NVIDIA_IMG_URL, json=payload, headers=headers,
-            timeout=aiohttp.ClientTimeout(total=60),
+            HF_FLUX_URL, json=payload, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=120),
         ) as resp:
+            ct = resp.headers.get("Content-Type", "")
+            if resp.status == 503:
+                raise Exception("FLUX прогревается. Попробуй снова через 30 сек.")
             if resp.status == 401:
-                raise Exception("Неверный NVIDIA_API_KEY.")
-            if resp.status == 402:
-                raise Exception("Кончились кредиты NVIDIA API. Проверь баланс на build.nvidia.com.")
+                raise Exception("Неверный HF_TOKEN. Проверь huggingface.co → Settings → Access Tokens.")
+            if "application/json" in ct:
+                data = await resp.json()
+                raise Exception(f"HuggingFace FLUX: {data.get('error', data)}")
             if resp.status != 200:
                 text = await resp.text()
-                raise Exception(f"NVIDIA SDXL {resp.status}: {text[:200]}")
-            data = await resp.json()
-            artifacts = data.get("artifacts", [])
-            if not artifacts:
-                raise Exception("NVIDIA вернул пустой ответ.")
-            b64 = artifacts[0].get("base64", "")
-            if not b64:
-                raise Exception("NVIDIA: нет base64 в ответе.")
-            return base64.b64decode(b64)
+                raise Exception(f"HuggingFace FLUX {resp.status}: {text[:200]}")
+            result = await resp.read()
+            if len(result) < 5000:
+                raise Exception("Пустой ответ от FLUX. Попробуй ещё раз.")
+            return result
 
 
 # ── Хэндлеры ─────────────────────────────────────────────────────────────────
