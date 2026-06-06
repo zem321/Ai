@@ -5,8 +5,7 @@ import aiohttp
 import json
 import io
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, BufferedInputFile
-from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from PIL import Image
 
@@ -16,8 +15,7 @@ from states import BotStates
 logger = logging.getLogger(__name__)
 router = Router()
 
-API_KEY = os.getenv("API_KEY")
-# 🎯 Официальный адрес для текстовых OpenAI-совместимых запросов NVIDIA
+API_KEY = os.getenv("API_KEY", "")
 CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 SYSTEM_PROMPT = "Ты полезный ИИ-ассистент от NVIDIA. Отвечай строго на русском языке. Будь точным и лаконичным."
@@ -28,11 +26,9 @@ def get_history(data):
 
 def get_model(data): 
     model = data.get("selected_model", "meta/llama-3.3-70b-instruct")
-    # Защита: если модель старая (из прокси), принудительно переключаем на актуальную модель NVIDIA
     if model not in MODELS:
         return "meta/llama-3.3-70b-instruct"
     return model
-
 
 def compress_image(image_bytes: bytes) -> str:
     img = Image.open(io.BytesIO(image_bytes))
@@ -45,6 +41,12 @@ def compress_image(image_bytes: bytes) -> str:
 
 
 async def call_ai(model_id: str, messages: list) -> str:
+    # 🔍 Локальная проверка ключа перед отправкой
+    if not API_KEY:
+        raise Exception("Переменная API_KEY пустая! Добавьте её в Railway Variables.")
+    if not API_KEY.startswith("nvapi-"):
+        raise Exception(f"Неверный формат ключа! Он должен начинаться с 'nvapi-'. Текущий префикс: '{API_KEY[:6]}...'")
+
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
@@ -60,6 +62,8 @@ async def call_ai(model_id: str, messages: list) -> str:
     async with aiohttp.ClientSession() as session:
         async with session.post(CHAT_URL, json=payload, headers=headers) as resp:
             text = await resp.text()
+            if resp.status == 401:
+                raise Exception("NVIDIA отклонила ключ (401 Unauthorized). Перевыпустите nvapi-токен в панели NVIDIA Build.")
             if resp.status != 200:
                 raise Exception(f"NVIDIA Chat Error {resp.status}: {text[:300]}")
             
@@ -97,15 +101,7 @@ async def show_models(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("model_"))
 async def model_selected(callback: CallbackQuery, state: FSMContext):
-    model_id = callback.data.replace("model_", "").replace("-", "/")
-    
-    # Корректируем обратно слэши для системных названий моделей NVIDIA
-    if "meta/" not in model_id and "nvidia/" not in model_id and "deepseek-ai/" not in model_id and "mistralai/" not in model_id:
-        if "llama" in model_id:
-            model_id = f"meta/{model_id}"
-        elif "nemotron" in model_id:
-            model_id = f"nvidia/{model_id}"
-            
+    model_id = callback.data.replace("model_", "")
     await state.update_data(selected_model=model_id)
     model_name = MODELS.get(model_id, model_id)
     
@@ -123,13 +119,12 @@ async def handle_photo(message: Message, state: FSMContext):
     model_id = get_model(data)
     
     if model_id not in VISION_MODELS:
-        # Автоматически переключаем на зрячую модель, если пользователь скинул фото
         model_id = "nvidia/llama-3.2-11b-vision-instruct"
         await state.update_data(selected_model=model_id)
 
     model_name = MODELS.get(model_id, model_id)
     await message.bot.send_chat_action(message.chat.id, "typing")
-    status_msg = await message.answer("👁️ <i>Анализирую изображение через NVIDIA Vision...</i>", parse_mode="HTML")
+    status_msg = await message.answer("👁️ <i>Анализирую изображение...</i>", parse_mode="HTML")
 
     try:
         photo = message.photo[-1]
