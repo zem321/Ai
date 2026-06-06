@@ -91,10 +91,10 @@ def _rembg_sync(image_bytes: bytes) -> bytes:
         import numpy as np
         from rembg import remove, new_session
 
-        # Загружаем модель только при первом вызове, потом переиспользуем
-        # isnet-general-use: лучшее качество из лёгких моделей (~176MB)
+        # u2netp: самая лёгкая модель (4.7MB, ~80MB RAM) — не крашит Railway
+        # isnet/birefnet используют 600MB+ RAM и убиваются Railway OOM
         if _rembg_session_cache is None:
-            _rembg_session_cache = new_session("isnet-general-use")
+            _rembg_session_cache = new_session("u2netp")
 
         session = _rembg_session_cache
         result_bytes = remove(image_bytes, session=session)
@@ -131,7 +131,13 @@ def _rembg_sync(image_bytes: bytes) -> bytes:
 async def remove_background(image_bytes: bytes) -> bytes:
     """Асинхронная обёртка — не блокирует бота пока rembg работает."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _rembg_sync, image_bytes)
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _rembg_sync, image_bytes),
+            timeout=60.0
+        )
+    except asyncio.TimeoutError:
+        raise Exception("Вырезка фона заняла слишком долго. Попробуй фото меньшего размера.")
 
 
 def _warmup_sync():
@@ -140,8 +146,8 @@ def _warmup_sync():
     try:
         from rembg import new_session
         if _rembg_session_cache is None:
-            logger.info("Прогрев rembg: загружаю isnet-general-use...")
-            _rembg_session_cache = new_session("isnet-general-use")
+            logger.info("Прогрев rembg: загружаю u2netp...")
+            _rembg_session_cache = new_session("u2netp")
             logger.info("Прогрев rembg: готово, модель в памяти")
     except Exception as e:
         logger.warning(f"Прогрев rembg не удался (не критично): {e}")
