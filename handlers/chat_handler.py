@@ -41,11 +41,8 @@ def compress_image(image_bytes: bytes) -> str:
 
 
 async def call_ai(model_id: str, messages: list) -> str:
-    # 🔍 Локальная проверка ключа перед отправкой
     if not API_KEY:
-        raise Exception("Переменная API_KEY пустая! Добавьте её в Railway Variables.")
-    if not API_KEY.startswith("nvapi-"):
-        raise Exception(f"Неверный формат ключа! Он должен начинаться с 'nvapi-'. Текущий префикс: '{API_KEY[:6]}...'")
+        raise Exception("Переменная API_KEY пустая! Добавьте её в Railway.")
 
     headers = {
         "Authorization": f"Bearer {API_KEY}",
@@ -55,17 +52,14 @@ async def call_ai(model_id: str, messages: list) -> str:
         "model": model_id,
         "messages": messages,
         "temperature": 0.5,
-        "top_p": 0.9,
         "max_tokens": 1500
     }
     
     async with aiohttp.ClientSession() as session:
         async with session.post(CHAT_URL, json=payload, headers=headers) as resp:
             text = await resp.text()
-            if resp.status == 401:
-                raise Exception("NVIDIA отклонила ключ (401 Unauthorized). Перевыпустите nvapi-токен в панели NVIDIA Build.")
             if resp.status != 200:
-                raise Exception(f"NVIDIA Chat Error {resp.status}: {text[:300]}")
+                raise Exception(f"NVIDIA Chat Error {resp.status}: {text[:200]}")
             
             data = json.loads(text)
             return data["choices"][0]["message"]["content"]
@@ -129,8 +123,11 @@ async def handle_photo(message: Message, state: FSMContext):
     try:
         photo = message.photo[-1]
         file = await message.bot.get_file(photo.file_id)
-        file_bytes = await message.bot.download_file(file.file_path)
-        base64_str = compress_image(file_bytes.read())
+        file_io = await message.bot.download_file(file.file_path)
+        
+        # 🔥 ФИКС: Используем .getvalue() вместо .read()
+        raw_bytes = file_io.getvalue()
+        base64_str = compress_image(raw_bytes)
 
         prompt = message.caption or "Что изображено на этой фотографии? Опиши подробно на русском."
         
@@ -153,10 +150,7 @@ async def handle_photo(message: Message, state: FSMContext):
         )
     except Exception as e:
         logger.error(f"Photo error: {e}")
-        await status_msg.edit_text(
-            f"❌ <b>Ошибка анализа фото:</b>\n<code>{str(e)}</code>",
-            parse_mode="HTML", reply_markup=cancel_keyboard()
-        )
+        await status_msg.edit_text(f"❌ <b>Ошибка анализа фото:</b>\n<code>{str(e)}</code>", parse_mode="HTML", reply_markup=cancel_keyboard())
 
 
 @router.message(BotStates.chat_mode, F.text)
@@ -187,7 +181,4 @@ async def handle_text(message: Message, state: FSMContext):
         )
     except Exception as e:
         logger.error(f"Text error: {e}")
-        await status_msg.edit_text(
-            f"❌ <b>Ошибка NVIDIA API:</b>\n<code>{str(e)}</code>",
-            parse_mode="HTML", reply_markup=cancel_keyboard()
-        )
+        await status_msg.edit_text(f"❌ <b>Ошибка NVIDIA API:</b>\n<code>{str(e)}</code>", parse_mode="HTML", reply_markup=cancel_keyboard())
