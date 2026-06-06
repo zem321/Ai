@@ -129,7 +129,7 @@ def _rembg_sync(image_bytes: bytes) -> bytes:
 
 async def remove_background(image_bytes: bytes) -> bytes:
     """Асинхронная обёртка — не блокирует бота пока rembg работает."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _rembg_sync, image_bytes)
 
 
@@ -148,8 +148,11 @@ def _warmup_sync():
 
 async def warmup_rembg():
     """Вызывается при старте бота — загружает модель заранее."""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _warmup_sync)
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _warmup_sync)
+    except Exception as e:
+        logger.warning(f"Прогрев завершился с ошибкой (не критично): {e}")
 
 
 # ── Генерация нового фона через NVIDIA SDXL Turbo ────────────────────────────
