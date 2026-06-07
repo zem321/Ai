@@ -6,8 +6,8 @@ import base64
 import random
 import logging
 import asyncio
-import aiohttp
 
+import aiohttp
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
@@ -23,20 +23,20 @@ router = Router()
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN")
 
-# NVIDIA — только генерация
+# NVIDIA: только генерация
 GEN_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
 
-# Hugging Face — редактирование
+# Hugging Face: только редактирование
 HF_EDIT_MODELS = {
     "flux.1-kontext-dev": "black-forest-labs/FLUX.1-Kontext-dev",
     "flux.2-klein-4b": "black-forest-labs/FLUX.1-Kontext-dev",  # для edit используем Kontext
 }
 
-# Порядок провайдеров для HF Inference Providers.
-# Можно переопределить переменной HF_EDIT_PROVIDERS="fal-ai,replicate,hf-inference,auto"
+# По умолчанию только hf-inference (чтобы не уходить в платные провайдеры fal/replicate)
+# Можно переопределить: HF_EDIT_PROVIDERS="hf-inference,auto"
 HF_EDIT_PROVIDERS = [
     p.strip()
-    for p in (os.getenv("HF_EDIT_PROVIDERS") or "fal-ai,replicate,hf-inference,auto").split(",")
+    for p in (os.getenv("HF_EDIT_PROVIDERS") or "hf-inference").split(",")
     if p.strip()
 ]
 
@@ -136,12 +136,8 @@ def _sync_hf_image_to_image(
     prompt: str,
     seed: int,
 ) -> bytes:
-    """
-    Синхронный вызов huggingface_hub, который запускается через asyncio.to_thread.
-    """
     client = InferenceClient(provider=provider, api_key=token, timeout=300)
 
-    # Некоторые провайдеры поддерживают расширенные параметры, некоторые — нет.
     try:
         result = client.image_to_image(
             image_bytes,
@@ -160,17 +156,31 @@ def _sync_hf_image_to_image(
 
     if isinstance(result, Image.Image):
         return _pil_to_png_bytes(result)
-
     if isinstance(result, (bytes, bytearray)):
         return bytes(result)
 
     raise Exception(f"Неподдерживаемый тип ответа от HF: {type(result)}")
 
 
+def _is_auth_error(msg: str) -> bool:
+    m = msg.lower()
+    return "401" in m or "403" in m or "unauthorized" in m or "forbidden" in m
+
+
+def _is_quota_error(msg: str) -> bool:
+    m = msg.lower()
+    return (
+        "402" in m
+        or "quota" in m
+        or "credit" in m
+        or "payment" in m
+        or "billing" in m
+        or "rate limit" in m
+        or "too many requests" in m
+    )
+
+
 async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1-kontext-dev") -> bytes:
-    """
-    Редактирование через Hugging Face Inference Providers.
-    """
     if not HF_TOKEN:
         raise Exception("HF_TOKEN не задан. Добавьте переменную HF_TOKEN в Railway.")
 
@@ -178,11 +188,9 @@ async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1
     safe_prompt = build_safe_edit_prompt(prompt)
 
     last_error = None
-
     for provider in HF_EDIT_PROVIDERS:
         try:
             logger.info("HF edit attempt: provider=%s model=%s", provider, model_id)
-
             result_bytes = await asyncio.to_thread(
                 _sync_hf_image_to_image,
                 provider,
@@ -197,23 +205,26 @@ async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1
                 raise Exception(f"Слишком маленький ответ: {len(result_bytes)} байт")
 
             return result_bytes
-
         except Exception as e:
             msg = str(e)
             last_error = e
             logger.warning("HF edit failed with provider=%s: %s", provider, msg)
 
-            # Критичные ошибки токена прекращают ретраи
-            if "401" in msg or "403" in msg or "unauthorized" in msg.lower() or "forbidden" in msg.lower():
+            if _is_auth_error(msg):
                 raise Exception(f"HF auth error: {msg}")
 
-            # Иначе пробуем следующий провайдер
+            if _is_quota_error(msg):
+                raise Exception(
+                    "Лимит Hugging Face исчерпан или нужен billing. "
+                    "Пополните кредиты/включите billing, либо дождитесь сброса лимита."
+                )
+
             continue
 
     raise Exception(f"HF редактирование не удалось. Последняя ошибка: {last_error}")
 
 
-# ── Генерация ──────────────────────────────────────────────────────────────────
+# ── Генерация ────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "mode_image_gen")
 async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
@@ -230,6 +241,7 @@ async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
 async def do_generate_image(message: Message, state: FSMContext):
     await message.bot.send_chat_action(message.chat.id, "upload_photo")
     status_msg = await message.answer("Генерирую изображение...", parse_mode="HTML")
+
     try:
         image_bytes = await call_generate(message.text)
         await status_msg.delete()
@@ -248,7 +260,7 @@ async def do_generate_image(message: Message, state: FSMContext):
         )
 
 
-# ── Редактирование ─────────────────────────────────────────────────────────────
+# ── Редактирование ───────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "mode_image_edit")
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
@@ -295,8 +307,8 @@ async def edit_photo_received(message: Message, state: FSMContext):
 
     data = await state.get_data()
     edit_model = data.get("edit_model", "flux.1-kontext-dev")
-    status_msg = await message.answer("Обрабатываю фото...", parse_mode="HTML")
 
+    status_msg = await message.answer("Обрабатываю фото...", parse_mode="HTML")
     try:
         photo = message.photo[-1]
         file = await message.bot.get_file(photo.file_id)
@@ -304,22 +316,20 @@ async def edit_photo_received(message: Message, state: FSMContext):
         image_bytes = compress_image(file_obj.read())
 
         await status_msg.edit_text("Редактирую через Hugging Face...", parse_mode="HTML")
-
         result_bytes = await call_hf_edit(caption, image_bytes, model_key=edit_model)
 
         await status_msg.delete()
         await message.answer_photo(
             photo=BufferedInputFile(result_bytes, filename="edited.png"),
-            caption=f"<b>Готово</b>\n{html.escape(caption)}",
+            caption=f"Готово\n{html.escape(caption)}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
-
     except Exception as e:
         logger.exception("Image edit error")
         err_text = html.escape(str(e))
         await status_msg.edit_text(
-            f"Ошибка редактирования:\n<code>{err_text}</code>",
+            f"Ошибка редактирования:\n{err_text}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
