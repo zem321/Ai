@@ -102,3 +102,9 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    # main.py (или bot.py, app.py - как у тебя называется)
+
+from handlers.image_generation import router as image_generation_router
+
+# При создании бота:
+dp.include_router(image_generation_router)
