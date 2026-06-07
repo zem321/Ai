@@ -3,6 +3,7 @@ import io
 import json
 import html
 import base64
+import random
 import logging
 import aiohttp
 
@@ -25,7 +26,7 @@ EDIT_URLS = {
     "flux.2-klein-4b": "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b",
 }
 
-# У разных аккаунтов/роутинга assets может жить на разных хостах
+# У разных аккаунтов NVIDIA endpoint для assets может отличаться
 ASSET_URLS = [
     ("https://ai.api.nvidia.com/v1/assets", "snake"),            # content_type
     ("https://api.nvcf.nvidia.com/v2/nvcf/assets", "camel"),     # contentType
@@ -37,22 +38,26 @@ def compress_image(image_bytes: bytes, max_side: int = 1024) -> bytes:
     if img.mode != "RGB":
         img = img.convert("RGB")
     img.thumbnail((max_side, max_side), Image.LANCZOS)
-    output = io.BytesIO()
-    img.save(output, format="PNG")
-    return output.getvalue()
+
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
 
 
 def parse_image_response(data: dict) -> bytes:
     artifacts = data.get("artifacts")
 
+    # Вариант 1
     if isinstance(artifacts, list) and artifacts:
         first = artifacts[0]
         if isinstance(first, dict) and first.get("base64"):
             return base64.b64decode(first["base64"])
 
+    # Вариант 2
     if isinstance(artifacts, dict) and artifacts.get("base64"):
         return base64.b64decode(artifacts["base64"])
 
+    # Вариант 3 (OpenAI-style)
     d = data.get("data")
     if isinstance(d, list) and d and isinstance(d[0], dict):
         b64 = d[0].get("b64_json")
@@ -62,7 +67,7 @@ def parse_image_response(data: dict) -> bytes:
     raise Exception(f"Изображение не получено от сервера: {str(data)[:700]}")
 
 
-def _extract_error_text(status: int, raw_text: str, parsed: dict = None) -> str:
+def _extract_error_text(status: int, raw_text: str, parsed: dict | None = None) -> str:
     if isinstance(parsed, dict):
         if isinstance(parsed.get("detail"), str):
             return parsed["detail"]
@@ -75,52 +80,51 @@ def _extract_error_text(status: int, raw_text: str, parsed: dict = None) -> str:
     return f"HTTP {status}: {raw_text[:700]}"
 
 
-def build_safe_edit_prompt(user_prompt: str) -> str:
-    """
-    Усиленный промпт, чтобы модель меняла только нужное и не трогала человека.
-    """
-    p = (user_prompt or "").strip()
-    lower = p.lower()
-
-    base_rules = (
-        "Сделай строго только то, что просит пользователь.\n"
-        "Главный объект (человек на фото) должен остаться тем же самым.\n"
-        "Нельзя менять: лицо, черты лица, пол, возраст, волосы, тело, позу, одежду, руки, кожу.\n"
-        "Нельзя добавлять или заменять человека, животных, посторонних персонажей.\n"
-        "Нельзя превращать человека в другого персонажа.\n"
-        "Сохрани реалистичность, ракурс и композицию.\n"
-        "Изменяй только те области, которые напрямую относятся к запросу.\n"
-    )
-
-    if any(k in lower for k in ["фон", "background", "задний план"]):
-        base_rules += (
-            "Это запрос на смену фона: меняй только задний план.\n"
-            "Передний план с человеком оставь без изменений.\n"
-        )
-
-    return f"{base_rules}\nЗапрос пользователя: {p}"
-
-
 async def _post_json(url: str, payload: dict, headers: dict, timeout_sec: int = 240) -> dict:
     timeout = aiohttp.ClientTimeout(total=timeout_sec)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, json=payload, headers=headers) as resp:
-            raw_text = await resp.text()
+            raw = await resp.text()
             parsed = None
             try:
-                parsed = json.loads(raw_text)
+                parsed = json.loads(raw)
             except Exception:
-                parsed = None
+                pass
 
             if resp.status != 200:
                 raise Exception(
-                    f"{url} -> {_extract_error_text(resp.status, raw_text, parsed if isinstance(parsed, dict) else None)}"
+                    f"{url} -> {_extract_error_text(resp.status, raw, parsed if isinstance(parsed, dict) else None)}"
                 )
 
             if not isinstance(parsed, dict):
-                raise Exception(f"{url} -> Некорректный JSON: {raw_text[:700]}")
+                raise Exception(f"{url} -> Некорректный JSON: {raw[:700]}")
 
             return parsed
+
+
+def build_safe_edit_prompt(user_prompt: str) -> str:
+    """
+    Усиленный промпт: менять только запрошенное, не заменять человека/объект.
+    """
+    p = (user_prompt or "").strip()
+    lower = p.lower()
+
+    rules = (
+        "Выполни строго только запрос пользователя.\n"
+        "Сохрани основного человека/объект на фото без изменений.\n"
+        "Не меняй лицо, пол, возраст, волосы, тело, позу, одежду, ракурс.\n"
+        "Не добавляй новых людей, животных или лишние объекты на передний план.\n"
+        "Не заменяй главного человека/объект на другого.\n"
+        "Сохрани фотореализм.\n"
+    )
+
+    if any(x in lower for x in ["фон", "background", "задний план"]):
+        rules += (
+            "Это запрос на замену фона: измени только фон.\n"
+            "Передний план и человека оставь прежними.\n"
+        )
+
+    return f"{rules}\nЗапрос пользователя: {p}"
 
 
 async def upload_asset(image_bytes: bytes) -> str:
@@ -129,20 +133,21 @@ async def upload_asset(image_bytes: bytes) -> str:
 
     timeout = aiohttp.ClientTimeout(total=240)
 
-    for asset_url, payload_style in ASSET_URLS:
+    for asset_url, style in ASSET_URLS:
         headers = {
             "Authorization": f"Bearer {NVIDIA_API_KEY}",
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
-
-        if payload_style == "snake":
-            body = {"content_type": "image/png", "description": "edit_image"}
-        else:
-            body = {"contentType": "image/png", "description": "edit_image"}
+        body = (
+            {"content_type": "image/png", "description": "edit_image"}
+            if style == "snake"
+            else {"contentType": "image/png", "description": "edit_image"}
+        )
 
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
+                # 1) init asset
                 async with session.post(asset_url, json=body, headers=headers) as resp:
                     raw = await resp.text()
                     try:
@@ -158,6 +163,7 @@ async def upload_asset(image_bytes: bytes) -> str:
                     if not asset_id or not upload_url:
                         raise Exception(f"Некорректный ответ assets: {str(data)[:700]}")
 
+                # 2) upload bytes
                 async with session.put(
                     upload_url,
                     data=image_bytes,
@@ -172,27 +178,39 @@ async def upload_asset(image_bytes: bytes) -> str:
 
             logger.info("Asset uploaded via %s", asset_url)
             return asset_id
+
         except Exception as e:
             logger.warning("Asset endpoint failed: %s -> %s", asset_url, e)
 
-    raise Exception("Не удалось загрузить asset ни через один endpoint (ai.api и api.nvcf)")
+    raise Exception("Не удалось загрузить asset ни через один endpoint (ai.api/nvcf)")
+
+
+def _build_edit_headers(asset_id: str) -> dict:
+    # Оба заголовка для совместимости
+    return {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "NVCF-INPUT-ASSET-REFERENCES": asset_id,
+        "NVCF-FUNCTION-ASSET-IDS": asset_id,
+    }
 
 
 async def call_generate(prompt: str) -> bytes:
     if not NVIDIA_API_KEY:
         raise Exception("NVIDIA_API_KEY не задан")
 
-    headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
     payload = {
         "prompt": prompt,
         "width": 1024,
         "height": 1024,
-        "seed": 0,
+        "seed": random.randint(1, 2_147_483_647),
         "steps": 4,
+    }
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
     }
 
     data = await _post_json(GEN_URL, payload, headers)
@@ -200,57 +218,75 @@ async def call_generate(prompt: str) -> bytes:
 
 
 async def _call_edit_with_asset(url: str, user_prompt: str, image_bytes: bytes, klein: bool) -> bytes:
-    """
-    Edit flow через assets + example_id (это то, что у тебя требует API).
-    """
+    if not NVIDIA_API_KEY:
+        raise Exception("NVIDIA_API_KEY не задан")
+
     asset_id = await upload_asset(image_bytes)
+    headers = _build_edit_headers(asset_id)
     safe_prompt = build_safe_edit_prompt(user_prompt)
+    seed = random.randint(1, 2_147_483_647)
 
-    headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "NVCF-INPUT-ASSET-REFERENCES": asset_id,
-    }
-
-    # Для твоего API нужен именно example_id
-    example_ref = "data:image/png;example_id,0"
-
+    # Основной сценарий: используем именно user asset_id
     if klein:
-        # Для klein уменьшаем "творчество", чтобы меньше портил объект
-        payload = {
+        primary_payload = {
             "prompt": safe_prompt,
-            "image": [example_ref],
+            "image": [f"data:image/png;asset_id,{asset_id}"],
             "width": 1024,
             "height": 1024,
-            "seed": 0,
-            "steps": 3,
+            "seed": seed,
+            "steps": 4,
         }
     else:
-        # Kontext лучше держит объект, повышаем точность следования ограничениями
-        payload = {
+        primary_payload = {
             "prompt": safe_prompt,
-            "image": example_ref,
+            "image": f"data:image/png;asset_id,{asset_id}",
             "aspect_ratio": "match_input_image",
-            "seed": 0,
+            "seed": seed,
             "steps": 40,
             "cfg_scale": 2.5,
         }
 
-    data = await _post_json(url, payload, headers, timeout_sec=300)
-    return parse_image_response(data)
+    try:
+        data = await _post_json(url, primary_payload, headers, timeout_sec=300)
+        return parse_image_response(data)
+    except Exception as e:
+        err = str(e).lower()
+
+        # fallback только если endpoint строго требует example_id
+        if "expected: example_id" not in err:
+            raise
+
+        logger.warning("Primary edit path rejected, fallback to example_id: %s", e)
+
+        if klein:
+            fallback_payload = {
+                "prompt": safe_prompt,
+                "image": ["data:image/png;example_id,0"],
+                "width": 1024,
+                "height": 1024,
+                "seed": seed,
+                "steps": 4,
+            }
+        else:
+            fallback_payload = {
+                "prompt": safe_prompt,
+                "image": "data:image/png;example_id,0",
+                "aspect_ratio": "match_input_image",
+                "seed": seed,
+                "steps": 40,
+                "cfg_scale": 2.5,
+            }
+
+        data = await _post_json(url, fallback_payload, headers, timeout_sec=300)
+        return parse_image_response(data)
 
 
 async def call_edit_kontext(prompt: str, image_bytes: bytes) -> bytes:
-    if not NVIDIA_API_KEY:
-        raise Exception("NVIDIA_API_KEY не задан")
     return await _call_edit_with_asset(EDIT_URLS["flux.1-kontext-dev"], prompt, image_bytes, klein=False)
 
 
 async def call_edit_klein(prompt: str, image_bytes: bytes) -> bytes:
-    if not NVIDIA_API_KEY:
-        raise Exception("NVIDIA_API_KEY не задан")
-    return await _call_with_asset(EDIT_URLS["flux.2-klein-4b"], prompt, image_bytes, klein=True)
+    return await _call_edit_with_asset(EDIT_URLS["flux.2-klein-4b"], prompt, image_bytes, klein=True)
 
 
 # ── Генерация ──────────────────────────────────────────────────────────────────
@@ -260,8 +296,7 @@ async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_generate)
     await callback.message.edit_text(
         "🎨 <b>Генерация изображения</b>\n\n"
-        "📝 Опиши что хочешь создать:\n\n"
-        "<i>Пример: Закат над морем в стиле аниме</i>",
+        "Опиши, что нужно создать.",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML",
     )
@@ -271,20 +306,20 @@ async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
 @router.message(BotStates.image_generate, F.text)
 async def do_generate_image(message: Message, state: FSMContext):
     await message.bot.send_chat_action(message.chat.id, "upload_photo")
-    status_msg = await message.answer("🎨 <i>Генерирую изображение...</i>", parse_mode="HTML")
+    status_msg = await message.answer("Генерирую изображение...", parse_mode="HTML")
     try:
         image_bytes = await call_generate(message.text)
         await status_msg.delete()
         await message.answer_photo(
             photo=BufferedInputFile(image_bytes, filename="generated.png"),
-            caption=f"🎨 <b>Готово!</b>\n📝 {html.escape(message.text)}",
+            caption=f"<b>Готово</b>\n{html.escape(message.text)}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
     except Exception as e:
         logger.exception("Image gen error")
         await status_msg.edit_text(
-            f"❌ <b>Ошибка генерации:</b>\n<code>{html.escape(str(e))}</code>",
+            f"Ошибка генерации:\n<code>{html.escape(str(e))}</code>",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
@@ -297,7 +332,7 @@ async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
     await state.update_data(edit_step="choose_model")
     await callback.message.edit_text(
-        "✏️ <b>Редактирование фото</b>\n\nВыбери модель:",
+        "<b>Редактирование фото</b>\n\nВыбери модель:",
         reply_markup=edit_model_keyboard(),
         parse_mode="HTML",
     )
@@ -309,8 +344,7 @@ async def edit_model_selected(callback: CallbackQuery, state: FSMContext):
     model_key = callback.data.replace("editmodel_", "", 1)
     await state.update_data(edit_model=model_key, edit_step="waiting_photo")
     await callback.message.edit_text(
-        "📸 Отправь фото <b>с подписью</b> — задание прямо под фото!\n\n"
-        "<i>Пример: Замени фон на сад (человека не менять)</i>",
+        "Отправь фото с подписью (что именно изменить).",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML",
     )
@@ -322,7 +356,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
     caption = (message.caption or "").strip()
     if not caption:
         await message.answer(
-            "⚠️ Добавь задание как подпись к фото.",
+            "Добавь задание как подпись к фото.",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
@@ -330,7 +364,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
 
     data = await state.get_data()
     edit_model = data.get("edit_model", "flux.1-kontext-dev")
-    status_msg = await message.answer("📤 <i>Обрабатываю фото...</i>", parse_mode="HTML")
+    status_msg = await message.answer("Обрабатываю фото...", parse_mode="HTML")
 
     try:
         photo = message.photo[-1]
@@ -338,7 +372,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
         file_obj = await message.bot.download_file(file.file_path)
         image_bytes = compress_image(file_obj.read())
 
-        await status_msg.edit_text("✏️ <i>Редактирую фото...</i>", parse_mode="HTML")
+        await status_msg.edit_text("Редактирую...", parse_mode="HTML")
 
         if edit_model == "flux.2-klein-4b":
             result_bytes = await call_edit_klein(caption, image_bytes)
@@ -348,14 +382,14 @@ async def edit_photo_received(message: Message, state: FSMContext):
         await status_msg.delete()
         await message.answer_photo(
             photo=BufferedInputFile(result_bytes, filename="edited.png"),
-            caption=f"✏️ <b>Готово!</b>\n📝 {html.escape(caption)}",
+            caption=f"<b>Готово</b>\n{html.escape(caption)}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
     except Exception as e:
         logger.exception("Image edit error")
         await status_msg.edit_text(
-            f"❌ <b>Ошибка редактирования:</b>\n<code>{html.escape(str(e))}</code>",
+            f"Ошибка редактирования:\n<code>{html.escape(str(e))}</code>",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
