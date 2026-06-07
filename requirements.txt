@@ -2,3 +2,4 @@ aiogram==3.13.1
 aiohttp==3.10.5
 python-dotenv==1.0.1
 Pillow==10.4.0
+huggingface_hub>=0.24.0
