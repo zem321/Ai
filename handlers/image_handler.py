@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import json
 import html
 import base64
@@ -27,27 +28,26 @@ HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN")
 # NVIDIA: только генерация
 GEN_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
 
-# Модели для UI-ключей редактирования (клавиатуру не трогаем)
+# UI ключи (клавиатуру не меняем)
 HF_EDIT_MODELS = {
     "flux.1-kontext-dev": "black-forest-labs/FLUX.1-Kontext-dev",
     "flux.2-klein-4b": "black-forest-labs/FLUX.1-Kontext-dev",
 }
 
-# По умолчанию только бесплатный провайдер.
-# Если хочешь fallback на платные, поставь:
-# HF_EDIT_PROVIDERS=hf-inference,auto
+# По умолчанию только бесплатный путь
 HF_EDIT_PROVIDERS = [
     p.strip()
     for p in (os.getenv("HF_EDIT_PROVIDERS") or "hf-inference").split(",")
     if p.strip()
 ]
 
-# Кандидаты моделей для hf-inference, которые должны поддерживать image-to-image.
-# Можно задать через ENV:
-# HF_INFERENCE_EDIT_MODELS=timbrooks/instruct-pix2pix
+# Кандидаты для hf-inference (можно переопределить через ENV)
 HF_INFERENCE_EDIT_MODELS = [
     m.strip()
-    for m in (os.getenv("HF_INFERENCE_EDIT_MODELS") or "timbrooks/instruct-pix2pix").split(",")
+    for m in (
+        os.getenv("HF_INFERENCE_EDIT_MODELS")
+        or "timbrooks/instruct-pix2pix"
+    ).split(",")
     if m.strip()
 ]
 
@@ -139,31 +139,24 @@ def _pil_to_png_bytes(img: Image.Image) -> bytes:
     return out.getvalue()
 
 
-def _extract_task(mapping_item) -> Optional[str]:
-    if mapping_item is None:
-        return None
-    # Может быть dataclass-объект или dict
-    task = getattr(mapping_item, "task", None)
-    if task:
-        return task
-    if isinstance(mapping_item, dict):
-        return mapping_item.get("task")
-    return None
-
-
 def _supports_provider_task(model_id: str, provider: str, task: str = "image-to-image") -> bool:
     try:
         info = model_info(model_id, expand="inferenceProviderMapping")
         mapping = getattr(info, "inference_provider_mapping", None) or {}
-        provider_item = mapping.get(provider)
-        return _extract_task(provider_item) == task
+        item = mapping.get(provider)
+        if item is None:
+            return False
+        provider_task = getattr(item, "task", None)
+        if provider_task is None and isinstance(item, dict):
+            provider_task = item.get("task")
+        return provider_task == task
     except Exception:
         return False
 
 
 def _sync_hf_image_to_image(
     provider: str,
-    model_id: str,
+    model_id: Optional[str],
     token: str,
     image_bytes: bytes,
     prompt: str,
@@ -171,21 +164,22 @@ def _sync_hf_image_to_image(
 ) -> bytes:
     client = InferenceClient(provider=provider, api_key=token, timeout=300)
 
+    kwargs = {
+        "prompt": prompt,
+        "guidance_scale": 3.5,
+        "num_inference_steps": 30,
+        "seed": seed,
+    }
+    if model_id:
+        kwargs["model"] = model_id
+
     try:
-        result = client.image_to_image(
-            image_bytes,
-            prompt=prompt,
-            model=model_id,
-            guidance_scale=3.5,
-            num_inference_steps=30,
-            seed=seed,
-        )
+        result = client.image_to_image(image_bytes, **kwargs)
     except TypeError:
-        result = client.image_to_image(
-            image_bytes,
-            prompt=prompt,
-            model=model_id,
-        )
+        kwargs.pop("guidance_scale", None)
+        kwargs.pop("num_inference_steps", None)
+        kwargs.pop("seed", None)
+        result = client.image_to_image(image_bytes, **kwargs)
 
     if isinstance(result, Image.Image):
         return _pil_to_png_bytes(result)
@@ -196,12 +190,19 @@ def _sync_hf_image_to_image(
 
 
 def _is_auth_error(msg: str) -> bool:
-    m = msg.lower()
-    return "401" in m or "403" in m or "unauthorized" in m or "forbidden" in m
+    m = (msg or "").lower()
+    if "unauthorized" in m or "forbidden" in m or "invalid token" in m:
+        return True
+    # Проверяем именно HTTP-код, а не случайные цифры в request id
+    if re.search(r"http\s*401", m) or re.search(r"http\s*403", m):
+        return True
+    if re.search(r"status\s*401", m) or re.search(r"status\s*403", m):
+        return True
+    return False
 
 
 def _is_quota_error(msg: str) -> bool:
-    m = msg.lower()
+    m = (msg or "").lower()
     return (
         "402" in m
         or "quota" in m
@@ -214,11 +215,12 @@ def _is_quota_error(msg: str) -> bool:
 
 
 def _is_model_task_error(msg: str) -> bool:
-    m = msg.lower()
+    m = (msg or "").lower()
     return (
         "model not supported by provider" in m
         or "doesn't support task" in m
         or "supported tasks" in m
+        or "got: 'image-to-image'" in m
     )
 
 
@@ -234,30 +236,27 @@ async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1
     for provider in HF_EDIT_PROVIDERS:
         try:
             if provider == "hf-inference":
-                # 1) сначала берем только те модели, где явно указан image-to-image
+                # 1) Сначала пробуем recommended model (без явного model=...)
+                # 2) Потом кандидаты из ENV, которые поддерживают image-to-image
                 verified = [
                     m for m in HF_INFERENCE_EDIT_MODELS
                     if _supports_provider_task(m, "hf-inference", "image-to-image")
                 ]
-
-                # 2) если маппинг не вернулся, пробуем raw-список как fallback
-                candidate_models = verified or HF_INFERENCE_EDIT_MODELS
-
-                if not candidate_models:
-                    raise Exception("Не задан список моделей для hf-inference (HF_INFERENCE_EDIT_MODELS).")
+                fallback_models = [m for m in HF_INFERENCE_EDIT_MODELS if m not in verified]
+                candidate_models: list[Optional[str]] = [None] + verified + fallback_models
 
                 provider_error = None
-                for candidate_model in candidate_models:
+                for candidate in candidate_models:
                     try:
                         logger.info(
                             "HF edit attempt: provider=%s model=%s",
                             provider,
-                            candidate_model,
+                            candidate or "<recommended>",
                         )
                         result_bytes = await asyncio.to_thread(
                             _sync_hf_image_to_image,
                             provider,
-                            candidate_model,
+                            candidate,
                             HF_TOKEN,
                             image_bytes,
                             safe_prompt,
@@ -268,17 +267,18 @@ async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1
                             raise Exception(f"Слишком маленький ответ: {len(result_bytes)} байт")
 
                         return result_bytes
-
                     except Exception as e:
                         provider_error = e
                         msg = str(e)
                         logger.warning(
                             "HF edit failed with provider=%s model=%s: %s",
                             provider,
-                            candidate_model,
+                            candidate or "<recommended>",
                             msg,
                         )
 
+                        if msg.startswith("HF auth error:"):
+                            raise
                         if _is_auth_error(msg):
                             raise Exception(f"HF auth error: {msg}")
                         if _is_quota_error(msg):
@@ -287,19 +287,18 @@ async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1
                                 "Пополните кредиты/включите billing, либо дождитесь сброса лимита."
                             )
 
-                        # Если модель/задача не совпали, пробуем следующую модель
+                        # Если модель не подходит по задаче - пробуем следующую
                         if _is_model_task_error(msg):
                             continue
 
-                        # Иные ошибки тоже пробуем обойти следующей моделью
                         continue
 
                 raise Exception(
-                    f"hf-inference не смог выполнить image-to-image. "
-                    f"Проверь HF_INFERENCE_EDIT_MODELS. Последняя ошибка: {provider_error}"
+                    "hf-inference не смог выполнить image-to-image. "
+                    f"Последняя ошибка: {provider_error}"
                 )
 
-            # Не hf-inference: используем выбранную FLUX-модель
+            # Для других провайдеров используем выбранную FLUX модель
             logger.info("HF edit attempt: provider=%s model=%s", provider, selected_model)
             result_bytes = await asyncio.to_thread(
                 _sync_hf_image_to_image,
@@ -321,6 +320,8 @@ async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1
             last_error = e
             logger.warning("HF edit failed with provider=%s: %s", provider, msg)
 
+            if msg.startswith("HF auth error:"):
+                raise
             if _is_auth_error(msg):
                 raise Exception(f"HF auth error: {msg}")
             if _is_quota_error(msg):
@@ -334,7 +335,7 @@ async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1
     raise Exception(f"HF редактирование не удалось. Последняя ошибка: {last_error}")
 
 
-# ── Генерация ────────────────────────────────────────────────────────────────
+# ── Генерация ──────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "mode_image_gen")
 async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
@@ -370,7 +371,7 @@ async def do_generate_image(message: Message, state: FSMContext):
         )
 
 
-# ── Редактирование ───────────────────────────────────────────────────────────
+# ── Редактирование ─────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "mode_image_edit")
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
