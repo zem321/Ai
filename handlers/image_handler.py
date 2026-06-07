@@ -1,4 +1,3 @@
-# handlers/image_handler.py
 import os
 import io
 import json
@@ -14,7 +13,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image
-from huggingface_hub import InferenceClient
+from huggingface_hub import InferenceClient, model_info
 
 from keyboards import cancel_keyboard, edit_model_keyboard
 from states import BotStates
@@ -28,25 +27,29 @@ HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN")
 # NVIDIA: только генерация
 GEN_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
 
-# UI-ключи из твоей клавиатуры оставляем как есть (не ломаем интерфейс)
-# Для paid провайдеров можно использовать Kontext.
+# Модели для UI-ключей редактирования (клавиатуру не трогаем)
 HF_EDIT_MODELS = {
     "flux.1-kontext-dev": "black-forest-labs/FLUX.1-Kontext-dev",
     "flux.2-klein-4b": "black-forest-labs/FLUX.1-Kontext-dev",
 }
 
-# По умолчанию бесплатный путь через hf-inference
-# Если хочешь fallback на платные: "hf-inference,auto" или "hf-inference,replicate,fal-ai"
+# По умолчанию только бесплатный провайдер.
+# Если хочешь fallback на платные, поставь:
+# HF_EDIT_PROVIDERS=hf-inference,auto
 HF_EDIT_PROVIDERS = [
     p.strip()
     for p in (os.getenv("HF_EDIT_PROVIDERS") or "hf-inference").split(",")
     if p.strip()
 ]
 
-# Ключевая настройка:
-# для hf-inference НЕ фиксируем модель, чтобы HF сам выбрал поддерживаемую image-to-image модель.
-# Это устраняет "Model not supported by provider hf-inference" для FLUX Kontext.
-USE_HF_RECOMMENDED_MODEL = (os.getenv("USE_HF_RECOMMENDED_MODEL") or "1") == "1"
+# Кандидаты моделей для hf-inference, которые должны поддерживать image-to-image.
+# Можно задать через ENV:
+# HF_INFERENCE_EDIT_MODELS=timbrooks/instruct-pix2pix
+HF_INFERENCE_EDIT_MODELS = [
+    m.strip()
+    for m in (os.getenv("HF_INFERENCE_EDIT_MODELS") or "timbrooks/instruct-pix2pix").split(",")
+    if m.strip()
+]
 
 
 def compress_image(image_bytes: bytes, max_side: int = 1024) -> bytes:
@@ -136,9 +139,31 @@ def _pil_to_png_bytes(img: Image.Image) -> bytes:
     return out.getvalue()
 
 
+def _extract_task(mapping_item) -> Optional[str]:
+    if mapping_item is None:
+        return None
+    # Может быть dataclass-объект или dict
+    task = getattr(mapping_item, "task", None)
+    if task:
+        return task
+    if isinstance(mapping_item, dict):
+        return mapping_item.get("task")
+    return None
+
+
+def _supports_provider_task(model_id: str, provider: str, task: str = "image-to-image") -> bool:
+    try:
+        info = model_info(model_id, expand="inferenceProviderMapping")
+        mapping = getattr(info, "inference_provider_mapping", None) or {}
+        provider_item = mapping.get(provider)
+        return _extract_task(provider_item) == task
+    except Exception:
+        return False
+
+
 def _sync_hf_image_to_image(
     provider: str,
-    model_id: Optional[str],
+    model_id: str,
     token: str,
     image_bytes: bytes,
     prompt: str,
@@ -146,23 +171,21 @@ def _sync_hf_image_to_image(
 ) -> bytes:
     client = InferenceClient(provider=provider, api_key=token, timeout=300)
 
-    # Некоторые провайдеры/модели не принимают расширенные параметры
-    kwargs = {
-        "prompt": prompt,
-        "guidance_scale": 3.5,
-        "num_inference_steps": 30,
-        "seed": seed,
-    }
-    if model_id:
-        kwargs["model"] = model_id
-
     try:
-        result = client.image_to_image(image_bytes, **kwargs)
+        result = client.image_to_image(
+            image_bytes,
+            prompt=prompt,
+            model=model_id,
+            guidance_scale=3.5,
+            num_inference_steps=30,
+            seed=seed,
+        )
     except TypeError:
-        kwargs.pop("guidance_scale", None)
-        kwargs.pop("num_inference_steps", None)
-        kwargs.pop("seed", None)
-        result = client.image_to_image(image_bytes, **kwargs)
+        result = client.image_to_image(
+            image_bytes,
+            prompt=prompt,
+            model=model_id,
+        )
 
     if isinstance(result, Image.Image):
         return _pil_to_png_bytes(result)
@@ -190,6 +213,15 @@ def _is_quota_error(msg: str) -> bool:
     )
 
 
+def _is_model_task_error(msg: str) -> bool:
+    m = msg.lower()
+    return (
+        "model not supported by provider" in m
+        or "doesn't support task" in m
+        or "supported tasks" in m
+    )
+
+
 async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1-kontext-dev") -> bytes:
     if not HF_TOKEN:
         raise Exception("HF_TOKEN не задан. Добавьте переменную HF_TOKEN в Railway.")
@@ -198,21 +230,81 @@ async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1
     safe_prompt = build_safe_edit_prompt(prompt)
 
     last_error = None
+
     for provider in HF_EDIT_PROVIDERS:
         try:
-            # Главное исправление:
-            # для hf-inference используем recommended model (model=None),
-            # потому что Kontext часто не поддерживается этим провайдером.
-            if provider == "hf-inference" and USE_HF_RECOMMENDED_MODEL:
-                provider_model = None
-            else:
-                provider_model = selected_model
+            if provider == "hf-inference":
+                # 1) сначала берем только те модели, где явно указан image-to-image
+                verified = [
+                    m for m in HF_INFERENCE_EDIT_MODELS
+                    if _supports_provider_task(m, "hf-inference", "image-to-image")
+                ]
 
-            logger.info("HF edit attempt: provider=%s model=%s", provider, provider_model or "<recommended>")
+                # 2) если маппинг не вернулся, пробуем raw-список как fallback
+                candidate_models = verified or HF_INFERENCE_EDIT_MODELS
+
+                if not candidate_models:
+                    raise Exception("Не задан список моделей для hf-inference (HF_INFERENCE_EDIT_MODELS).")
+
+                provider_error = None
+                for candidate_model in candidate_models:
+                    try:
+                        logger.info(
+                            "HF edit attempt: provider=%s model=%s",
+                            provider,
+                            candidate_model,
+                        )
+                        result_bytes = await asyncio.to_thread(
+                            _sync_hf_image_to_image,
+                            provider,
+                            candidate_model,
+                            HF_TOKEN,
+                            image_bytes,
+                            safe_prompt,
+                            random.randint(1, 2_147_483_647),
+                        )
+
+                        if len(result_bytes) < 1000:
+                            raise Exception(f"Слишком маленький ответ: {len(result_bytes)} байт")
+
+                        return result_bytes
+
+                    except Exception as e:
+                        provider_error = e
+                        msg = str(e)
+                        logger.warning(
+                            "HF edit failed with provider=%s model=%s: %s",
+                            provider,
+                            candidate_model,
+                            msg,
+                        )
+
+                        if _is_auth_error(msg):
+                            raise Exception(f"HF auth error: {msg}")
+                        if _is_quota_error(msg):
+                            raise Exception(
+                                "Лимит Hugging Face исчерпан или нужен billing. "
+                                "Пополните кредиты/включите billing, либо дождитесь сброса лимита."
+                            )
+
+                        # Если модель/задача не совпали, пробуем следующую модель
+                        if _is_model_task_error(msg):
+                            continue
+
+                        # Иные ошибки тоже пробуем обойти следующей моделью
+                        continue
+
+                raise Exception(
+                    f"hf-inference не смог выполнить image-to-image. "
+                    f"Проверь HF_INFERENCE_EDIT_MODELS. Последняя ошибка: {provider_error}"
+                )
+
+            # Не hf-inference: используем выбранную FLUX-модель
+            logger.info("HF edit attempt: provider=%s model=%s", provider, selected_model)
             result_bytes = await asyncio.to_thread(
                 _sync_hf_image_to_image,
                 provider,
-                provider_model,
+                selected_model,
                 HF_TOKEN,
                 image_bytes,
                 safe_prompt,
@@ -231,16 +323,11 @@ async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1
 
             if _is_auth_error(msg):
                 raise Exception(f"HF auth error: {msg}")
-
             if _is_quota_error(msg):
                 raise Exception(
                     "Лимит Hugging Face исчерпан или нужен billing. "
                     "Пополните кредиты/включите billing, либо дождитесь сброса лимита."
                 )
-
-            # Частая ошибка для фиксированной модели на провайдере
-            if "model not supported by provider" in msg.lower():
-                continue
 
             continue
 
