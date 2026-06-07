@@ -1,4 +1,4 @@
-# image_generation.py
+# handlers/image_handler.py
 import os
 import io
 import json
@@ -61,24 +61,9 @@ VIDEO_MODELS = {
 
 # ============ БЕСПЛАТНЫЕ SPACE ДЛЯ РЕДАКТИРОВАНИЯ ============
 IMAGE_EDIT_SPACES = [
-    {
-        "name": "1Paint",
-        "id": "1Paint/1Paint",
-        "description": "Изменение фона, удаление объектов",
-        "priority": 1,
-    },
-    {
-        "name": "SDXL Inpainting",
-        "id": "diffusers/stable-diffusion-xl-inpainting",
-        "description": "Качественная замена частей изображения",
-        "priority": 2,
-    },
-    {
-        "name": "Lama Cleaner",
-        "id": "camenduru/Lama Cleaner",
-        "description": "Быстрое удаление объектов",
-        "priority": 3,
-    },
+    {"name": "1Paint", "id": "1Paint/1Paint", "priority": 1},
+    {"name": "SDXL Inpainting", "id": "diffusers/stable-diffusion-xl-inpainting", "priority": 2},
+    {"name": "Lama Cleaner", "id": "camenduru/Lama Cleaner", "priority": 3},
 ]
 
 # ============ ПРЕСЕТЫ ============
@@ -89,8 +74,6 @@ EDIT_PRESETS = {
     "preset_room": "change background to cozy living room interior",
     "preset_studio": "apply professional studio lighting and backdrop",
     "preset_artistic": "transform into artistic painting style",
-    "preset_portrait": "make professional portrait with soft studio lighting",
-    "preset_vintage": "apply vintage film photography style",
 }
 
 
@@ -125,8 +108,6 @@ def edit_type_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="🎨 Заменить фон", callback_data="edit_type_background")],
             [InlineKeyboardButton(text="🔄 Изменить стиль", callback_data="edit_type_style")],
-            [InlineKeyboardButton(text="➕ Добавить объект", callback_data="edit_type_add")],
-            [InlineKeyboardButton(text="✂️ Удалить объект", callback_data="edit_type_remove")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="mode_image_gen")],
         ]
     )
@@ -152,7 +133,7 @@ async def download_file_as_bytes(bot, file_info) -> bytes:
     return image_io.getvalue()
 
 def _build_url(path_or_url: str) -> str:
-    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
+    if path_or_url.startswith("http"):
         return path_or_url
     return f"{NVIDIA_BASE_URL}/{path_or_url}"
 
@@ -312,8 +293,8 @@ async def generate_video(prompt: str, selected_key: str) -> tuple[bytes, str]:
     all_404 = all(("HTTP 404" in err or "Not found for account" in err) for err in errors) if errors else False
     if all_404:
         raise Exception(
-            "Видео-модели NVIDIA недоступны для вашего аккаунта (404 Not found for account). "
-            "Проверьте доступные video endpoints в NVIDIA и подставьте рабочий путь модели."
+            "Видео-модели NVIDIA недоступны для вашего аккаунта. "
+            "Проверьте доступные video endpoints в NVIDIA."
         )
 
     last_error = errors[-1] if errors else "неизвестная ошибка"
@@ -321,15 +302,7 @@ async def generate_video(prompt: str, selected_key: str) -> tuple[bytes, str]:
 
 
 # ============ РЕДАКТИРОВАНИЕ ЧЕРЕЗ HUGGINGFACE SPACES ============
-async def generate_image_edit_free(
-    image_bytes: bytes,
-    prompt: str,
-    edit_type: str = "background"
-) -> tuple[bytes, str]:
-    """
-    Редактирует изображение через бесплатные HuggingFace Spaces.
-    """
-    # Создаём временный файл
+async def generate_image_edit_free(image_bytes: bytes, prompt: str, edit_type: str = "background") -> tuple[bytes, str]:
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
@@ -349,30 +322,15 @@ async def generate_image_edit_free(
                 client = Client(space_id, verbose=False)
                 
                 if space_name == "1Paint":
-                    result = client.predict(
-                        {"path": tmp_path},
-                        prompt,
-                        api_name="/predict"
-                    )
-                elif space_name == "Lama Cleaner":
-                    result = client.predict(
-                        tmp_path,
-                        prompt,
-                        api_name="/predict"
-                    )
+                    result = client.predict({"path": tmp_path}, prompt, api_name="/predict")
                 else:
-                    result = client.predict(
-                        tmp_path,
-                        prompt,
-                        api_name="/predict"
-                    )
+                    result = client.predict(tmp_path, prompt, api_name="/predict")
                 
                 if result is None:
                     continue
                 
                 result_bytes = None
                 
-                # Обработка разных форматов результата
                 if isinstance(result, str) and os.path.exists(result):
                     with open(result, "rb") as f:
                         result_bytes = f.read()
@@ -385,11 +343,6 @@ async def generate_image_edit_free(
                         os.remove(output_path)
                     except:
                         pass
-                elif isinstance(result, dict):
-                    path = result.get("path") or result.get("image") or result.get("output")
-                    if path and os.path.exists(path):
-                        with open(path, "rb") as f:
-                            result_bytes = f.read()
                 
                 if result_bytes and len(result_bytes) > 1000:
                     return result_bytes, f"HF: {space_name}"
@@ -401,10 +354,9 @@ async def generate_image_edit_free(
                 continue
         
         error_summary = errors[-1] if errors else "Все Space недоступны"
-        raise Exception(f"Не удалось отредактировать. Попробуйте позже.\nОшибка: {error_summary[:200]}")
+        raise Exception(f"Не удалось отредактировать. Ошибка: {error_summary[:200]}")
         
     finally:
-        # Удаляем временный файл
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
@@ -467,8 +419,6 @@ async def select_edit_type(callback: CallbackQuery, state: FSMContext):
     edit_type_map = {
         "edit_type_background": "background",
         "edit_type_style": "style",
-        "edit_type_add": "add",
-        "edit_type_remove": "remove",
     }
     
     edit_type = edit_type_map.get(callback.data)
@@ -481,8 +431,6 @@ async def select_edit_type(callback: CallbackQuery, state: FSMContext):
     type_descriptions = {
         "background": "Изменить фон изображения",
         "style": "Изменить стиль фото",
-        "add": "Добавить объект на фото",
-        "remove": "Удалить объект с фото",
     }
     
     await callback.message.edit_text(
@@ -645,7 +593,7 @@ async def handle_edit_photo(message: Message, state: FSMContext):
     status_msg = await message.answer("⏳ Скачиваю фото...", parse_mode="HTML")
 
     try:
-        # Скачиваем фото - ИСПРАВЛЕНО!
+        # ИСПРАВЛЕНО! Используем helper функцию
         file_info = await message.bot.get_file(message.photo[-1].file_id)
         image_bytes = await download_file_as_bytes(message.bot, file_info)
 
@@ -658,7 +606,6 @@ async def handle_edit_photo(message: Message, state: FSMContext):
         elif edit_instruction:
             instruction = edit_instruction
         else:
-            # Сохраняем фото и ждём инструкцию
             await state.update_data(edit_image_bytes=image_bytes)
             await status_msg.edit_text(
                 "📷 Фото получено!\n\n"
@@ -671,7 +618,7 @@ async def handle_edit_photo(message: Message, state: FSMContext):
             )
             return
 
-        # Обрабатываем сразу
+        # Обрабатываем
         await status_msg.edit_text("✏️ Обрабатываю...", parse_mode="HTML")
         await message.bot.send_chat_action(message.chat.id, "upload_photo")
 
@@ -689,7 +636,6 @@ async def handle_edit_photo(message: Message, state: FSMContext):
             reply_markup=cancel_keyboard(),
         )
 
-        # Сбрасываем состояние
         await state.update_data(
             edit_image_bytes=None,
             edit_instruction=None,
@@ -763,8 +709,6 @@ async def handle_edit_instruction(message: Message, state: FSMContext):
 async def handle_edit_document(message: Message, state: FSMContext):
     await message.answer("Отправь фото (не файл).", reply_markup=cancel_keyboard())
 
-
-# ============ ДОПОЛНИТЕЛЬНЫЕ КОМАНДЫ ============
 
 @router.message(F.text == "/cancel")
 async def cmd_cancel(message: Message, state: FSMContext):
