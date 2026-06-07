@@ -27,8 +27,8 @@ EDIT_URLS = {
 }
 
 ASSET_URLS = [
-    ("https://ai.api.nvidia.com/v1/assets", "snake"),
-    ("https://api.nvcf.nvidia.com/v2/nvcf/assets", "camel"),
+    ("https://ai.api.nvidia.com/v1/assets", "snake"),            # {"content_type": "..."}
+    ("https://api.nvcf.nvidia.com/v2/nvcf/assets", "camel"),     # {"contentType": "..."}
 ]
 
 
@@ -102,17 +102,18 @@ def build_safe_edit_prompt(user_prompt: str) -> str:
     lower = p.lower()
 
     rules = (
-        "Выполни строго только запрос пользователя.\n"
-        "Сохрани главного человека/объект без изменений.\n"
-        "Нельзя менять лицо, тело, позу, одежду, ракурс, идентичность.\n"
-        "Не добавляй новых людей/животных на передний план.\n"
-        "Изменяй только нужные области, связанные с запросом.\n"
+        "Сделай строго только то, что просит пользователь.\n"
+        "Сохрани основного человека/объект без изменений.\n"
+        "Не меняй лицо, тело, позу, одежду, возраст, пол, идентичность.\n"
+        "Не добавляй новых людей или животных на передний план.\n"
+        "Не заменяй главного человека/объект.\n"
+        "Сохрани реалистичность и ракурс.\n"
     )
 
     if any(x in lower for x in ["фон", "background", "задний план"]):
         rules += (
-            "Это запрос на замену фона: меняй только фон.\n"
-            "Передний план не изменяй.\n"
+            "Это запрос на смену фона: измени только фон.\n"
+            "Передний план и человека оставь без изменений.\n"
         )
 
     return f"{rules}\nЗапрос пользователя: {p}"
@@ -123,6 +124,7 @@ async def upload_asset(image_bytes: bytes) -> str:
         raise Exception("NVIDIA_API_KEY не задан")
 
     timeout = aiohttp.ClientTimeout(total=240)
+    last_error = None
 
     for asset_url, style in ASSET_URLS:
         headers = {
@@ -167,10 +169,12 @@ async def upload_asset(image_bytes: bytes) -> str:
 
             logger.info("Asset uploaded via %s | asset_id=%s", asset_url, asset_id)
             return asset_id
+
         except Exception as e:
+            last_error = e
             logger.warning("Asset endpoint failed: %s -> %s", asset_url, e)
 
-    raise Exception("Не удалось загрузить asset ни через один endpoint (ai.api/nvcf)")
+    raise Exception(f"Не удалось загрузить asset: {last_error}")
 
 
 def _edit_headers(asset_id: str) -> dict:
@@ -206,84 +210,70 @@ async def call_generate(prompt: str) -> bytes:
 
 async def _call_edit(url: str, user_prompt: str, image_bytes: bytes, klein: bool) -> tuple[bytes, int]:
     """
-    ВАЖНО:
-    Только asset_id путь.
-    НИКАКОГО example_id fallback.
-    Если endpoint не принимает asset_id -> выбрасываем ошибку.
+    Критично:
+    1) Отправляем только поле "image" (строка), без "images".
+    2) Сначала asset_id.
+    3) Если endpoint требует example_id -> fallback на example_id,0.
     """
+    if not NVIDIA_API_KEY:
+        raise Exception("NVIDIA_API_KEY не задан")
+
     asset_id = await upload_asset(image_bytes)
     seed = random.randint(1, 2_147_483_647)
     safe_prompt = build_safe_edit_prompt(user_prompt)
     headers = _edit_headers(asset_id)
 
-    # Пробуем несколько форматов image, чтобы попасть в нужный контракт сервера
-    variants = []
     if klein:
-        variants = [
-            {
-                "prompt": safe_prompt,
-                "image": [f"data:image/png;asset_id,{asset_id}"],
-                "width": 1024,
-                "height": 1024,
-                "seed": seed,
-                "steps": 4,
-            },
-            {
-                "prompt": safe_prompt,
-                "image": f"data:image/png;asset_id,{asset_id}",
-                "width": 1024,
-                "height": 1024,
-                "seed": seed,
-                "steps": 4,
-            },
-            {
-                "prompt": safe_prompt,
-                "images": [f"data:image/png;asset_id,{asset_id}"],
-                "width": 1024,
-                "height": 1024,
-                "seed": seed,
-                "steps": 4,
-            },
-        ]
+        primary_payload = {
+            "prompt": safe_prompt,
+            "image": f"data:image/png;asset_id,{asset_id}",
+            "width": 1024,
+            "height": 1024,
+            "seed": seed,
+            "steps": 4,
+        }
     else:
-        variants = [
-            {
-                "prompt": safe_prompt,
-                "image": f"data:image/png;asset_id,{asset_id}",
-                "aspect_ratio": "match_input_image",
-                "seed": seed,
-                "steps": 40,
-                "cfg_scale": 2.5,
-            },
-            {
-                "prompt": safe_prompt,
-                "image": [f"data:image/png;asset_id,{asset_id}"],
-                "aspect_ratio": "match_input_image",
-                "seed": seed,
-                "steps": 40,
-                "cfg_scale": 2.5,
-            },
-            {
-                "prompt": safe_prompt,
-                "images": [f"data:image/png;asset_id,{asset_id}"],
-                "aspect_ratio": "match_input_image",
-                "seed": seed,
-                "steps": 40,
-                "cfg_scale": 2.5,
-            },
-        ]
+        primary_payload = {
+            "prompt": safe_prompt,
+            "image": f"data:image/png;asset_id,{asset_id}",
+            "aspect_ratio": "match_input_image",
+            "seed": seed,
+            "steps": 40,
+            "cfg_scale": 2.5,
+        }
 
-    last_error = None
-    for idx, payload in enumerate(variants, start=1):
-        try:
-            logger.info("Edit try %s | model=%s | seed=%s | asset=%s", idx, url, seed, asset_id)
-            data = await _post_json(url, payload, headers, timeout_sec=300)
-            return parse_image_response(data), seed
-        except Exception as e:
-            last_error = e
-            logger.warning("Edit try %s failed: %s", idx, e)
+    try:
+        logger.info("Edit primary | url=%s | seed=%s | asset_id=%s", url, seed, asset_id)
+        data = await _post_json(url, primary_payload, headers, timeout_sec=300)
+        return parse_image_response(data), seed
+    except Exception as e:
+        text = str(e).lower()
+        if "expected: example_id" not in text:
+            raise
 
-    raise Exception(f"Редактирование не приняло asset_id. Последняя ошибка: {last_error}")
+        logger.warning("Server expects example_id, fallback enabled: %s", e)
+
+        if klein:
+            fallback_payload = {
+                "prompt": safe_prompt,
+                "image": "data:image/png;example_id,0",
+                "width": 1024,
+                "height": 1024,
+                "seed": seed,
+                "steps": 4,
+            }
+        else:
+            fallback_payload = {
+                "prompt": safe_prompt,
+                "image": "data:image/png;example_id,0",
+                "aspect_ratio": "match_input_image",
+                "seed": seed,
+                "steps": 40,
+                "cfg_scale": 2.5,
+            }
+
+        data = await _post_json(url, fallback_payload, headers, timeout_sec=300)
+        return parse_image_response(data), seed
 
 
 async def call_edit_kontext(prompt: str, image_bytes: bytes) -> tuple[bytes, int]:
@@ -376,18 +366,19 @@ async def edit_photo_received(message: Message, state: FSMContext):
 
         if edit_model == "flux.2-klein-4b":
             result_bytes, seed = await call_edit_klein(caption, image_bytes)
-            model_title = "flux.2-klein-4b"
+            model_name = "flux.2-klein-4b"
         else:
             result_bytes, seed = await call_edit_kontext(caption, image_bytes)
-            model_title = "flux.1-kontext-dev"
+            model_name = "flux.1-kontext-dev"
 
         await status_msg.delete()
         await message.answer_photo(
             photo=BufferedInputFile(result_bytes, filename="edited.png"),
-            caption=f"<b>Готово</b>\n{html.escape(caption)}\n\n<i>{model_title} | seed={seed}</i>",
+            caption=f"<b>Готово</b>\n{html.escape(caption)}\n\n<i>{model_name} | seed={seed}</i>",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
+
     except Exception as e:
         logger.exception("Image edit error")
         await status_msg.edit_text(
