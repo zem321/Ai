@@ -26,14 +26,20 @@ HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN")
 # NVIDIA: только генерация
 GEN_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
 
-# Hugging Face: только редактирование
+# UI-ключи моделей
+# Важно: FLUX Kontext обычно НЕ поддерживается провайдером hf-inference
+# Поэтому для hf-inference используем отдельную совместимую модель.
 HF_EDIT_MODELS = {
     "flux.1-kontext-dev": "black-forest-labs/FLUX.1-Kontext-dev",
-    "flux.2-klein-4b": "black-forest-labs/FLUX.1-Kontext-dev",  # для edit используем Kontext
+    "flux.2-klein-4b": "black-forest-labs/FLUX.1-Kontext-dev",
 }
 
-# По умолчанию только hf-inference (чтобы не уходить в платные провайдеры fal/replicate)
-# Можно переопределить: HF_EDIT_PROVIDERS="hf-inference,auto"
+HF_INFERENCE_EDIT_MODEL = os.getenv("HF_INFERENCE_EDIT_MODEL", "timbrooks/instruct-pix2pix")
+
+# По умолчанию только hf-inference (бесплатный путь, если доступен)
+# Можно переопределить:
+# HF_EDIT_PROVIDERS="hf-inference,auto"
+# HF_EDIT_PROVIDERS="replicate,fal-ai,hf-inference,auto"
 HF_EDIT_PROVIDERS = [
     p.strip()
     for p in (os.getenv("HF_EDIT_PROVIDERS") or "hf-inference").split(",")
@@ -190,11 +196,14 @@ async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1
     last_error = None
     for provider in HF_EDIT_PROVIDERS:
         try:
-            logger.info("HF edit attempt: provider=%s model=%s", provider, model_id)
+            # Для hf-inference используем совместимую модель
+            provider_model_id = HF_INFERENCE_EDIT_MODEL if provider == "hf-inference" else model_id
+
+            logger.info("HF edit attempt: provider=%s model=%s", provider, provider_model_id)
             result_bytes = await asyncio.to_thread(
                 _sync_hf_image_to_image,
                 provider,
-                model_id,
+                provider_model_id,
                 HF_TOKEN,
                 image_bytes,
                 safe_prompt,
@@ -218,6 +227,10 @@ async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1
                     "Лимит Hugging Face исчерпан или нужен billing. "
                     "Пополните кредиты/включите billing, либо дождитесь сброса лимита."
                 )
+
+            # Если модель не поддерживается провайдером, идем к следующему
+            if "model not supported by provider" in msg.lower():
+                continue
 
             continue
 
@@ -243,11 +256,11 @@ async def do_generate_image(message: Message, state: FSMContext):
     status_msg = await message.answer("Генерирую изображение...", parse_mode="HTML")
 
     try:
-        image_bytes = await call_generate(message.text)
+        image_bytes = await call_generate(message.text or "")
         await status_msg.delete()
         await message.answer_photo(
             photo=BufferedInputFile(image_bytes, filename="generated.png"),
-            caption=f"<b>Готово</b>\n{html.escape(message.text)}",
+            caption=f"<b>Готово</b>\n{html.escape(message.text or '')}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
@@ -271,7 +284,7 @@ async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
         "Выбери модель:\n\n"
         "<b>Flux.1 Kontext</b> — точное редактирование\n"
         "<b>Flux.2 Klein</b> — быстрое редактирование\n\n"
-        "<i>Работает через Hugging Face (принимает ваши фото)</i>",
+        "<i>Работает через Hugging Face</i>",
         reply_markup=edit_model_keyboard(),
         parse_mode="HTML",
     )
@@ -327,9 +340,8 @@ async def edit_photo_received(message: Message, state: FSMContext):
         )
     except Exception as e:
         logger.exception("Image edit error")
-        err_text = html.escape(str(e))
         await status_msg.edit_text(
-            f"Ошибка редактирования:\n{err_text}",
+            f"Ошибка редактирования:\n{html.escape(str(e))}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
