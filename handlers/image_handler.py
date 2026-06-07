@@ -27,8 +27,8 @@ EDIT_URLS = {
 }
 
 ASSET_URLS = [
-    ("https://ai.api.nvidia.com/v1/assets", "snake"),            # {"content_type": "..."}
-    ("https://api.nvcf.nvidia.com/v2/nvcf/assets", "camel"),     # {"contentType": "..."}
+    ("https://ai.api.nvidia.com/v1/assets", "snake"),
+    ("https://api.nvcf.nvidia.com/v2/nvcf/assets", "camel"),
 ]
 
 
@@ -103,10 +103,10 @@ def build_safe_edit_prompt(user_prompt: str) -> str:
 
     rules = (
         "Сделай строго только то, что просит пользователь.\n"
-        "Сохрани основного человека/объект без изменений.\n"
+        "Сохрани основного человека или объект без изменений.\n"
         "Не меняй лицо, тело, позу, одежду, возраст, пол, идентичность.\n"
         "Не добавляй новых людей или животных на передний план.\n"
-        "Не заменяй главного человека/объект.\n"
+        "Не заменяй главного человека или объект.\n"
         "Сохрани реалистичность и ракурс.\n"
     )
 
@@ -210,10 +210,8 @@ async def call_generate(prompt: str) -> bytes:
 
 async def _call_edit(url: str, user_prompt: str, image_bytes: bytes, klein: bool) -> tuple[bytes, int]:
     """
-    Критично:
-    1) Отправляем только поле "image" (строка), без "images".
-    2) Сначала asset_id.
-    3) Если endpoint требует example_id -> fallback на example_id,0.
+    Только user asset_id, без fallback на example_id.
+    Если endpoint требует example_id, возвращаем понятную ошибку.
     """
     if not NVIDIA_API_KEY:
         raise Exception("NVIDIA_API_KEY не задан")
@@ -224,7 +222,7 @@ async def _call_edit(url: str, user_prompt: str, image_bytes: bytes, klein: bool
     headers = _edit_headers(asset_id)
 
     if klein:
-        primary_payload = {
+        payload = {
             "prompt": safe_prompt,
             "image": f"data:image/png;asset_id,{asset_id}",
             "width": 1024,
@@ -233,7 +231,7 @@ async def _call_edit(url: str, user_prompt: str, image_bytes: bytes, klein: bool
             "steps": 4,
         }
     else:
-        primary_payload = {
+        payload = {
             "prompt": safe_prompt,
             "image": f"data:image/png;asset_id,{asset_id}",
             "aspect_ratio": "match_input_image",
@@ -243,37 +241,18 @@ async def _call_edit(url: str, user_prompt: str, image_bytes: bytes, klein: bool
         }
 
     try:
-        logger.info("Edit primary | url=%s | seed=%s | asset_id=%s", url, seed, asset_id)
-        data = await _post_json(url, primary_payload, headers, timeout_sec=300)
+        logger.info("Edit request | model=%s | seed=%s | asset_id=%s", url, seed, asset_id)
+        data = await _post_json(url, payload, headers, timeout_sec=300)
         return parse_image_response(data), seed
     except Exception as e:
-        text = str(e).lower()
-        if "expected: example_id" not in text:
-            raise
-
-        logger.warning("Server expects example_id, fallback enabled: %s", e)
-
-        if klein:
-            fallback_payload = {
-                "prompt": safe_prompt,
-                "image": "data:image/png;example_id,0",
-                "width": 1024,
-                "height": 1024,
-                "seed": seed,
-                "steps": 4,
-            }
-        else:
-            fallback_payload = {
-                "prompt": safe_prompt,
-                "image": "data:image/png;example_id,0",
-                "aspect_ratio": "match_input_image",
-                "seed": seed,
-                "steps": 40,
-                "cfg_scale": 2.5,
-            }
-
-        data = await _post_json(url, fallback_payload, headers, timeout_sec=300)
-        return parse_image_response(data), seed
+        err = str(e).lower()
+        if "expected: example_id" in err:
+            raise Exception(
+                "Этот NVIDIA endpoint для редактирования в вашем аккаунте принимает только example_id "
+                "(демо-шаблоны), поэтому пользовательское фото не применяется. "
+                "Нужен другой endpoint с поддержкой asset_id или другой провайдер для image edit."
+            )
+        raise
 
 
 async def call_edit_kontext(prompt: str, image_bytes: bytes) -> tuple[bytes, int]:
