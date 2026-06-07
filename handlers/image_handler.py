@@ -1,447 +1,351 @@
 import os
 import io
-import re
 import json
 import html
 import base64
 import random
 import logging
-import asyncio
-from typing import Optional
-
 import aiohttp
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, BufferedInputFile
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    BufferedInputFile,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
 from aiogram.fsm.context import FSMContext
-from PIL import Image
-from huggingface_hub import InferenceClient, model_info
 
-from keyboards import cancel_keyboard, edit_model_keyboard
+from keyboards import cancel_keyboard
 from states import BotStates
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN")
+NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://ai.api.nvidia.com/v1/genai")
 
-# NVIDIA: только генерация
-GEN_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
-
-# UI ключи (клавиатуру не меняем)
-HF_EDIT_MODELS = {
-    "flux.1-kontext-dev": "black-forest-labs/FLUX.1-Kontext-dev",
-    "flux.2-klein-4b": "black-forest-labs/FLUX.1-Kontext-dev",
+# Несколько моделей для генерации картинок
+IMAGE_MODELS = {
+    "img_flux2": {
+        "title": "Flux 2 Klein (быстро)",
+        "path": "black-forest-labs/flux.2-klein-4b",
+    },
+    "img_flux1": {
+        "title": "Flux 1 Schnell",
+        "path": "black-forest-labs/flux.1-schnell",
+    },
+    "img_sdxl": {
+        "title": "Stable Diffusion XL",
+        "path": "stabilityai/stable-diffusion-xl",
+    },
 }
 
-# По умолчанию только бесплатный путь
-HF_EDIT_PROVIDERS = [
-    p.strip()
-    for p in (os.getenv("HF_EDIT_PROVIDERS") or "hf-inference").split(",")
-    if p.strip()
-]
-
-# Кандидаты для hf-inference (можно переопределить через ENV)
-HF_INFERENCE_EDIT_MODELS = [
-    m.strip()
-    for m in (
-        os.getenv("HF_INFERENCE_EDIT_MODELS")
-        or "timbrooks/instruct-pix2pix"
-    ).split(",")
-    if m.strip()
-]
-
-
-def compress_image(image_bytes: bytes, max_side: int = 1024) -> bytes:
-    img = Image.open(io.BytesIO(image_bytes))
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-    img.thumbnail((max_side, max_side), Image.LANCZOS)
-    out = io.BytesIO()
-    img.save(out, format="PNG")
-    return out.getvalue()
+# Несколько моделей для видео
+VIDEO_MODELS = {
+    "vid_ltx": {
+        "title": "LTX Video",
+        "path": "lightricks/ltx-video",
+    },
+    "vid_cog": {
+        "title": "CogVideoX",
+        "path": "THUDM/cogvideox-5b",
+    },
+    "vid_svd": {
+        "title": "Stable Video Diffusion",
+        "path": "stabilityai/stable-video-diffusion",
+    },
+}
 
 
-def build_safe_edit_prompt(user_prompt: str) -> str:
-    p = (user_prompt or "").strip()
-    lower = p.lower()
-
-    rules = (
-        "Perform strictly only the requested change. "
-        "Keep the main person/object on the photo unchanged. "
-        "Do NOT change face, body, pose, clothes, age, gender, identity. "
-        "Do NOT add new people or animals to the foreground. "
-        "Do NOT replace the main subject. "
-        "Keep realism and camera angle. "
+def gen_type_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🖼 Картинка", callback_data="gen_type_image")],
+            [InlineKeyboardButton(text="🎬 Видео", callback_data="gen_type_video")],
+            [InlineKeyboardButton(text="◀️ Меню", callback_data="main_menu")],
+        ]
     )
 
-    if any(x in lower for x in ["фон", "background", "задний план"]):
-        rules += "Change ONLY the background. Keep the foreground and the person untouched. "
 
-    return f"{rules}{p}"
+def image_model_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    for key, data in IMAGE_MODELS.items():
+        rows.append([InlineKeyboardButton(text=data["title"], callback_data=f"gen_model_{key}")])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="mode_image_gen")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def call_generate(prompt: str) -> bytes:
+def video_model_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    for key, data in VIDEO_MODELS.items():
+        rows.append([InlineKeyboardButton(text=data["title"], callback_data=f"gen_model_{key}")])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="mode_image_gen")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _post_nvidia(model_path: str, payload: dict) -> dict:
     if not NVIDIA_API_KEY:
         raise Exception("NVIDIA_API_KEY не задан")
 
-    payload = {
-        "prompt": prompt,
-        "width": 1024,
-        "height": 1024,
-        "seed": random.randint(1, 2_147_483_647),
-        "steps": 4,
-    }
+    url = f"{NVIDIA_BASE_URL}/{model_path}"
     headers = {
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
         "Accept": "application/json",
         "Content-Type": "application/json",
     }
 
-    timeout = aiohttp.ClientTimeout(total=240)
+    timeout = aiohttp.ClientTimeout(total=300)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(GEN_URL, json=payload, headers=headers) as resp:
+        async with session.post(url, json=payload, headers=headers) as resp:
             raw = await resp.text()
-            parsed = None
             try:
-                parsed = json.loads(raw)
+                data = json.loads(raw)
             except Exception:
-                pass
+                data = {"raw": raw}
 
             if resp.status != 200:
-                err = ""
-                if isinstance(parsed, dict):
-                    if isinstance(parsed.get("detail"), str):
-                        err = parsed["detail"]
-                    elif isinstance(parsed.get("error"), dict):
-                        err = parsed["error"].get("message", "")
-                raise Exception(f"NVIDIA gen error: HTTP {resp.status}: {err or raw[:500]}")
+                detail = ""
+                if isinstance(data, dict):
+                    if isinstance(data.get("detail"), str):
+                        detail = data["detail"]
+                    elif isinstance(data.get("error"), dict):
+                        detail = data["error"].get("message", "")
+                raise Exception(f"HTTP {resp.status}: {detail or raw[:400]}")
 
-            data = parsed if isinstance(parsed, dict) else {}
-            artifacts = data.get("artifacts")
-            if isinstance(artifacts, list) and artifacts and isinstance(artifacts[0], dict):
-                b64 = artifacts[0].get("base64")
-                if b64:
-                    return base64.b64decode(b64)
+            if not isinstance(data, dict):
+                raise Exception(f"Невалидный ответ NVIDIA: {str(data)[:300]}")
 
-            d = data.get("data")
-            if isinstance(d, list) and d and isinstance(d[0], dict):
-                b64 = d[0].get("b64_json")
-                if b64:
-                    return base64.b64decode(b64)
-
-            raise Exception(f"Изображение не получено от генерации: {str(data)[:500]}")
+            return data
 
 
-def _pil_to_png_bytes(img: Image.Image) -> bytes:
-    out = io.BytesIO()
-    img.save(out, format="PNG")
-    return out.getvalue()
+async def _download_url_bytes(url: str) -> bytes:
+    timeout = aiohttp.ClientTimeout(total=300)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                txt = await resp.text()
+                raise Exception(f"Ошибка скачивания файла: HTTP {resp.status}: {txt[:200]}")
+            return await resp.read()
 
 
-def _supports_provider_task(model_id: str, provider: str, task: str = "image-to-image") -> bool:
-    try:
-        info = model_info(model_id, expand="inferenceProviderMapping")
-        mapping = getattr(info, "inference_provider_mapping", None) or {}
-        item = mapping.get(provider)
-        if item is None:
-            return False
-        provider_task = getattr(item, "task", None)
-        if provider_task is None and isinstance(item, dict):
-            provider_task = item.get("task")
-        return provider_task == task
-    except Exception:
-        return False
+def _extract_image_bytes(data: dict) -> bytes:
+    artifacts = data.get("artifacts")
+    if isinstance(artifacts, list) and artifacts and isinstance(artifacts[0], dict):
+        b64 = artifacts[0].get("base64")
+        if b64:
+            return base64.b64decode(b64)
+
+    arr = data.get("data")
+    if isinstance(arr, list) and arr and isinstance(arr[0], dict):
+        b64 = arr[0].get("b64_json")
+        if b64:
+            return base64.b64decode(b64)
+
+    raise Exception(f"Изображение не найдено в ответе: {str(data)[:400]}")
 
 
-def _sync_hf_image_to_image(
-    provider: str,
-    model_id: Optional[str],
-    token: str,
-    image_bytes: bytes,
-    prompt: str,
-    seed: int,
-) -> bytes:
-    client = InferenceClient(provider=provider, api_key=token, timeout=300)
+async def _extract_video_bytes(data: dict) -> bytes:
+    # Вариант 1: base64
+    artifacts = data.get("artifacts")
+    if isinstance(artifacts, list) and artifacts and isinstance(artifacts[0], dict):
+        b64 = artifacts[0].get("base64")
+        if b64:
+            return base64.b64decode(b64)
 
-    kwargs = {
-        "prompt": prompt,
-        "guidance_scale": 3.5,
-        "num_inference_steps": 30,
-        "seed": seed,
-    }
-    if model_id:
-        kwargs["model"] = model_id
+    arr = data.get("data")
+    if isinstance(arr, list) and arr and isinstance(arr[0], dict):
+        b64 = arr[0].get("b64_json")
+        if b64:
+            return base64.b64decode(b64)
 
-    try:
-        result = client.image_to_image(image_bytes, **kwargs)
-    except TypeError:
-        kwargs.pop("guidance_scale", None)
-        kwargs.pop("num_inference_steps", None)
-        kwargs.pop("seed", None)
-        result = client.image_to_image(image_bytes, **kwargs)
+    # Вариант 2: ссылка на файл
+    for key in ("video_url", "url", "output_url", "download_url"):
+        val = data.get(key)
+        if isinstance(val, str) and val.startswith("http"):
+            return await _download_url_bytes(val)
 
-    if isinstance(result, Image.Image):
-        return _pil_to_png_bytes(result)
-    if isinstance(result, (bytes, bytearray)):
-        return bytes(result)
+    if isinstance(arr, list) and arr and isinstance(arr[0], dict):
+        for key in ("video_url", "url", "output_url", "download_url"):
+            val = arr[0].get(key)
+            if isinstance(val, str) and val.startswith("http"):
+                return await _download_url_bytes(val)
 
-    raise Exception(f"Неподдерживаемый тип ответа от HF: {type(result)}")
+    raise Exception(f"Видео не найдено в ответе: {str(data)[:400]}")
 
 
-def _is_auth_error(msg: str) -> bool:
-    m = (msg or "").lower()
-    if "unauthorized" in m or "forbidden" in m or "invalid token" in m:
-        return True
-    # Проверяем именно HTTP-код, а не случайные цифры в request id
-    if re.search(r"http\s*401", m) or re.search(r"http\s*403", m):
-        return True
-    if re.search(r"status\s*401", m) or re.search(r"status\s*403", m):
-        return True
-    return False
-
-
-def _is_quota_error(msg: str) -> bool:
-    m = (msg or "").lower()
-    return (
-        "402" in m
-        or "quota" in m
-        or "credit" in m
-        or "payment" in m
-        or "billing" in m
-        or "rate limit" in m
-        or "too many requests" in m
-    )
-
-
-def _is_model_task_error(msg: str) -> bool:
-    m = (msg or "").lower()
-    return (
-        "model not supported by provider" in m
-        or "doesn't support task" in m
-        or "supported tasks" in m
-        or "got: 'image-to-image'" in m
-    )
-
-
-async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1-kontext-dev") -> bytes:
-    if not HF_TOKEN:
-        raise Exception("HF_TOKEN не задан. Добавьте переменную HF_TOKEN в Railway.")
-
-    selected_model = HF_EDIT_MODELS.get(model_key, "black-forest-labs/FLUX.1-Kontext-dev")
-    safe_prompt = build_safe_edit_prompt(prompt)
-
+async def generate_image(prompt: str, selected_key: str) -> tuple[bytes, str]:
+    model_keys = [selected_key] + [k for k in IMAGE_MODELS.keys() if k != selected_key]
     last_error = None
 
-    for provider in HF_EDIT_PROVIDERS:
+    for key in model_keys:
+        model = IMAGE_MODELS[key]
+        payload = {
+            "prompt": prompt,
+            "width": 1024,
+            "height": 1024,
+            "steps": 4,
+            "seed": random.randint(1, 2_147_483_647),
+        }
         try:
-            if provider == "hf-inference":
-                # 1) Сначала пробуем recommended model (без явного model=...)
-                # 2) Потом кандидаты из ENV, которые поддерживают image-to-image
-                verified = [
-                    m for m in HF_INFERENCE_EDIT_MODELS
-                    if _supports_provider_task(m, "hf-inference", "image-to-image")
-                ]
-                fallback_models = [m for m in HF_INFERENCE_EDIT_MODELS if m not in verified]
-                candidate_models: list[Optional[str]] = [None] + verified + fallback_models
-
-                provider_error = None
-                for candidate in candidate_models:
-                    try:
-                        logger.info(
-                            "HF edit attempt: provider=%s model=%s",
-                            provider,
-                            candidate or "<recommended>",
-                        )
-                        result_bytes = await asyncio.to_thread(
-                            _sync_hf_image_to_image,
-                            provider,
-                            candidate,
-                            HF_TOKEN,
-                            image_bytes,
-                            safe_prompt,
-                            random.randint(1, 2_147_483_647),
-                        )
-
-                        if len(result_bytes) < 1000:
-                            raise Exception(f"Слишком маленький ответ: {len(result_bytes)} байт")
-
-                        return result_bytes
-                    except Exception as e:
-                        provider_error = e
-                        msg = str(e)
-                        logger.warning(
-                            "HF edit failed with provider=%s model=%s: %s",
-                            provider,
-                            candidate or "<recommended>",
-                            msg,
-                        )
-
-                        if msg.startswith("HF auth error:"):
-                            raise
-                        if _is_auth_error(msg):
-                            raise Exception(f"HF auth error: {msg}")
-                        if _is_quota_error(msg):
-                            raise Exception(
-                                "Лимит Hugging Face исчерпан или нужен billing. "
-                                "Пополните кредиты/включите billing, либо дождитесь сброса лимита."
-                            )
-
-                        # Если модель не подходит по задаче - пробуем следующую
-                        if _is_model_task_error(msg):
-                            continue
-
-                        continue
-
-                raise Exception(
-                    "hf-inference не смог выполнить image-to-image. "
-                    f"Последняя ошибка: {provider_error}"
-                )
-
-            # Для других провайдеров используем выбранную FLUX модель
-            logger.info("HF edit attempt: provider=%s model=%s", provider, selected_model)
-            result_bytes = await asyncio.to_thread(
-                _sync_hf_image_to_image,
-                provider,
-                selected_model,
-                HF_TOKEN,
-                image_bytes,
-                safe_prompt,
-                random.randint(1, 2_147_483_647),
-            )
-
-            if len(result_bytes) < 1000:
-                raise Exception(f"Слишком маленький ответ: {len(result_bytes)} байт")
-
-            return result_bytes
-
+            logger.info("Image attempt model=%s", model["path"])
+            data = await _post_nvidia(model["path"], payload)
+            return _extract_image_bytes(data), model["title"]
         except Exception as e:
-            msg = str(e)
             last_error = e
-            logger.warning("HF edit failed with provider=%s: %s", provider, msg)
-
-            if msg.startswith("HF auth error:"):
-                raise
-            if _is_auth_error(msg):
-                raise Exception(f"HF auth error: {msg}")
-            if _is_quota_error(msg):
-                raise Exception(
-                    "Лимит Hugging Face исчерпан или нужен billing. "
-                    "Пополните кредиты/включите billing, либо дождитесь сброса лимита."
-                )
-
+            logger.warning("Image model failed model=%s error=%s", model["path"], str(e))
             continue
 
-    raise Exception(f"HF редактирование не удалось. Последняя ошибка: {last_error}")
+    raise Exception(f"Генерация картинки не удалась. Последняя ошибка: {last_error}")
 
 
-# ── Генерация ──────────────────────────────────────────────────────────────────
+async def generate_video(prompt: str, selected_key: str) -> tuple[bytes, str]:
+    model_keys = [selected_key] + [k for k in VIDEO_MODELS.keys() if k != selected_key]
+    last_error = None
+
+    for key in model_keys:
+        model = VIDEO_MODELS[key]
+        payload = {
+            "prompt": prompt,
+            "seed": random.randint(1, 2_147_483_647),
+            "duration": 4,
+            "fps": 16,
+        }
+        try:
+            logger.info("Video attempt model=%s", model["path"])
+            data = await _post_nvidia(model["path"], payload)
+            video_bytes = await _extract_video_bytes(data)
+            if len(video_bytes) < 2000:
+                raise Exception(f"Слишком маленький видео-файл: {len(video_bytes)} байт")
+            return video_bytes, model["title"]
+        except Exception as e:
+            last_error = e
+            logger.warning("Video model failed model=%s error=%s", model["path"], str(e))
+            continue
+
+    raise Exception(f"Генерация видео не удалась. Последняя ошибка: {last_error}")
+
 
 @router.callback_query(F.data == "mode_image_gen")
-async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
+async def enter_generation(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_generate)
+    await state.update_data(gen_type=None, gen_model=None)
     await callback.message.edit_text(
-        "<b>Генерация изображения</b>\n\nОпиши, что нужно создать.",
-        reply_markup=cancel_keyboard(),
+        "<b>Генерация</b>\n\nВыбери, что создать:",
         parse_mode="HTML",
+        reply_markup=gen_type_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "mode_image_edit")
+async def edit_mode_disabled(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "<b>Редактирование фото отключено</b>\n\nИспользуй генерацию картинки или видео.",
+        parse_mode="HTML",
+        reply_markup=cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "gen_type_image")
+async def select_image_model(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(BotStates.image_generate)
+    await state.update_data(gen_type="image", gen_model="img_flux2")
+    await callback.message.edit_text(
+        "<b>Генерация картинки</b>\n\nВыбери модель:",
+        parse_mode="HTML",
+        reply_markup=image_model_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "gen_type_video")
+async def select_video_model(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(BotStates.image_generate)
+    await state.update_data(gen_type="video", gen_model="vid_ltx")
+    await callback.message.edit_text(
+        "<b>Генерация видео</b>\n\nВыбери модель:",
+        parse_mode="HTML",
+        reply_markup=video_model_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("gen_model_"))
+async def set_generation_model(callback: CallbackQuery, state: FSMContext):
+    key = callback.data.replace("gen_model_", "", 1)
+    data = await state.get_data()
+    gen_type = data.get("gen_type")
+
+    if gen_type == "image" and key in IMAGE_MODELS:
+        await state.update_data(gen_model=key)
+        title = IMAGE_MODELS[key]["title"]
+    elif gen_type == "video" and key in VIDEO_MODELS:
+        await state.update_data(gen_model=key)
+        title = VIDEO_MODELS[key]["title"]
+    else:
+        await callback.answer("Неверная модель", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        f"<b>Выбрано:</b> {html.escape(title)}\n\nТеперь отправь текстовый запрос.",
+        parse_mode="HTML",
+        reply_markup=cancel_keyboard(),
     )
     await callback.answer()
 
 
 @router.message(BotStates.image_generate, F.text)
-async def do_generate_image(message: Message, state: FSMContext):
-    await message.bot.send_chat_action(message.chat.id, "upload_photo")
-    status_msg = await message.answer("Генерирую изображение...", parse_mode="HTML")
+async def do_generate(message: Message, state: FSMContext):
+    data = await state.get_data()
+    gen_type = data.get("gen_type")
+    gen_model = data.get("gen_model")
 
-    try:
-        image_bytes = await call_generate(message.text or "")
-        await status_msg.delete()
-        await message.answer_photo(
-            photo=BufferedInputFile(image_bytes, filename="generated.png"),
-            caption=f"<b>Готово</b>\n{html.escape(message.text or '')}",
-            parse_mode="HTML",
+    if not gen_type:
+        await message.answer(
+            "Сначала выбери режим генерации в меню.",
             reply_markup=cancel_keyboard(),
         )
+        return
+
+    prompt = (message.text or "").strip()
+    if not prompt:
+        await message.answer("Отправь текстовый запрос.")
+        return
+
+    action = "upload_photo" if gen_type == "image" else "upload_video"
+    await message.bot.send_chat_action(message.chat.id, action)
+
+    status_msg = await message.answer("Генерирую, подожди...", parse_mode="HTML")
+
+    try:
+        if gen_type == "image":
+            selected = gen_model if gen_model in IMAGE_MODELS else "img_flux2"
+            image_bytes, used_model = await generate_image(prompt, selected)
+
+            await status_msg.delete()
+            await message.answer_photo(
+                photo=BufferedInputFile(image_bytes, filename="generated.png"),
+                caption=f"<b>Готово</b>\nМодель: {html.escape(used_model)}\n\n{html.escape(prompt)}",
+                parse_mode="HTML",
+                reply_markup=cancel_keyboard(),
+            )
+        else:
+            selected = gen_model if gen_model in VIDEO_MODELS else "vid_ltx"
+            video_bytes, used_model = await generate_video(prompt, selected)
+
+            await status_msg.delete()
+            await message.answer_video(
+                video=BufferedInputFile(video_bytes, filename="generated.mp4"),
+                caption=f"<b>Готово</b>\nМодель: {html.escape(used_model)}\n\n{html.escape(prompt)}",
+                parse_mode="HTML",
+                reply_markup=cancel_keyboard(),
+            )
     except Exception as e:
-        logger.exception("Image gen error")
+        logger.exception("Generation error")
         await status_msg.edit_text(
             f"Ошибка генерации:\n<code>{html.escape(str(e))}</code>",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
-
-
-# ── Редактирование ─────────────────────────────────────────────────────────────
-
-@router.callback_query(F.data == "mode_image_edit")
-async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(BotStates.image_edit)
-    await state.update_data(edit_step="choose_model")
-    await callback.message.edit_text(
-        "<b>Редактирование фото</b>\n\n"
-        "Выбери модель:\n\n"
-        "<b>Flux.1 Kontext</b> — точное редактирование\n"
-        "<b>Flux.2 Klein</b> — быстрое редактирование\n\n"
-        "<i>Работает через Hugging Face</i>",
-        reply_markup=edit_model_keyboard(),
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("editmodel_"))
-async def edit_model_selected(callback: CallbackQuery, state: FSMContext):
-    model_key = callback.data.replace("editmodel_", "", 1)
-    await state.update_data(edit_model=model_key, edit_step="waiting_photo")
-    await callback.message.edit_text(
-        "Отправь фото с подписью (что изменить).\n\n"
-        "<i>Примеры:</i>\n"
-        "• Смени фон на сад\n"
-        "• Добавь солнечные очки\n"
-        "• Измени цвет шапки на красный",
-        reply_markup=cancel_keyboard(),
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
-
-@router.message(BotStates.image_edit, F.photo)
-async def edit_photo_received(message: Message, state: FSMContext):
-    caption = (message.caption or "").strip()
-    if not caption:
-        await message.answer(
-            "Добавь задание как подпись к фото.",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard(),
-        )
-        return
-
-    data = await state.get_data()
-    edit_model = data.get("edit_model", "flux.1-kontext-dev")
-
-    status_msg = await message.answer("Обрабатываю фото...", parse_mode="HTML")
-    try:
-        photo = message.photo[-1]
-        file = await message.bot.get_file(photo.file_id)
-        file_obj = await message.bot.download_file(file.file_path)
-        image_bytes = compress_image(file_obj.read())
-
-        await status_msg.edit_text("Редактирую через Hugging Face...", parse_mode="HTML")
-        result_bytes = await call_hf_edit(caption, image_bytes, model_key=edit_model)
-
-        await status_msg.delete()
-        await message.answer_photo(
-            photo=BufferedInputFile(result_bytes, filename="edited.png"),
-            caption=f"Готово\n{html.escape(caption)}",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard(),
-        )
-    except Exception as e:
-        logger.exception("Image edit error")
-        await status_msg.edit_text(
-            f"Ошибка редактирования:\n{html.escape(str(e))}",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard(),
-        )
-    finally:
-        await state.update_data(edit_step="waiting_photo")
