@@ -34,31 +34,28 @@ def compress_image(image_bytes: bytes, max_side: int = 1024) -> bytes:
     img.thumbnail((max_side, max_side), Image.LANCZOS)
 
     output = io.BytesIO()
-    # PNG для предсказуемого качества при edit
     img.save(output, format="PNG")
     return output.getvalue()
 
 
 def parse_image_response(data: dict) -> bytes:
-    # Вариант 1: {"artifacts": [{"base64": "..."}]}
     artifacts = data.get("artifacts")
+
     if isinstance(artifacts, list) and artifacts:
         first = artifacts[0]
         if isinstance(first, dict) and first.get("base64"):
             return base64.b64decode(first["base64"])
 
-    # Вариант 2: {"artifacts": {"base64": "..."}}
     if isinstance(artifacts, dict) and artifacts.get("base64"):
         return base64.b64decode(artifacts["base64"])
 
-    # Вариант 3: OpenAI-подобный {"data":[{"b64_json":"..."}]}
     d = data.get("data")
     if isinstance(d, list) and d and isinstance(d[0], dict):
         b64 = d[0].get("b64_json")
         if b64:
             return base64.b64decode(b64)
 
-    raise Exception(f"Изображение не получено от сервера. Ответ: {str(data)[:500]}")
+    raise Exception(f"Изображение не получено от сервера. Ответ: {str(data)[:700]}")
 
 
 def _extract_error_text(status: int, raw_text: str, parsed: dict | None) -> str:
@@ -71,10 +68,10 @@ def _extract_error_text(status: int, raw_text: str, parsed: dict | None) -> str:
                 return msg
         if isinstance(parsed.get("message"), str):
             return parsed["message"]
-    return f"HTTP {status}: {raw_text[:600]}"
+    return f"HTTP {status}: {raw_text[:700]}"
 
 
-async def _post_json(url: str, payload: dict, headers: dict, timeout_sec: int = 180) -> dict:
+async def _post_json(url: str, payload: dict, headers: dict, timeout_sec: int = 240) -> dict:
     timeout = aiohttp.ClientTimeout(total=timeout_sec)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, json=payload, headers=headers) as resp:
@@ -86,27 +83,30 @@ async def _post_json(url: str, payload: dict, headers: dict, timeout_sec: int = 
                 parsed = None
 
             if resp.status != 200:
-                raise Exception(_extract_error_text(resp.status, raw_text, parsed))
+                raise Exception(_extract_error_text(resp.status, raw_text, parsed if isinstance(parsed, dict) else None))
 
             if not isinstance(parsed, dict):
-                raise Exception(f"Некорректный JSON в ответе: {raw_text[:500]}")
+                raise Exception(f"Некорректный JSON в ответе: {raw_text[:700]}")
 
             return parsed
 
 
 async def upload_asset(image_bytes: bytes) -> str:
     """
-    Fallback: если endpoint редактирования требует asset flow.
+    Загружаем фото в NVIDIA Assets и получаем asset_id.
     """
+    if not NVIDIA_API_KEY:
+        raise Exception("NVIDIA_API_KEY не задан")
+
     headers = {
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
         "Accept": "application/json",
         "Content-Type": "application/json",
     }
 
-    timeout = aiohttp.ClientTimeout(total=180)
+    timeout = aiohttp.ClientTimeout(total=240)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        # 1) Получаем uploadUrl + assetId
+        # 1) Получаем upload URL + assetId
         async with session.post(
             ASSET_URL,
             json={"content_type": "image/png", "description": "edit_image"},
@@ -124,7 +124,7 @@ async def upload_asset(image_bytes: bytes) -> str:
             asset_id = data.get("assetId")
             upload_url = data.get("uploadUrl")
             if not asset_id or not upload_url:
-                raise Exception(f"Некорректный ответ /v1/assets: {str(data)[:500]}")
+                raise Exception(f"Некорректный ответ /v1/assets: {str(data)[:700]}")
 
         # 2) Загружаем файл в presigned URL
         async with session.put(
@@ -137,7 +137,7 @@ async def upload_asset(image_bytes: bytes) -> str:
         ) as put_resp:
             if put_resp.status not in (200, 204):
                 put_text = await put_resp.text()
-                raise Exception(f"Asset upload failed: HTTP {put_resp.status}: {put_text[:400]}")
+                raise Exception(f"Asset upload failed: HTTP {put_resp.status}: {put_text[:700]}")
 
     return asset_id
 
@@ -159,49 +159,14 @@ async def call_generate(prompt: str) -> bytes:
         "steps": 4,
     }
 
-    data = await _post_json(GEN_URL, payload, headers, timeout_sec=180)
+    data = await _post_json(GEN_URL, payload, headers, timeout_sec=240)
     return parse_image_response(data)
 
 
-async def _call_edit_direct(url: str, prompt: str, image_bytes: bytes, *, klein: bool) -> bytes:
+async def _call_edit_with_asset(url: str, prompt: str, image_bytes: bytes, *, klein: bool) -> bytes:
     """
-    Основной путь: отправка base64 data URI напрямую.
-    """
-    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-    image_data_uri = f"data:image/png;base64,{image_b64}"
-
-    headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
-
-    if klein:
-        payload = {
-            "prompt": prompt,
-            "image": image_data_uri,
-            "width": 1024,
-            "height": 1024,
-            "seed": 0,
-            "steps": 4,
-        }
-    else:
-        payload = {
-            "prompt": prompt,
-            "image": image_data_uri,
-            "aspect_ratio": "match_input_image",
-            "seed": 0,
-            "steps": 30,
-            "cfg_scale": 3.5,
-        }
-
-    data = await _post_json(url, payload, headers, timeout_sec=240)
-    return parse_image_response(data)
-
-
-async def _call_edit_asset(url: str, prompt: str, image_bytes: bytes, *, klein: bool) -> bytes:
-    """
-    Fallback путь: upload asset + asset_id reference.
+    Ключевая правка:
+    для edit-моделей используем только asset flow + example_id.
     """
     asset_id = await upload_asset(image_bytes)
 
@@ -209,13 +174,16 @@ async def _call_edit_asset(url: str, prompt: str, image_bytes: bytes, *, klein: 
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
         "Accept": "application/json",
         "Content-Type": "application/json",
+        # Список входных assets, на них потом ссылаемся как example_id,0
         "NVCF-INPUT-ASSET-REFERENCES": asset_id,
     }
+
+    example_ref = "data:image/png;example_id,0"
 
     if klein:
         payload = {
             "prompt": prompt,
-            "image": [f"data:image/png;asset_id,{asset_id}"],
+            "image": [example_ref],
             "width": 1024,
             "height": 1024,
             "seed": 0,
@@ -224,46 +192,27 @@ async def _call_edit_asset(url: str, prompt: str, image_bytes: bytes, *, klein: 
     else:
         payload = {
             "prompt": prompt,
-            "image": f"data:image/png;asset_id,{asset_id}",
+            "image": example_ref,
             "aspect_ratio": "match_input_image",
             "seed": 0,
             "steps": 30,
             "cfg_scale": 3.5,
         }
 
-    data = await _post_json(url, payload, headers, timeout_sec=240)
+    data = await _post_json(url, payload, headers, timeout_sec=300)
     return parse_image_response(data)
 
 
 async def call_edit_kontext(prompt: str, image_bytes: bytes) -> bytes:
     if not NVIDIA_API_KEY:
         raise Exception("NVIDIA_API_KEY не задан")
-
-    url = EDIT_URLS["flux.1-kontext-dev"]
-    try:
-        return await _call_edit_direct(url, prompt, image_bytes, klein=False)
-    except Exception as e:
-        msg = str(e).lower()
-        # Авто-fallback на asset flow, если direct не принят
-        if "asset" in msg or "reference" in msg or "input-asset" in msg:
-            logger.warning("Kontext direct edit failed, retry via assets flow: %s", e)
-            return await _call_edit_asset(url, prompt, image_bytes, klein=False)
-        raise
+    return await _call_edit_with_asset(EDIT_URLS["flux.1-kontext-dev"], prompt, image_bytes, klein=False)
 
 
 async def call_edit_klein(prompt: str, image_bytes: bytes) -> bytes:
     if not NVIDIA_API_KEY:
         raise Exception("NVIDIA_API_KEY не задан")
-
-    url = EDIT_URLS["flux.2-klein-4b"]
-    try:
-        return await _call_edit_direct(url, prompt, image_bytes, klein=True)
-    except Exception as e:
-        msg = str(e).lower()
-        if "asset" in msg or "reference" in msg or "input-asset" in msg:
-            logger.warning("Klein direct edit failed, retry via assets flow: %s", e)
-            return await _call_edit_asset(url, prompt, image_bytes, klein=True)
-        raise
+    return await _call_edit_with_asset(EDIT_URLS["flux.2-klein-4b"], prompt, image_bytes, klein=True)
 
 
 # ── Генерация ──────────────────────────────────────────────────────────────────
@@ -353,6 +302,7 @@ async def edit_photo_received(message: Message, state: FSMContext):
         photo = message.photo[-1]
         file = await message.bot.get_file(photo.file_id)
         file_obj = await message.bot.download_file(file.file_path)
+
         original_bytes = file_obj.read()
         image_bytes = compress_image(original_bytes)
 
