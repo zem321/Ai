@@ -7,10 +7,3 @@ class BotStates(StatesGroup):
     image_edit = State()
     video_generate = State()
     video_edit = State()
-# states.py
-from aiogram.fsm.state import StatesGroup, State
-
-class BotStates(StatesGroup):
-    # ... существующие состояния ...
-    
-    image_edit = State()  # <-- ДОБАВЬ ЭТУ СТРОККУ
