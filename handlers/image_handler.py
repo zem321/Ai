@@ -5,12 +5,14 @@ import html
 import base64
 import random
 import logging
+import asyncio
 import aiohttp
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image
+from huggingface_hub import InferenceClient
 
 from keyboards import cancel_keyboard, edit_model_keyboard
 from states import BotStates
@@ -27,8 +29,16 @@ GEN_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b"
 # Hugging Face — редактирование
 HF_EDIT_MODELS = {
     "flux.1-kontext-dev": "black-forest-labs/FLUX.1-Kontext-dev",
-    "flux.2-klein-4b": "black-forest-labs/FLUX.1-Kontext-dev",  # для edit пока используем Kontext
+    "flux.2-klein-4b": "black-forest-labs/FLUX.1-Kontext-dev",  # для edit используем Kontext
 }
+
+# Порядок провайдеров для HF Inference Providers.
+# Можно переопределить переменной HF_EDIT_PROVIDERS="fal-ai,replicate,hf-inference,auto"
+HF_EDIT_PROVIDERS = [
+    p.strip()
+    for p in (os.getenv("HF_EDIT_PROVIDERS") or "fal-ai,replicate,hf-inference,auto").split(",")
+    if p.strip()
+]
 
 
 def compress_image(image_bytes: bytes, max_side: int = 1024) -> bytes:
@@ -112,114 +122,95 @@ async def call_generate(prompt: str) -> bytes:
             raise Exception(f"Изображение не получено от генерации: {str(data)[:500]}")
 
 
-def _decode_possible_json_image(raw: bytes) -> bytes | None:
-    try:
-        j = json.loads(raw.decode("utf-8", errors="ignore"))
-    except Exception:
-        return None
+def _pil_to_png_bytes(img: Image.Image) -> bytes:
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
 
-    if isinstance(j, dict):
-        for key in ["image", "output", "generated_image"]:
-            val = j.get(key)
-            if isinstance(val, str) and len(val) > 100:
-                try:
-                    return base64.b64decode(val)
-                except Exception:
-                    continue
-    return None
+
+def _sync_hf_image_to_image(
+    provider: str,
+    model_id: str,
+    token: str,
+    image_bytes: bytes,
+    prompt: str,
+    seed: int,
+) -> bytes:
+    """
+    Синхронный вызов huggingface_hub, который запускается через asyncio.to_thread.
+    """
+    client = InferenceClient(provider=provider, api_key=token, timeout=300)
+
+    # Некоторые провайдеры поддерживают расширенные параметры, некоторые — нет.
+    try:
+        result = client.image_to_image(
+            image_bytes,
+            prompt=prompt,
+            model=model_id,
+            guidance_scale=3.5,
+            num_inference_steps=30,
+            seed=seed,
+        )
+    except TypeError:
+        result = client.image_to_image(
+            image_bytes,
+            prompt=prompt,
+            model=model_id,
+        )
+
+    if isinstance(result, Image.Image):
+        return _pil_to_png_bytes(result)
+
+    if isinstance(result, (bytes, bytearray)):
+        return bytes(result)
+
+    raise Exception(f"Неподдерживаемый тип ответа от HF: {type(result)}")
 
 
 async def call_hf_edit(prompt: str, image_bytes: bytes, model_key: str = "flux.1-kontext-dev") -> bytes:
     """
-    Редактирование через Hugging Face Inference API.
-    Важно: для image-to-image картинка передается в `inputs`, а prompt — в `parameters.prompt`.
+    Редактирование через Hugging Face Inference Providers.
     """
     if not HF_TOKEN:
         raise Exception("HF_TOKEN не задан. Добавьте переменную HF_TOKEN в Railway.")
 
     model_id = HF_EDIT_MODELS.get(model_key, "black-forest-labs/FLUX.1-Kontext-dev")
     safe_prompt = build_safe_edit_prompt(prompt)
-    timeout = aiohttp.ClientTimeout(total=300)
-
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}",
-        "Accept": "image/png, image/jpeg, application/json",
-    }
-
-    endpoints = [
-        f"https://router.huggingface.co/hf-inference/models/{model_id}",
-        f"https://api-inference.huggingface.co/models/{model_id}",
-    ]
 
     last_error = None
 
-    for endpoint in endpoints:
+    for provider in HF_EDIT_PROVIDERS:
         try:
-            logger.info("HF edit request to %s", endpoint)
+            logger.info("HF edit attempt: provider=%s model=%s", provider, model_id)
 
-            # FormData нужно создавать заново на каждую попытку
-            form = aiohttp.FormData()
-            form.add_field("inputs", image_bytes, filename="input.png", content_type="image/png")
-            form.add_field(
-                "parameters",
-                json.dumps(
-                    {
-                        "prompt": safe_prompt,
-                        "guidance_scale": 3.5,
-                        "num_inference_steps": 30,
-                        "seed": random.randint(1, 2_147_483_647),
-                    }
-                ),
-                content_type="application/json",
+            result_bytes = await asyncio.to_thread(
+                _sync_hf_image_to_image,
+                provider,
+                model_id,
+                HF_TOKEN,
+                image_bytes,
+                safe_prompt,
+                random.randint(1, 2_147_483_647),
             )
 
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(endpoint, headers=headers, data=form) as resp:
-                    body = await resp.read()
-                    content_type = (resp.headers.get("Content-Type") or "").lower()
+            if len(result_bytes) < 1000:
+                raise Exception(f"Слишком маленький ответ: {len(result_bytes)} байт")
 
-                    if resp.status == 200:
-                        # Иногда провайдер возвращает JSON вместо raw image
-                        if "application/json" in content_type:
-                            decoded = _decode_possible_json_image(body)
-                            if decoded:
-                                return decoded
-                            txt = body.decode("utf-8", errors="ignore")
-                            raise Exception(f"HF вернул JSON без изображения: {txt[:500]}")
-
-                        if len(body) < 1000:
-                            raise Exception(f"HF вернул слишком маленький ответ: {len(body)} байт")
-
-                        return body
-
-                    text = body.decode("utf-8", errors="ignore")
-                    err_msg = text[:500]
-                    try:
-                        j = json.loads(text)
-                        if isinstance(j, dict):
-                            e = j.get("error") or j.get("message") or j.get("detail")
-                            if isinstance(e, dict):
-                                e = e.get("message", str(e))
-                            if e:
-                                err_msg = str(e)
-                    except Exception:
-                        pass
-
-                    if resp.status == 503:
-                        last_error = f"Модель загружается (503): {err_msg}"
-                        logger.warning("HF 503 at %s: %s", endpoint, err_msg)
-                        continue
-
-                    raise Exception(f"HF error: HTTP {resp.status}: {err_msg}")
+            return result_bytes
 
         except Exception as e:
+            msg = str(e)
             last_error = e
-            logger.warning("HF edit failed at %s: %s", endpoint, e)
-            # Ошибки токена/авторизации сразу возвращаем
-            if "401" in str(e) or "403" in str(e) or "HF_TOKEN" in str(e):
-                raise
+            logger.warning("HF edit failed with provider=%s: %s", provider, msg)
 
-    raise Exception(f"HF редактирование не удалось: {last_error}")
+            # Критичные ошибки токена прекращают ретраи
+            if "401" in msg or "403" in msg or "unauthorized" in msg.lower() or "forbidden" in msg.lower():
+                raise Exception(f"HF auth error: {msg}")
+
+            # Иначе пробуем следующий провайдер
+            continue
+
+    raise Exception(f"HF редактирование не удалось. Последняя ошибка: {last_error}")
 
 
 # ── Генерация ──────────────────────────────────────────────────────────────────
@@ -314,7 +305,6 @@ async def edit_photo_received(message: Message, state: FSMContext):
 
         await status_msg.edit_text("Редактирую через Hugging Face...", parse_mode="HTML")
 
-        # Важно: передаем выбранную модель
         result_bytes = await call_hf_edit(caption, image_bytes, model_key=edit_model)
 
         await status_msg.delete()
