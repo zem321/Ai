@@ -26,10 +26,9 @@ EDIT_URLS = {
     "flux.2-klein-4b": "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b",
 }
 
-# У разных аккаунтов NVIDIA endpoint для assets может отличаться
 ASSET_URLS = [
-    ("https://ai.api.nvidia.com/v1/assets", "snake"),            # content_type
-    ("https://api.nvcf.nvidia.com/v2/nvcf/assets", "camel"),     # contentType
+    ("https://ai.api.nvidia.com/v1/assets", "snake"),
+    ("https://api.nvcf.nvidia.com/v2/nvcf/assets", "camel"),
 ]
 
 
@@ -38,7 +37,6 @@ def compress_image(image_bytes: bytes, max_side: int = 1024) -> bytes:
     if img.mode != "RGB":
         img = img.convert("RGB")
     img.thumbnail((max_side, max_side), Image.LANCZOS)
-
     out = io.BytesIO()
     img.save(out, format="PNG")
     return out.getvalue()
@@ -47,17 +45,14 @@ def compress_image(image_bytes: bytes, max_side: int = 1024) -> bytes:
 def parse_image_response(data: dict) -> bytes:
     artifacts = data.get("artifacts")
 
-    # Вариант 1
     if isinstance(artifacts, list) and artifacts:
         first = artifacts[0]
         if isinstance(first, dict) and first.get("base64"):
             return base64.b64decode(first["base64"])
 
-    # Вариант 2
     if isinstance(artifacts, dict) and artifacts.get("base64"):
         return base64.b64decode(artifacts["base64"])
 
-    # Вариант 3 (OpenAI-style)
     d = data.get("data")
     if isinstance(d, list) and d and isinstance(d[0], dict):
         b64 = d[0].get("b64_json")
@@ -103,25 +98,21 @@ async def _post_json(url: str, payload: dict, headers: dict, timeout_sec: int = 
 
 
 def build_safe_edit_prompt(user_prompt: str) -> str:
-    """
-    Усиленный промпт: менять только запрошенное, не заменять человека/объект.
-    """
     p = (user_prompt or "").strip()
     lower = p.lower()
 
     rules = (
         "Выполни строго только запрос пользователя.\n"
-        "Сохрани основного человека/объект на фото без изменений.\n"
-        "Не меняй лицо, пол, возраст, волосы, тело, позу, одежду, ракурс.\n"
-        "Не добавляй новых людей, животных или лишние объекты на передний план.\n"
-        "Не заменяй главного человека/объект на другого.\n"
-        "Сохрани фотореализм.\n"
+        "Сохрани главного человека/объект без изменений.\n"
+        "Нельзя менять лицо, тело, позу, одежду, ракурс, идентичность.\n"
+        "Не добавляй новых людей/животных на передний план.\n"
+        "Изменяй только нужные области, связанные с запросом.\n"
     )
 
     if any(x in lower for x in ["фон", "background", "задний план"]):
         rules += (
-            "Это запрос на замену фона: измени только фон.\n"
-            "Передний план и человека оставь прежними.\n"
+            "Это запрос на замену фона: меняй только фон.\n"
+            "Передний план не изменяй.\n"
         )
 
     return f"{rules}\nЗапрос пользователя: {p}"
@@ -147,7 +138,6 @@ async def upload_asset(image_bytes: bytes) -> str:
 
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                # 1) init asset
                 async with session.post(asset_url, json=body, headers=headers) as resp:
                     raw = await resp.text()
                     try:
@@ -163,7 +153,6 @@ async def upload_asset(image_bytes: bytes) -> str:
                     if not asset_id or not upload_url:
                         raise Exception(f"Некорректный ответ assets: {str(data)[:700]}")
 
-                # 2) upload bytes
                 async with session.put(
                     upload_url,
                     data=image_bytes,
@@ -176,17 +165,15 @@ async def upload_asset(image_bytes: bytes) -> str:
                         put_text = await put_resp.text()
                         raise Exception(f"Upload failed: HTTP {put_resp.status}: {put_text[:700]}")
 
-            logger.info("Asset uploaded via %s", asset_url)
+            logger.info("Asset uploaded via %s | asset_id=%s", asset_url, asset_id)
             return asset_id
-
         except Exception as e:
             logger.warning("Asset endpoint failed: %s -> %s", asset_url, e)
 
     raise Exception("Не удалось загрузить asset ни через один endpoint (ai.api/nvcf)")
 
 
-def _build_edit_headers(asset_id: str) -> dict:
-    # Оба заголовка для совместимости
+def _edit_headers(asset_id: str) -> dict:
     return {
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
         "Accept": "application/json",
@@ -217,86 +204,101 @@ async def call_generate(prompt: str) -> bytes:
     return parse_image_response(data)
 
 
-async def _call_edit_with_asset(url: str, user_prompt: str, image_bytes: bytes, klein: bool) -> bytes:
-    if not NVIDIA_API_KEY:
-        raise Exception("NVIDIA_API_KEY не задан")
-
+async def _call_edit(url: str, user_prompt: str, image_bytes: bytes, klein: bool) -> tuple[bytes, int]:
+    """
+    ВАЖНО:
+    Только asset_id путь.
+    НИКАКОГО example_id fallback.
+    Если endpoint не принимает asset_id -> выбрасываем ошибку.
+    """
     asset_id = await upload_asset(image_bytes)
-    headers = _build_edit_headers(asset_id)
-    safe_prompt = build_safe_edit_prompt(user_prompt)
     seed = random.randint(1, 2_147_483_647)
+    safe_prompt = build_safe_edit_prompt(user_prompt)
+    headers = _edit_headers(asset_id)
 
-    # Основной сценарий: используем именно user asset_id
+    # Пробуем несколько форматов image, чтобы попасть в нужный контракт сервера
+    variants = []
     if klein:
-        primary_payload = {
-            "prompt": safe_prompt,
-            "image": [f"data:image/png;asset_id,{asset_id}"],
-            "width": 1024,
-            "height": 1024,
-            "seed": seed,
-            "steps": 4,
-        }
-    else:
-        primary_payload = {
-            "prompt": safe_prompt,
-            "image": f"data:image/png;asset_id,{asset_id}",
-            "aspect_ratio": "match_input_image",
-            "seed": seed,
-            "steps": 40,
-            "cfg_scale": 2.5,
-        }
-
-    try:
-        data = await _post_json(url, primary_payload, headers, timeout_sec=300)
-        return parse_image_response(data)
-    except Exception as e:
-        err = str(e).lower()
-
-        # fallback только если endpoint строго требует example_id
-        if "expected: example_id" not in err:
-            raise
-
-        logger.warning("Primary edit path rejected, fallback to example_id: %s", e)
-
-        if klein:
-            fallback_payload = {
+        variants = [
+            {
                 "prompt": safe_prompt,
-                "image": ["data:image/png;example_id,0"],
+                "image": [f"data:image/png;asset_id,{asset_id}"],
                 "width": 1024,
                 "height": 1024,
                 "seed": seed,
                 "steps": 4,
-            }
-        else:
-            fallback_payload = {
+            },
+            {
                 "prompt": safe_prompt,
-                "image": "data:image/png;example_id,0",
+                "image": f"data:image/png;asset_id,{asset_id}",
+                "width": 1024,
+                "height": 1024,
+                "seed": seed,
+                "steps": 4,
+            },
+            {
+                "prompt": safe_prompt,
+                "images": [f"data:image/png;asset_id,{asset_id}"],
+                "width": 1024,
+                "height": 1024,
+                "seed": seed,
+                "steps": 4,
+            },
+        ]
+    else:
+        variants = [
+            {
+                "prompt": safe_prompt,
+                "image": f"data:image/png;asset_id,{asset_id}",
                 "aspect_ratio": "match_input_image",
                 "seed": seed,
                 "steps": 40,
                 "cfg_scale": 2.5,
-            }
+            },
+            {
+                "prompt": safe_prompt,
+                "image": [f"data:image/png;asset_id,{asset_id}"],
+                "aspect_ratio": "match_input_image",
+                "seed": seed,
+                "steps": 40,
+                "cfg_scale": 2.5,
+            },
+            {
+                "prompt": safe_prompt,
+                "images": [f"data:image/png;asset_id,{asset_id}"],
+                "aspect_ratio": "match_input_image",
+                "seed": seed,
+                "steps": 40,
+                "cfg_scale": 2.5,
+            },
+        ]
 
-        data = await _post_json(url, fallback_payload, headers, timeout_sec=300)
-        return parse_image_response(data)
+    last_error = None
+    for idx, payload in enumerate(variants, start=1):
+        try:
+            logger.info("Edit try %s | model=%s | seed=%s | asset=%s", idx, url, seed, asset_id)
+            data = await _post_json(url, payload, headers, timeout_sec=300)
+            return parse_image_response(data), seed
+        except Exception as e:
+            last_error = e
+            logger.warning("Edit try %s failed: %s", idx, e)
+
+    raise Exception(f"Редактирование не приняло asset_id. Последняя ошибка: {last_error}")
 
 
-async def call_edit_kontext(prompt: str, image_bytes: bytes) -> bytes:
-    return await _call_edit_with_asset(EDIT_URLS["flux.1-kontext-dev"], prompt, image_bytes, klein=False)
+async def call_edit_kontext(prompt: str, image_bytes: bytes) -> tuple[bytes, int]:
+    return await _call_edit(EDIT_URLS["flux.1-kontext-dev"], prompt, image_bytes, klein=False)
 
 
-async def call_edit_klein(prompt: str, image_bytes: bytes) -> bytes:
-    return await _call_edit_with_asset(EDIT_URLS["flux.2-klein-4b"], prompt, image_bytes, klein=True)
+async def call_edit_klein(prompt: str, image_bytes: bytes) -> tuple[bytes, int]:
+    return await _call_edit(EDIT_URLS["flux.2-klein-4b"], prompt, image_bytes, klein=True)
 
-
-# ── Генерация ──────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "mode_image_gen")
 async def enter_image_gen(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_generate)
     await callback.message.edit_text(
-        "🎨 <b>Генерация изображения</b>\n\n"
-        "Опиши, что нужно создать.",
+        "🎨 <b>Генерация изображения</b>\n\nОпиши, что нужно создать.",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML",
     )
@@ -325,8 +327,6 @@ async def do_generate_image(message: Message, state: FSMContext):
         )
 
 
-# ── Редактирование ─────────────────────────────────────────────────────────────
-
 @router.callback_query(F.data == "mode_image_edit")
 async def enter_image_edit(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_edit)
@@ -344,7 +344,7 @@ async def edit_model_selected(callback: CallbackQuery, state: FSMContext):
     model_key = callback.data.replace("editmodel_", "", 1)
     await state.update_data(edit_model=model_key, edit_step="waiting_photo")
     await callback.message.edit_text(
-        "Отправь фото с подписью (что именно изменить).",
+        "Отправь фото с подписью (что изменить).",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML",
     )
@@ -375,14 +375,16 @@ async def edit_photo_received(message: Message, state: FSMContext):
         await status_msg.edit_text("Редактирую...", parse_mode="HTML")
 
         if edit_model == "flux.2-klein-4b":
-            result_bytes = await call_edit_klein(caption, image_bytes)
+            result_bytes, seed = await call_edit_klein(caption, image_bytes)
+            model_title = "flux.2-klein-4b"
         else:
-            result_bytes = await call_edit_kontext(caption, image_bytes)
+            result_bytes, seed = await call_edit_kontext(caption, image_bytes)
+            model_title = "flux.1-kontext-dev"
 
         await status_msg.delete()
         await message.answer_photo(
             photo=BufferedInputFile(result_bytes, filename="edited.png"),
-            caption=f"<b>Готово</b>\n{html.escape(caption)}",
+            caption=f"<b>Готово</b>\n{html.escape(caption)}\n\n<i>{model_title} | seed={seed}</i>",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
