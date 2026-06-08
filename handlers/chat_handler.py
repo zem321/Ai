@@ -19,7 +19,7 @@ router = Router()
 SYSTEM_PROMPT = "Ты полезный ИИ-ассистент. Отвечай на русском языке если вопрос на русском. Будь точным и лаконичным."
 MAX_HISTORY = 20
 
-# NVIDIA (оставляем как было)
+# NVIDIA
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
@@ -43,6 +43,22 @@ def get_provider(model_id: str) -> str:
 
 def strip_provider_prefix(model_id: str) -> str:
     return model_id.replace("freemodel/", "", 1)
+
+
+def join_api_path(base: str, path: str) -> str:
+    """
+    Безопасная склейка base + path:
+    - убирает хвостовые "/"
+    - предотвращает дублирование /v1/v1/...
+    """
+    clean_base = (base or "").strip().rstrip("/")
+    if not clean_base:
+        raise Exception("Пустой base URL")
+
+    if clean_base.endswith("/v1") and path.startswith("/v1/"):
+        path = path[3:]  # "/chat/completions" или "/messages"
+
+    return f"{clean_base}{path}"
 
 
 def compress_image(image_bytes: bytes) -> str:
@@ -80,7 +96,6 @@ def to_anthropic_messages(messages: list) -> tuple[str, list]:
 
         mapped_role = "assistant" if role == "assistant" else "user"
 
-        # Текстовое сообщение
         if isinstance(content, str):
             out.append({
                 "role": mapped_role,
@@ -88,7 +103,6 @@ def to_anthropic_messages(messages: list) -> tuple[str, list]:
             })
             continue
 
-        # Мультимодальное сообщение (text + image_url)
         converted = []
         for block in content:
             if block.get("type") == "text":
@@ -117,6 +131,13 @@ def to_anthropic_messages(messages: list) -> tuple[str, list]:
     return system_text, out
 
 
+async def _parse_json_response(resp: aiohttp.ClientResponse, text: str) -> dict:
+    try:
+        return json.loads(text)
+    except Exception:
+        raise Exception(f"Ответ сервера не JSON: {text[:300]}")
+
+
 async def call_nvidia(model_id: str, messages: list) -> str:
     if not NVIDIA_API_KEY:
         raise Exception("NVIDIA_API_KEY не задан")
@@ -140,13 +161,16 @@ async def call_nvidia(model_id: str, messages: list) -> str:
             timeout=aiohttp.ClientTimeout(total=60)
         ) as resp:
             text = await resp.text()
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Ответ сервера: {text[:300]}")
+            data = await _parse_json_response(resp, text)
 
             if resp.status != 200:
-                raise Exception(data.get("error", {}).get("message", str(data)[:300]))
+                logger.error(
+                    "NVIDIA HTTP error: status=%s url=%s body=%s",
+                    resp.status,
+                    str(resp.url),
+                    text[:500]
+                )
+                raise Exception(data.get("error", {}).get("message", f"HTTP {resp.status}: {text[:300]}"))
 
             return data["choices"][0]["message"]["content"]
 
@@ -165,18 +189,22 @@ async def call_freemodel_openai(raw_model: str, messages: list) -> str:
         "max_tokens": 2048,
         "temperature": 0.7,
     }
-    url = f"{FREEMODEL_OPENAI_BASE}/v1/chat/completions"
+    url = join_api_path(FREEMODEL_OPENAI_BASE, "/v1/chat/completions")
 
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
             text = await resp.text()
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Ответ сервера: {text[:300]}")
+            data = await _parse_json_response(resp, text)
 
             if resp.status != 200:
-                raise Exception(data.get("error", {}).get("message", str(data)[:300]))
+                logger.error(
+                    "FreeModel OpenAI HTTP error: status=%s url=%s model=%s body=%s",
+                    resp.status,
+                    str(resp.url),
+                    raw_model,
+                    text[:500]
+                )
+                raise Exception(data.get("error", {}).get("message", f"HTTP {resp.status}: {text[:300]}"))
 
             return data["choices"][0]["message"]["content"]
 
@@ -194,26 +222,32 @@ async def call_freemodel_anthropic(raw_model: str, messages: list) -> str:
     if system_text:
         payload["system"] = system_text
 
-    url = f"{FREEMODEL_ANTHROPIC_BASE}/v1/messages"
+    url = join_api_path(FREEMODEL_ANTHROPIC_BASE, "/v1/messages")
 
-    # Пробуем Bearer (часто работает в прокси), если нет — fallback на x-api-key + anthropic-version
     async with aiohttp.ClientSession() as session:
+        # ) Bearer
         bearer_headers = {
             "Authorization": f"Bearer {FREEMODEL_API_KEY}",
             "Content-Type": "application/json",
         }
         async with session.post(url, json=payload, headers=bearer_headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
             text = await resp.text()
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Ответ сервера: {text[:300]}")
+            data = await _parse_json_response(resp, text)
 
             if resp.status == 200:
                 parts = [item.get("text", "") for item in data.get("content", []) if item.get("type") == "text"]
                 answer = "\n".join([p for p in parts if p]).strip()
                 return answer or "Пустой ответ от модели."
 
+            logger.warning(
+                "FreeModel Anthropic bearer failed: status=%s url=%s model=%s body=%s",
+                resp.status,
+                str(resp.url),
+                raw_model,
+                text[:500]
+            )
+
+        # 2) x-api-key fallback
         fallback_headers = {
             "x-api-key": FREEMODEL_API_KEY,
             "anthropic-version": "2023-06-01",
@@ -221,13 +255,17 @@ async def call_freemodel_anthropic(raw_model: str, messages: list) -> str:
         }
         async with session.post(url, json=payload, headers=fallback_headers, timeout=aiohttp.ClientTimeout(total=60)) as resp2:
             text2 = await resp2.text()
-            try:
-                data2 = json.loads(text2)
-            except Exception:
-                raise Exception(f"Ответ сервера: {text2[:300]}")
+            data2 = await _parse_json_response(resp2, text2)
 
             if resp2.status != 200:
-                raise Exception(data2.get("error", {}).get("message", str(data2)[:300]))
+                logger.error(
+                    "FreeModel Anthropic fallback failed: status=%s url=%s model=%s body=%s",
+                    resp2.status,
+                    str(resp2.url),
+                    raw_model,
+                    text2[:500]
+                )
+                raise Exception(data2.get("error", {}).get("message", f"HTTP {resp2.status}: {text2[:300]}"))
 
             parts = [item.get("text", "") for item in data2.get("content", []) if item.get("type") == "text"]
             answer = "\n".join([p for p in parts if p]).strip()
@@ -238,7 +276,6 @@ async def call_ai(model_id: str, messages: list) -> str:
     provider = get_provider(model_id)
 
     if provider == "nvidia":
-        # Для nvidia оставляем модель без изменений
         return await call_nvidia(model_id, messages)
 
     raw_model = strip_provider_prefix(model_id)
@@ -374,7 +411,7 @@ async def handle_photo(message: Message, state: FSMContext):
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
     except Exception as e:
-        logger.error(f"Photo error: {e}")
+        logger.error("Photo error: %s", e, exc_info=True)
         await status_msg.edit_text(
             f"❌ <b>Ошибка:</b>\n<code>{str(e)}</code>",
             parse_mode="HTML", reply_markup=cancel_keyboard()
@@ -407,7 +444,7 @@ async def handle_text(message: Message, state: FSMContext):
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
     except Exception as e:
-        logger.error(f"Chat error: {e}")
+        logger.error("Chat error: %s", e, exc_info=True)
         await status_msg.edit_text(
             f"❌ <b>Ошибка:</b>\n<code>{str(e)}</code>",
             parse_mode="HTML", reply_markup=cancel_keyboard()
