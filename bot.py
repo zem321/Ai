@@ -69,7 +69,6 @@ async def set_commands(bot: Bot):
 
 
 async def main():
-    # Автоматически одобряем админа при каждом старте
     admin_id = int(os.getenv("ADMIN_ID", "0"))
     if admin_id:
         db.approve_user(admin_id)
@@ -89,7 +88,6 @@ async def main():
 
     await set_commands(bot)
 
-    # Важно для устранения конфликтов после webhook/старых запусков
     await bot.delete_webhook(drop_pending_updates=True)
 
     logger.info("Бот запущен!")
@@ -102,9 +100,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    # main.py (или bot.py, app.py - как у тебя называется)
-
-from handlers.image_generation import router as image_generation_router
-
-# При создании бота:
-dp.include_router(image_generation_router)
