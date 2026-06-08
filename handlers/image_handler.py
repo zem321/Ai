@@ -1,6 +1,4 @@
-# handlers/image_handler.py
 import os
-import io
 import json
 import html
 import base64
@@ -31,7 +29,6 @@ router = Router()
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://ai.api.nvidia.com/v1")
 
-# ============ КАРТИНКИ ============
 IMAGE_MODELS = {
     "img_flux2": {
         "title": "Flux 2 Klein (быстро)",
@@ -43,7 +40,6 @@ IMAGE_MODELS = {
     },
 }
 
-# ============ ВИДЕО ============
 VIDEO_MODELS = {
     "vid_svd": {
         "title": "Stable Video Diffusion",
@@ -59,14 +55,12 @@ VIDEO_MODELS = {
     },
 }
 
-# ============ БЕСПЛАТНЫЕ SPACE ДЛЯ РЕДАКТИРОВАНИЯ ============
 IMAGE_EDIT_SPACES = [
     {"name": "1Paint", "id": "1Paint/1Paint", "priority": 1},
     {"name": "SDXL Inpainting", "id": "diffusers/stable-diffusion-xl-inpainting", "priority": 2},
     {"name": "Lama Cleaner", "id": "camenduru/Lama Cleaner", "priority": 3},
 ]
 
-# ============ ПРЕСЕТЫ ============
 EDIT_PRESETS = {
     "preset_beach": "change background to beautiful tropical beach with ocean waves",
     "preset_city": "change background to modern city skyline at sunset",
@@ -77,7 +71,6 @@ EDIT_PRESETS = {
 }
 
 
-# ============ КЛАВИАТУРЫ ============
 def gen_type_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -89,6 +82,7 @@ def gen_type_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
+
 def image_model_keyboard() -> InlineKeyboardMarkup:
     rows = []
     for key, item in IMAGE_MODELS.items():
@@ -96,12 +90,14 @@ def image_model_keyboard() -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="mode_image_gen")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+
 def video_model_keyboard() -> InlineKeyboardMarkup:
     rows = []
     for key, item in VIDEO_MODELS.items():
         rows.append([InlineKeyboardButton(text=item["title"], callback_data=f"gen_model_{key}")])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="mode_image_gen")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
 def edit_type_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -111,6 +107,7 @@ def edit_type_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="◀️ Назад", callback_data="mode_image_gen")],
         ]
     )
+
 
 def common_edits_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -126,16 +123,16 @@ def common_edits_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-# ============ ХЕЛПЕРЫ ============
 async def download_file_as_bytes(bot, file_info) -> bytes:
-    """Скачивает файл и возвращает байты (не BytesIO)"""
     image_io = await bot.download_file(file_info.file_path)
     return image_io.getvalue()
+
 
 def _build_url(path_or_url: str) -> str:
     if path_or_url.startswith("http"):
         return path_or_url
     return f"{NVIDIA_BASE_URL}/{path_or_url}"
+
 
 async def _nvidia_post(path_or_url: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not NVIDIA_API_KEY:
@@ -176,6 +173,7 @@ async def _nvidia_post(path_or_url: str, payload: dict[str, Any]) -> dict[str, A
 
             return data
 
+
 async def _download_bytes(url: str) -> bytes:
     timeout = aiohttp.ClientTimeout(total=300)
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -184,6 +182,7 @@ async def _download_bytes(url: str) -> bytes:
                 t = await resp.text()
                 raise Exception(f"Ошибка скачивания файла HTTP {resp.status}: {t[:300]}")
             return await resp.read()
+
 
 def _extract_b64_from_response(data: dict[str, Any]) -> bytes | None:
     artifacts = data.get("artifacts")
@@ -201,6 +200,7 @@ def _extract_b64_from_response(data: dict[str, Any]) -> bytes | None:
                     return base64.b64decode(b64)
 
     return None
+
 
 async def _extract_video_bytes(data: dict[str, Any]) -> bytes:
     b = _extract_b64_from_response(data)
@@ -221,6 +221,7 @@ async def _extract_video_bytes(data: dict[str, Any]) -> bytes:
 
     raise Exception(f"Видео не найдено в ответе: {str(data)[:400]}")
 
+
 def _extract_image_bytes(data: dict[str, Any]) -> bytes:
     b = _extract_b64_from_response(data)
     if b:
@@ -235,7 +236,6 @@ def _extract_image_bytes(data: dict[str, Any]) -> bytes:
     raise Exception(f"Изображение не найдено в ответе: {str(data)[:400]}")
 
 
-# ============ ГЕНЕРАЦИЯ КАРТИНОК ============
 async def generate_image(prompt: str, selected_key: str) -> tuple[bytes, str]:
     model_order = [selected_key] + [k for k in IMAGE_MODELS if k != selected_key]
     last_error = None
@@ -263,7 +263,6 @@ async def generate_image(prompt: str, selected_key: str) -> tuple[bytes, str]:
     raise Exception(f"Генерация картинки не удалась. Последняя ошибка: {last_error}")
 
 
-# ============ ГЕНЕРАЦИЯ ВИДЕО ============
 async def generate_video(prompt: str, selected_key: str) -> tuple[bytes, str]:
     model_order = [selected_key] + [k for k in VIDEO_MODELS if k != selected_key]
     errors = []
@@ -301,36 +300,42 @@ async def generate_video(prompt: str, selected_key: str) -> tuple[bytes, str]:
     raise Exception(f"Генерация видео не удалась. Последняя ошибка: {last_error}")
 
 
-# ============ РЕДАКТИРОВАНИЕ ЧЕРЕЗ HUGGINGFACE SPACES ============
 async def generate_image_edit_free(image_bytes: bytes, prompt: str, edit_type: str = "background") -> tuple[bytes, str]:
+    try:
+        from gradio_client import Client
+    except ModuleNotFoundError:
+        raise Exception(
+            "Функция редактирования недоступна: не установлен пакет gradio_client. "
+            "Установите зависимости из requirements.txt и перезапустите бота."
+        )
+
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             tmp_path = tmp.name
             tmp.write(image_bytes)
-        
+
         errors = []
-        
+
         for space in sorted(IMAGE_EDIT_SPACES, key=lambda x: x["priority"]):
             space_name = space["name"]
             space_id = space["id"]
-            
+
             try:
-                logger.info(f"Attempting edit with Space: {space_name}")
-                
-                from gradio_client import Client
+                logger.info("Attempting edit with Space: %s", space_name)
+
                 client = Client(space_id, verbose=False)
-                
+
                 if space_name == "1Paint":
                     result = client.predict({"path": tmp_path}, prompt, api_name="/predict")
                 else:
                     result = client.predict(tmp_path, prompt, api_name="/predict")
-                
+
                 if result is None:
                     continue
-                
+
                 result_bytes = None
-                
+
                 if isinstance(result, str) and os.path.exists(result):
                     with open(result, "rb") as f:
                         result_bytes = f.read()
@@ -341,30 +346,33 @@ async def generate_image_edit_free(image_bytes: bytes, prompt: str, edit_type: s
                         result_bytes = f.read()
                     try:
                         os.remove(output_path)
-                    except:
+                    except Exception:
                         pass
-                
+                elif isinstance(result, dict):
+                    path = result.get("path") or result.get("image") or result.get("output")
+                    if path and os.path.exists(path):
+                        with open(path, "rb") as f:
+                            result_bytes = f.read()
+
                 if result_bytes and len(result_bytes) > 1000:
                     return result_bytes, f"HF: {space_name}"
-                    
+
             except Exception as e:
                 msg = str(e)
                 errors.append(f"{space_name}: {msg}")
-                logger.warning(f"Space {space_name} failed: {msg}")
+                logger.warning("Space %s failed: %s", space_name, msg)
                 continue
-        
+
         error_summary = errors[-1] if errors else "Все Space недоступны"
         raise Exception(f"Не удалось отредактировать. Ошибка: {error_summary[:200]}")
-        
+
     finally:
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
-            except:
+            except Exception:
                 pass
 
-
-# ============ ОБРАБОТЧИКИ КОЛБЭКОВ ============
 
 @router.callback_query(F.data == "mode_image_gen")
 async def enter_generation(callback: CallbackQuery, state: FSMContext):
@@ -420,19 +428,19 @@ async def select_edit_type(callback: CallbackQuery, state: FSMContext):
         "edit_type_background": "background",
         "edit_type_style": "style",
     }
-    
+
     edit_type = edit_type_map.get(callback.data)
     if not edit_type:
         await callback.answer("Неизвестный тип", show_alert=True)
         return
-    
+
     await state.update_data(edit_type=edit_type)
-    
+
     type_descriptions = {
         "background": "Изменить фон изображения",
         "style": "Изменить стиль фото",
     }
-    
+
     await callback.message.edit_text(
         f"<b>✏️ Тип:</b> {type_descriptions.get(edit_type, edit_type)}\n\n"
         "Отправь фото и напиши инструкцию.",
@@ -446,13 +454,13 @@ async def select_edit_type(callback: CallbackQuery, state: FSMContext):
 async def select_preset(callback: CallbackQuery, state: FSMContext):
     preset_key = callback.data
     preset_instruction = EDIT_PRESETS.get(preset_key)
-    
+
     if not preset_instruction:
         await callback.answer("Неизвестный пресет", show_alert=True)
         return
-    
+
     await state.update_data(edit_preset=preset_key, edit_instruction=preset_instruction)
-    
+
     preset_names = {
         "preset_beach": "🏖️ Пляж",
         "preset_city": "🌆 Город",
@@ -461,7 +469,7 @@ async def select_preset(callback: CallbackQuery, state: FSMContext):
         "preset_studio": "✨ Студийный свет",
         "preset_artistic": "🎭 Художественный стиль",
     }
-    
+
     await callback.message.edit_text(
         f"<b>✅ Выбрано:</b> {preset_names.get(preset_key, preset_key)}\n\n"
         "Теперь отправь фото.",
@@ -526,8 +534,6 @@ async def cancel_action(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# ============ ОБРАБОТЧИКИ СООБЩЕНИЙ ============
-
 @router.message(BotStates.image_generate, F.text)
 async def do_generate(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -580,11 +586,8 @@ async def do_generate(message: Message, state: FSMContext):
         )
 
 
-# ============ РЕДАКТИРОВАНИЕ ИЗОБРАЖЕНИЙ ============
-
 @router.message(BotStates.image_edit, F.photo)
 async def handle_edit_photo(message: Message, state: FSMContext):
-    """Пользователь отправил фото для редактирования."""
     data = await state.get_data()
     edit_instruction = data.get("edit_instruction")
     edit_preset = data.get("edit_preset")
@@ -593,14 +596,12 @@ async def handle_edit_photo(message: Message, state: FSMContext):
     status_msg = await message.answer("⏳ Скачиваю фото...", parse_mode="HTML")
 
     try:
-        # ИСПРАВЛЕНО! Используем helper функцию
         file_info = await message.bot.get_file(message.photo[-1].file_id)
         image_bytes = await download_file_as_bytes(message.bot, file_info)
 
         if len(image_bytes) < 1000:
             raise Exception("Слишком маленькое изображение")
 
-        # Определяем инструкцию
         if edit_preset:
             instruction = EDIT_PRESETS.get(edit_preset, "edit this image")
         elif edit_instruction:
@@ -618,7 +619,6 @@ async def handle_edit_photo(message: Message, state: FSMContext):
             )
             return
 
-        # Обрабатываем
         await status_msg.edit_text("✏️ Обрабатываю...", parse_mode="HTML")
         await message.bot.send_chat_action(message.chat.id, "upload_photo")
 
@@ -654,7 +654,6 @@ async def handle_edit_photo(message: Message, state: FSMContext):
 
 @router.message(BotStates.image_edit, F.text & ~F.text.startswith("/"))
 async def handle_edit_instruction(message: Message, state: FSMContext):
-    """Пользователь отправил текстовую инструкцию."""
     data = await state.get_data()
     image_bytes = data.get("edit_image_bytes")
 
