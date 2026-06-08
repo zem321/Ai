@@ -31,7 +31,7 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://ai.api.nvidia.com/v1")
 
 IMAGE_MODELS = {
-    "_flux2": {
+    "img_flux2": {
         "title": "Flux 2 Klein (быстро)",
         "path": "black-forest-labs/flux.2-klein-4b",
     },
@@ -56,10 +56,34 @@ VIDEO_MODELS = {
     },
 }
 
+# Реально существующие и публичные HF Spaces для редактирования.
+# priority=1 — пробуем первыми.
 IMAGE_EDIT_SPACES = [
-    {"name": "1Paint", "id": "1Paint/1Paint", "priority": 1},
-    {"name": "SDXL Inpainting", "id": "diffusers/stable-diffusion-xl-inpainting", "priority": 2},
-    {"name": "Lama Cleaner", "id": "camenduru/Lama-Cleaner", "priority": 3},
+    {
+        "name": "InstructPix2Pix",
+        "id": "timbrooks/instruct-pix2pix",
+        "priority": 1,
+        "api": "/predict",
+    },
+    {
+        "name": "MagicEdit",
+        "id": "magic-research/MagicEdit",
+        "priority": 2,
+        "api": "/predict",
+    },
+    {
+        "name": "PhotoMaker Inpainting",
+        "id": "TencentARC/PhotoMaker",
+        "priority": 3,
+        "api": "/predict",
+    },
+]
+
+# NVIDIA endpoints для редактирования изображений.
+# Используются как fallback, если все HF Spaces упали.
+NVIDIA_EDIT_ENDPOINTS = [
+    {"title": "InstructPix2Pix (NVIDIA)", "path": "timbrooks/instruct-pix2pix"},
+    {"title": "Kosmos-G Editing (NVIDIA)", "path": "nvidia/kosmos-g"},
 ]
 
 EDIT_PRESETS = {
@@ -73,7 +97,6 @@ EDIT_PRESETS = {
 
 
 def _is_valid_hf_repo_id(repo_id: str) -> bool:
-    # Validate Hugging Face repo id early to avoid noisy runtime errors.
     return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}/[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", repo_id))
 
 
@@ -242,6 +265,42 @@ def _extract_image_bytes(data: dict[str, Any]) -> bytes:
     raise Exception(f"Изображение не найдено в ответе: {str(data)[:400]}")
 
 
+def _read_bytes_from_any(result: Any, fallback_path: str) -> bytes | None:
+    """Универсальный парсер результата gradio predict — может быть путём, PIL-объектом или dict."""
+    if result is None:
+        return None
+
+    # Путь к файлу (самый частый случай)
+    if isinstance(result, str) and os.path.exists(result):
+        with open(result, "rb") as f:
+            return f.read()
+
+    # PIL.Image-like
+    if hasattr(result, "save"):
+        try:
+            result.save(fallback_path)
+            with open(fallback_path, "rb") as f:
+                return f.read()
+        except Exception:
+            return None
+
+    # dict с полем path / image / output
+    if isinstance(result, dict):
+        path = result.get("path") or result.get("image") or result.get("output")
+        if isinstance(path, str) and os.path.exists(path):
+            with open(path, "rb") as f:
+                return f.read()
+
+    # list of paths / images
+    if isinstance(result, list):
+        for item in result:
+            b = _read_bytes_from_any(item, fallback_path)
+            if b:
+                return b
+
+    return None
+
+
 async def generate_image(prompt: str, selected_key: str) -> tuple[bytes, str]:
     model_order = [selected_key] + [k for k in IMAGE_MODELS if k != selected_key]
     last_error = None
@@ -306,83 +365,107 @@ async def generate_video(prompt: str, selected_key: str) -> tuple[bytes, str]:
     raise Exception(f"Генерация видео не удалась. Последняя ошибка: {last_error}")
 
 
+async def _edit_via_nvidia(image_bytes: bytes, prompt: str) -> tuple[bytes, str] | None:
+    """Fallback: просим NVIDIA отредактировать картинку по промпту."""
+    if not NVIDIA_API_KEY:
+        return None
+
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+    for endpoint in NVIDIA_EDIT_ENDPOINTS:
+        try:
+            logger.info("NVIDIA edit fallback: %s", endpoint["path"])
+            payload = {
+                "prompt": prompt,
+                "image": image_b64,
+                "width": 1024,
+                "height": 1024,
+                "steps": 4,
+                "seed": random.randint(1, 2_147_483_647),
+            }
+            data = await _nvidia_post(endpoint["path"], payload)
+            result_bytes = _extract_image_bytes(data)
+            if result_bytes:
+                return result_bytes, endpoint["title"]
+        except Exception as e:
+            logger.warning("NVIDIA edit %s failed: %s", endpoint["path"], e)
+            continue
+
+    # Если ни один edit-endpoint не сработал — fallback на обычную генерацию по промпту.
+    try:
+        image_bytes, used = await generate_image(prompt, "img_flux2")
+        return image_bytes, f"{used} (fallback)"
+    except Exception as e:
+        logger.warning("NVIDIA fallback generation failed: %s", e)
+        return None
+
+
 async def generate_image_edit_free(image_bytes: bytes, prompt: str, edit_type: str = "background") -> tuple[bytes, str]:
-    try:
-        from gradio_client import Client
-    except ModuleNotFoundError:
-        raise Exception(
-            "Функция редактирования недоступна: не установлен пакет gradio_client. "
-            "Установите зависимости из requirements.txt и перезапустите бота."
-        )
-
     tmp_path = None
+    errors: list[str] = []
+
+    # 1) Пробуем через gradio_client на реальных HF Spaces.
     try:
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            tmp_path = tmp.name
-            tmp.write(image_bytes)
+        from gradio_client import Client  # type: ignore
+        gradio_available = True
+    except ModuleNotFoundError:
+        gradio_available = False
+        errors.append("gradio_client не установлен")
 
-        errors = []
+    if gradio_available:
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp_path = tmp.name
+                tmp.write(image_bytes)
 
-        for space in sorted(IMAGE_EDIT_SPACES, key=lambda x: x["priority"]):
-            space_name = space["name"]
-            space_id = space["id"]
+            fallback_out = tmp_path.replace(".jpg", "_result.png")
 
-            if not _is_valid_hf_repo_id(space_id):
-                errors.append(f"{space_name}: invalid repo id '{space_id}'")
-                logger.warning("Skipping invalid HF repo id for %s: %s", space_name, space_id)
-                continue
+            for space in sorted(IMAGE_EDIT_SPACES, key=lambda x: x["priority"]):
+                space_name = space["name"]
+                space_id = space["id"]
+                api_name = space.get("api", "/predict")
 
-            try:
-                logger.info("Attempting edit with Space: %s", space_name)
-
-                client = Client(space_id, verbose=False)
-
-                if space_name == "1Paint":
-                    result = client.predict({"path": tmp_path}, prompt, api_name="/predict")
-                else:
-                    result = client.predict(tmp_path, prompt, api_name="/predict")
-
-                if result is None:
+                if not _is_valid_hf_repo_id(space_id):
+                    errors.append(f"{space_name}: invalid repo id '{space_id}'")
+                    logger.warning("Skipping invalid HF repo id for %s: %s", space_name, space_id)
                     continue
 
-                result_bytes = None
+                try:
+                    logger.info("Attempting edit with Space: %s (%s)", space_name, space_id)
+                    client = Client(space_id, verbose=False)
 
-                if isinstance(result, str) and os.path.exists(result):
-                    with open(result, "rb") as f:
-                        result_bytes = f.read()
-                elif hasattr(result, "save"):
-                    output_path = tmp_path.replace(".jpg", "_result.png")
-                    result.save(output_path)
-                    with open(output_path, "rb") as f:
-                        result_bytes = f.read()
+                    # Универсальный вызов — большинство Spaces принимают (image_path, text_prompt).
                     try:
-                        os.remove(output_path)
+                        result = client.predict(tmp_path, prompt, api_name=api_name)
+                    except Exception:
+                        # Некоторые Spaces ожидают dict-формат {"path": ...}.
+                        result = client.predict({"path": tmp_path}, prompt, api_name=api_name)
+
+                    result_bytes = _read_bytes_from_any(result, fallback_out)
+                    if result_bytes and len(result_bytes) > 1000:
+                        return result_bytes, f"HF: {space_name}"
+
+                except Exception as e:
+                    msg = str(e)[:200]
+                    errors.append(f"{space_name}: {msg}")
+                    logger.warning("Space %s failed: %s", space_name, msg)
+                    continue
+        finally:
+            for p in (tmp_path, (tmp_path.replace(".jpg", "_result.png") if tmp_path else None)):
+                if p and os.path.exists(p):
+                    try:
+                        os.unlink(p)
                     except Exception:
                         pass
-                elif isinstance(result, dict):
-                    path = result.get("path") or result.get("image") or result.get("output")
-                    if path and os.path.exists(path):
-                        with open(path, "rb") as f:
-                            result_bytes = f.read()
 
-                if result_bytes and len(result_bytes) > 1000:
-                    return result_bytes, f"HF: {space_name}"
+    # 2) Fallback: NVIDIA API (у вас уже настроен NVIDIA_API_KEY).
+    logger.info("HF Spaces не сработали — пробуем NVIDIA fallback.")
+    nvidia_result = await _edit_via_nvidia(image_bytes, prompt)
+    if nvidia_result:
+        return nvidia_result
 
-            except Exception as e:
-                msg = str(e)
-                errors.append(f"{space_name}: {msg}")
-                logger.warning("Space %s failed: %s", space_name, msg)
-                continue
-
-        error_summary = errors[-1] if errors else "Все Space недоступны"
-        raise Exception(f"Не удалось отредактировать. Ошибка: {error_summary[:200]}")
-
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
+    error_summary = errors[-1] if errors else "Все источники недоступны"
+    raise Exception(f"Не удалось отредактировать. Ошибка: {error_summary[:200]}")
 
 
 @router.callback_query(F.data == "mode_image_gen")
