@@ -16,49 +16,14 @@ from states import BotStates
 logger = logging.getLogger(__name__)
 router = Router()
 
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+
 SYSTEM_PROMPT = "Ты полезный ИИ-ассистент. Отвечай на русском языке если вопрос на русском. Будь точным и лаконичным."
 MAX_HISTORY = 20
 
-# NVIDIA
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-
-# FreeModel
-FREEMODEL_API_KEY = os.getenv("FREEMODEL_API_KEY", "")
-FREEMODEL_OPENAI_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.dev")
-FREEMODEL_ANTHROPIC_BASE = os.getenv("FREEMODEL_ANTHROPIC_BASE", "https://cc.freemodel.dev")
-
-
-def get_history(data):
-    return data.get("chat_history", [])
-
-
-def get_model(data):
-    return data.get("selected_model", "nvidia/llama-3.3-nemotron-super-49b-v1.5")
-
-
-def get_provider(model_id: str) -> str:
-    return "freemodel" if model_id.startswith("freemodel/") else "nvidia"
-
-
-def strip_provider_prefix(model_id: str) -> str:
-    return model_id.replace("freemodel/", "", 1)
-
-
-def join_api_path(base: str, path: str) -> str:
-    """
-    Безопасная склейка base + path:
-    - убирает хвостовые "/"
-    - предотвращает дублирование /v1/v1/...
-    """
-    clean_base = (base or "").strip().rstrip("/")
-    if not clean_base:
-        raise Exception("Пустой base URL")
-
-    if clean_base.endswith("/v1") and path.startswith("/v1/"):
-        path = path[3:]  # "/chat/completions" или "/messages"
-
-    return f"{clean_base}{path}"
+def get_history(data): return data.get("chat_history", [])
+def get_model(data): return data.get("selected_model", "nvidia/llama-3.3-nemotron-super-49b-v1.5")
 
 
 def compress_image(image_bytes: bytes) -> str:
@@ -71,217 +36,27 @@ def compress_image(image_bytes: bytes) -> str:
     return base64.b64encode(output.getvalue()).decode("utf-8")
 
 
-def to_openai_messages(messages: list) -> list:
-    out = []
-    for msg in messages:
-        out.append({
-            "role": msg.get("role", "user"),
-            "content": msg.get("content", "")
-        })
-    return out
-
-
-def to_anthropic_messages(messages: list) -> tuple[str, list]:
-    system_text = ""
-    out = []
-
-    for msg in messages:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-
-        if role == "system":
-            if isinstance(content, str):
-                system_text = content
-            continue
-
-        mapped_role = "assistant" if role == "assistant" else "user"
-
-        if isinstance(content, str):
-            out.append({
-                "role": mapped_role,
-                "content": [{"type": "text", "text": content}]
-            })
-            continue
-
-        converted = []
-        for block in content:
-            if block.get("type") == "text":
-                converted.append({"type": "text", "text": block.get("text", "")})
-            elif block.get("type") == "image_url":
-                url = (block.get("image_url") or {}).get("url", "")
-                if url.startswith("data:image/jpeg;base64,"):
-                    b64_data = url.split(",", 1)[1]
-                    converted.append({
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": b64_data
-                        }
-                    })
-
-        if not converted:
-            converted = [{"type": "text", "text": ""}]
-
-        out.append({
-            "role": mapped_role,
-            "content": converted
-        })
-
-    return system_text, out
-
-
-async def _parse_json_response(resp: aiohttp.ClientResponse, text: str) -> dict:
-    try:
-        return json.loads(text)
-    except Exception:
-        raise Exception(f"Ответ сервера не JSON: {text[:300]}")
-
-
-async def call_nvidia(model_id: str, messages: list) -> str:
-    if not NVIDIA_API_KEY:
-        raise Exception("NVIDIA_API_KEY не задан")
-
+async def call_ai(model_id: str, messages: list) -> str:
     headers = {
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
         "model": model_id,
-        "messages": to_openai_messages(messages),
+        "messages": messages,
         "max_tokens": 2048,
         "temperature": 0.7,
     }
-
     async with aiohttp.ClientSession() as session:
-        async with session.post(
-            NVIDIA_CHAT_URL,
-            json=payload,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=60)
-        ) as resp:
+        async with session.post(CHAT_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
             text = await resp.text()
-            data = await _parse_json_response(resp, text)
-
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"Ответ сервера: {text[:300]}")
             if resp.status != 200:
-                logger.error(
-                    "NVIDIA HTTP error: status=%s url=%s body=%s",
-                    resp.status,
-                    str(resp.url),
-                    text[:500]
-                )
-                raise Exception(data.get("error", {}).get("message", f"HTTP {resp.status}: {text[:300]}"))
-
+                raise Exception(data.get("error", {}).get("message", str(data)[:300]))
             return data["choices"][0]["message"]["content"]
-
-
-async def call_freemodel_openai(raw_model: str, messages: list) -> str:
-    if not FREEMODEL_API_KEY:
-        raise Exception("FREEMODEL_API_KEY не задан")
-
-    headers = {
-        "Authorization": f"Bearer {FREEMODEL_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": raw_model,
-        "messages": to_openai_messages(messages),
-        "max_tokens": 2048,
-        "temperature": 0.7,
-    }
-    url = join_api_path(FREEMODEL_OPENAI_BASE, "/v1/chat/completions")
-
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-            text = await resp.text()
-            data = await _parse_json_response(resp, text)
-
-            if resp.status != 200:
-                logger.error(
-                    "FreeModel OpenAI HTTP error: status=%s url=%s model=%s body=%s",
-                    resp.status,
-                    str(resp.url),
-                    raw_model,
-                    text[:500]
-                )
-                raise Exception(data.get("error", {}).get("message", f"HTTP {resp.status}: {text[:300]}"))
-
-            return data["choices"][0]["message"]["content"]
-
-
-async def call_freemodel_anthropic(raw_model: str, messages: list) -> str:
-    if not FREEMODEL_API_KEY:
-        raise Exception("FREEMODEL_API_KEY не задан")
-
-    system_text, anthropic_messages = to_anthropic_messages(messages)
-    payload = {
-        "model": raw_model,
-        "max_tokens": 2048,
-        "messages": anthropic_messages,
-    }
-    if system_text:
-        payload["system"] = system_text
-
-    url = join_api_path(FREEMODEL_ANTHROPIC_BASE, "/v1/messages")
-
-    async with aiohttp.ClientSession() as session:
-        # ) Bearer
-        bearer_headers = {
-            "Authorization": f"Bearer {FREEMODEL_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        async with session.post(url, json=payload, headers=bearer_headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-            text = await resp.text()
-            data = await _parse_json_response(resp, text)
-
-            if resp.status == 200:
-                parts = [item.get("text", "") for item in data.get("content", []) if item.get("type") == "text"]
-                answer = "\n".join([p for p in parts if p]).strip()
-                return answer or "Пустой ответ от модели."
-
-            logger.warning(
-                "FreeModel Anthropic bearer failed: status=%s url=%s model=%s body=%s",
-                resp.status,
-                str(resp.url),
-                raw_model,
-                text[:500]
-            )
-
-        # 2) x-api-key fallback
-        fallback_headers = {
-            "x-api-key": FREEMODEL_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-        }
-        async with session.post(url, json=payload, headers=fallback_headers, timeout=aiohttp.ClientTimeout(total=60)) as resp2:
-            text2 = await resp2.text()
-            data2 = await _parse_json_response(resp2, text2)
-
-            if resp2.status != 200:
-                logger.error(
-                    "FreeModel Anthropic fallback failed: status=%s url=%s model=%s body=%s",
-                    resp2.status,
-                    str(resp2.url),
-                    raw_model,
-                    text2[:500]
-                )
-                raise Exception(data2.get("error", {}).get("message", f"HTTP {resp2.status}: {text2[:300]}"))
-
-            parts = [item.get("text", "") for item in data2.get("content", []) if item.get("type") == "text"]
-            answer = "\n".join([p for p in parts if p]).strip()
-            return answer or "Пустой ответ от модели."
-
-
-async def call_ai(model_id: str, messages: list) -> str:
-    provider = get_provider(model_id)
-
-    if provider == "nvidia":
-        return await call_nvidia(model_id, messages)
-
-    raw_model = strip_provider_prefix(model_id)
-    if raw_model.startswith("claude-"):
-        return await call_freemodel_anthropic(raw_model, messages)
-    return await call_freemodel_openai(raw_model, messages)
 
 
 @router.callback_query(F.data == "select_model")
@@ -411,7 +186,7 @@ async def handle_photo(message: Message, state: FSMContext):
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
     except Exception as e:
-        logger.error("Photo error: %s", e, exc_info=True)
+        logger.error(f"Photo error: {e}")
         await status_msg.edit_text(
             f"❌ <b>Ошибка:</b>\n<code>{str(e)}</code>",
             parse_mode="HTML", reply_markup=cancel_keyboard()
@@ -431,7 +206,6 @@ async def handle_text(message: Message, state: FSMContext):
         history = get_history(data)
         history.append({"role": "user", "content": message.text})
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
-
         reply = await call_ai(model_id, messages)
 
         history.append({"role": "assistant", "content": reply})
@@ -444,7 +218,7 @@ async def handle_text(message: Message, state: FSMContext):
             parse_mode="HTML", reply_markup=cancel_keyboard()
         )
     except Exception as e:
-        logger.error("Chat error: %s", e, exc_info=True)
+        logger.error(f"Chat error: {e}")
         await status_msg.edit_text(
             f"❌ <b>Ошибка:</b>\n<code>{str(e)}</code>",
             parse_mode="HTML", reply_markup=cancel_keyboard()
