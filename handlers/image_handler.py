@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://ai.api.nvidia.com/v1")
+NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 
 IMAGE_MODELS = {
     "img_flux2": {
@@ -131,7 +131,10 @@ async def download_file_as_bytes(bot, file_info) -> bytes:
 def _build_url(path_or_url: str) -> str:
     if path_or_url.startswith("http"):
         return path_or_url
-    return f"{NVIDIA_BASE_URL}/{path_or_url}"
+
+    base = NVIDIA_BASE_URL.rstrip("/")
+    path = path_or_url if path_or_url.startswith("/") else f"/{path_or_url}"
+    return f"{base}{path}"
 
 
 async def _nvidia_post(path_or_url: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -166,6 +169,8 @@ async def _nvidia_post(path_or_url: str, payload: dict[str, Any]) -> dict[str, A
                         detail = data["error"].get("message", "")
                     elif isinstance(data.get("message"), str):
                         detail = data["message"]
+
+                logger.error("NVIDIA HTTP error status=%s url=%s body=%s", resp.status, str(resp.url), raw[:500])
                 raise Exception(f"HTTP {resp.status}: {detail or raw[:400]}")
 
             if not isinstance(data, dict):
@@ -229,7 +234,7 @@ def _extract_image_bytes(data: dict[str, Any]) -> bytes:
 
     d = data.get("data")
     if isinstance(d, list) and d and isinstance(d[0], dict):
-        b64 = d[0].get("b64_json")
+        b64 = d[0].get("b64_json") or d[0].get("base64")
         if isinstance(b64, str) and b64:
             return base64.b64decode(b64)
 
@@ -243,16 +248,17 @@ async def generate_image(prompt: str, selected_key: str) -> tuple[bytes, str]:
     for key in model_order:
         model = IMAGE_MODELS[key]
         payload = {
+            "model": model["path"],
             "prompt": prompt,
-            "width": 1024,
-            "height": 1024,
-            "steps": 4,
+            "n": 1,
+            "size": "1024x1024",
+            "response_format": "b64_json",
             "seed": random.randint(1, 2_147_483_647),
         }
 
         try:
             logger.info("Image attempt model=%s", model["path"])
-            data = await _nvidia_post(model["path"], payload)
+            data = await _nvidia_post("/images/generations", payload)
             image_bytes = _extract_image_bytes(data)
             return image_bytes, model["title"]
         except Exception as e:
