@@ -1,101 +1,90 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Текстовые модели (без vision)
+# Текстовые модели
 TEXT_MODELS = {
-    "nvidia/llama-3.1-nemotron-ultra-253b-v1": "💎 Nemotron Ultra 253B",
-    "nvidia/llama-3.3-nemotron-super-49b-v1.5": "🔥 Nemotron Super 49B",
-    "moonshotai/kimi-k2.6": "🌙 Kimi K2.6",
-    "deepseek-ai/deepseek-v4-pro": "🧠 DeepSeek V4 Pro",
-    "mistralai/mistral-large-3-675b-instruct-2512": "🌊 Mistral Large 3 675B",
-    "mistralai/mistral-medium-3.5-128b": "✨ Mistral Medium 3.5",
-    "qwen/qwen3.5-397b-a17b": "⚡️ Qwen 3.5 397B",
-    "mistralai/magistral-small-2506": "📝 Magistral Small",
+    "qwen/qwen3.5-397b-a17b": "Qwen 3.5 397B",
+    "deepseek-ai/deepseek-v4-pro": "DeepSeek V4 Pro",
+    "nvidia/llama-3.3-nemotron-super-49b-v1.5": "Nemotron Super 49B",
+    "moonshotai/kimi-k2.6": "Kimi K2.6",
+    "freemodel/gpt-5.4-nano": "GPT 5.4 Nano (FreeModel)",
+    "freemodel/gpt-5.5": "GPT 5.5 (FreeModel)",
 }
 
-# Vision модели (анализ фото + текст)
+# Vision модели
 VISION_MODELS_DICT = {
-    "meta/llama-4-maverick-17b-128e-instruct": "🦙 Llama 4 Maverick Vision",
-    "meta/llama-3.2-90b-vision-instruct": "👁 Llama 3.2 90B Vision",
-    "meta/llama-3.2-11b-vision-instruct": "👁 Llama 3.2 11B Vision",
-    "microsoft/phi-4-multimodal-instruct": "🔬 Phi-4 Multimodal",
-    "nvidia/nemotron-nano-12b-v2-vl": "🤖 Nemotron Nano 12B VL",
+    "meta/llama-4-maverick-17b-128e-instruct": "Llama 4 Maverick Vision",
+    "meta/llama-3.2-11b-vision-instruct": "Llama 3.2 11B Vision",
 }
 
-# Объединённый словарь для поиска названий
 MODELS = {**TEXT_MODELS, **VISION_MODELS_DICT}
-
-# Множество ID vision-моделей для проверки
 VISION_MODELS = set(VISION_MODELS_DICT.keys())
 
-# Модели редактирования фото
+# Модель редактирования (оставили для совместимости интерфейса)
 EDIT_MODELS = {
-    "flux.1-kontext-dev": "🎨 Flux.1 Kontext (точное редактирование)",
-    "flux.2-klein-4b": "⚡️ Flux.2 Klein (быстрое редактирование)",
+    "flux.2-klein-4b": "Flux.2 Klein",
 }
 
 
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="💬 Чат с ИИ", callback_data="mode_chat"),
-            InlineKeyboardButton(text="🎨 Создать картинку", callback_data="mode_image_gen"),
+            InlineKeyboardButton(text="Чат с ИИ", callback_data="mode_chat"),
+            InlineKeyboardButton(text="Создать картинку", callback_data="mode_image_gen"),
         ],
         [
-            InlineKeyboardButton(text="✏️ Редактировать фото", callback_data="mode_image_edit"),
-            InlineKeyboardButton(text="🤖 Выбрать модель", callback_data="select_model"),
+            InlineKeyboardButton(text="Выбрать модель", callback_data="select_model"),
+            InlineKeyboardButton(text="Очистить историю", callback_data="clear_history"),
         ],
         [
-            InlineKeyboardButton(text="🗑 Очистить историю", callback_data="clear_history"),
-            InlineKeyboardButton(text="❓ Помощь", callback_data="help"),
+            InlineKeyboardButton(text="Помощь", callback_data="help"),
         ]
     ])
 
 
 def model_select_keyboard(current: str = "") -> InlineKeyboardMarkup:
     buttons = []
-    # Текстовые модели
-    buttons.append([InlineKeyboardButton(text="─── 📝 Текст ───", callback_data="noop")])
+    buttons.append([InlineKeyboardButton(text="--- Текст ---", callback_data="noop")])
     for model_id, model_name in TEXT_MODELS.items():
-        label = f"✅ {model_name}" if model_id == current else model_name
+        label = f"[x] {model_name}" if model_id == current else model_name
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
-    # Vision модели
-    buttons.append([InlineKeyboardButton(text="─── 👁 Vision (фото+текст) ───", callback_data="noop")])
+
+    buttons.append([InlineKeyboardButton(text="--- Vision (фото+текст) ---", callback_data="noop")])
     for model_id, model_name in VISION_MODELS_DICT.items():
-        label = f"✅ {model_name}" if model_id == current else model_name
+        label = f"[x] {model_name}" if model_id == current else model_name
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="main_menu")])
+
+    buttons.append([InlineKeyboardButton(text="Назад", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🤖 Сменить модель", callback_data="select_model"),
-            InlineKeyboardButton(text="◀️ Меню", callback_data="main_menu"),
+            InlineKeyboardButton(text="Сменить модель", callback_data="select_model"),
+            InlineKeyboardButton(text="Меню", callback_data="main_menu"),
         ]
     ])
 
 
 def edit_model_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎨 Flux.1 Kontext — точное редактирование", callback_data="editmodel_flux.1-kontext-dev")],
-        [InlineKeyboardButton(text="⚡️ Flux.2 Klein — быстрое редактирование", callback_data="editmodel_flux.2-klein-4b")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="main_menu")],
+        [InlineKeyboardButton(text="Flux.2 Klein", callback_data="editmodel_flux.2-klein-4b")],
+        [InlineKeyboardButton(text="Назад", callback_data="main_menu")],
     ])
 
 
 def admin_notify_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_{user_id}"),
-            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{user_id}"),
+            InlineKeyboardButton(text="Одобрить", callback_data=f"approve_{user_id}"),
+            InlineKeyboardButton(text="Отклонить", callback_data=f"reject_{user_id}"),
         ]
     ])
 
 
 def admin_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👥 Одобренные", callback_data="admin_list_approved")],
-        [InlineKeyboardButton(text="⏳ Ожидают", callback_data="admin_list_pending")],
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="Одобренные", callback_data="admin_list_approved")],
+        [InlineKeyboardButton(text="Ожидают", callback_data="admin_list_pending")],
+        [InlineKeyboardButton(text="Статистика", callback_data="admin_stats")],
     ])
