@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import html
 import base64
@@ -30,7 +31,7 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://ai.api.nvidia.com/v1")
 
 IMAGE_MODELS = {
-    "img_flux2": {
+    "_flux2": {
         "title": "Flux 2 Klein (быстро)",
         "path": "black-forest-labs/flux.2-klein-4b",
     },
@@ -58,7 +59,7 @@ VIDEO_MODELS = {
 IMAGE_EDIT_SPACES = [
     {"name": "1Paint", "id": "1Paint/1Paint", "priority": 1},
     {"name": "SDXL Inpainting", "id": "diffusers/stable-diffusion-xl-inpainting", "priority": 2},
-    {"name": "Lama Cleaner", "id": "camenduru/Lama Cleaner", "priority": 3},
+    {"name": "Lama Cleaner", "id": "camenduru/Lama-Cleaner", "priority": 3},
 ]
 
 EDIT_PRESETS = {
@@ -69,6 +70,11 @@ EDIT_PRESETS = {
     "preset_studio": "apply professional studio lighting and backdrop",
     "preset_artistic": "transform into artistic painting style",
 }
+
+
+def _is_valid_hf_repo_id(repo_id: str) -> bool:
+    # Validate Hugging Face repo id early to avoid noisy runtime errors.
+    return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}/[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", repo_id))
 
 
 def gen_type_keyboard() -> InlineKeyboardMarkup:
@@ -320,6 +326,11 @@ async def generate_image_edit_free(image_bytes: bytes, prompt: str, edit_type: s
         for space in sorted(IMAGE_EDIT_SPACES, key=lambda x: x["priority"]):
             space_name = space["name"]
             space_id = space["id"]
+
+            if not _is_valid_hf_repo_id(space_id):
+                errors.append(f"{space_name}: invalid repo id '{space_id}'")
+                logger.warning("Skipping invalid HF repo id for %s: %s", space_name, space_id)
+                continue
 
             try:
                 logger.info("Attempting edit with Space: %s", space_name)
