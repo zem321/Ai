@@ -2,23 +2,41 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Текстовые модели (без vision)
 TEXT_MODELS = {
+    # NVIDIA (твои текущие)
     "nvidia/llama-3.1-nemotron-ultra-253b-v1": "💎 Nemotron Ultra 253B",
     "nvidia/llama-3.3-nemotron-super-49b-v1.5": "🔥 Nemotron Super 49B",
     "moonshotai/kimi-k2.6": "🌙 Kimi K2.6",
     "deepseek-ai/deepseek-v4-pro": "🧠 DeepSeek V4 Pro",
     "mistralai/mistral-large-3-675b-instruct-2512": "🌊 Mistral Large 3 675B",
     "mistralai/mistral-medium-3.5-128b": "✨ Mistral Medium 3.5",
-    "qwen/qwen3.5-397b-a17b": "⚡️ Qwen 3.5 397B",
+    "qwen/qwen3.5-397b-a17b": "⚡ Qwen 3.5 397B",
     "mistralai/magistral-small-2506": "📝 Magistral Small",
+
+    # FreeModel (OpenAI-compatible)
+    "freemodel/gpt-4o-mini": "🆓 GPT-4o Mini (FreeModel)",
+    "freemodel/deepseek-chat": "🆓 DeepSeek Chat (FreeModel)",
+    "freemodel/gpt-5.4-mini": "🆕 GPT-5.4 Mini (FreeModel)",
+    "freemodel/gpt-5.5": "🆕 GPT-5.5 (FreeModel)",
+
+    # FreeModel (Anthropic-compatible)
+    "freemodel/claude-t0": "🆓 Claude T0 (FreeModel)",
+    "freemodel/claude-sonnet-4.5": "🆕 Claude Sonnet 4.5 (FreeModel)",
+    "freemodel/claude-sonnet-4.6": "🆕 Claude Sonnet 4.6 (FreeModel)",
 }
 
 # Vision модели (анализ фото + текст)
 VISION_MODELS_DICT = {
+    # NVIDIA vision
     "meta/llama-4-maverick-17b-128e-instruct": "🦙 Llama 4 Maverick Vision",
     "meta/llama-3.2-90b-vision-instruct": "👁 Llama 3.2 90B Vision",
     "meta/llama-3.2-11b-vision-instruct": "👁 Llama 3.2 11B Vision",
     "microsoft/phi-4-multimodal-instruct": "🔬 Phi-4 Multimodal",
     "nvidia/nemotron-nano-12b-v2-vl": "🤖 Nemotron Nano 12B VL",
+
+    # FreeModel vision (если доступно на твоем тарифе/роуте)
+    "freemodel/gpt-4o-mini": "🆓 GPT-4o Mini Vision (FreeModel)",
+    "freemodel/gpt-5.4-mini": "🆕 GPT-5.4 Mini Vision (FreeModel)",
+    "freemodel/gpt-5.5": "🆕 GPT-5.5 Vision (FreeModel)",
 }
 
 # Объединённый словарь для поиска названий
@@ -30,7 +48,7 @@ VISION_MODELS = set(VISION_MODELS_DICT.keys())
 # Модели редактирования фото
 EDIT_MODELS = {
     "flux.1-kontext-dev": "🎨 Flux.1 Kontext (точное редактирование)",
-    "flux.2-klein-4b": "⚡️ Flux.2 Klein (быстрое редактирование)",
+    "flux.2-klein-4b": "⚡ Flux.2 Klein (быстрое редактирование)",
 }
 
 
@@ -53,16 +71,16 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
 
 def model_select_keyboard(current: str = "") -> InlineKeyboardMarkup:
     buttons = []
-    # Текстовые модели
     buttons.append([InlineKeyboardButton(text="─── 📝 Текст ───", callback_data="noop")])
     for model_id, model_name in TEXT_MODELS.items():
         label = f"✅ {model_name}" if model_id == current else model_name
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
-    # Vision модели
+
     buttons.append([InlineKeyboardButton(text="─── 👁 Vision (фото+текст) ───", callback_data="noop")])
     for model_id, model_name in VISION_MODELS_DICT.items():
         label = f"✅ {model_name}" if model_id == current else model_name
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
+
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -79,7 +97,7 @@ def cancel_keyboard() -> InlineKeyboardMarkup:
 def edit_model_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎨 Flux.1 Kontext — точное редактирование", callback_data="editmodel_flux.1-kontext-dev")],
-        [InlineKeyboardButton(text="⚡️ Flux.2 Klein — быстрое редактирование", callback_data="editmodel_flux.2-klein-4b")],
+        [InlineKeyboardButton(text="⚡ Flux.2 Klein — быстрое редактирование", callback_data="editmodel_flux.2-klein-4b")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="main_menu")],
     ])
 
