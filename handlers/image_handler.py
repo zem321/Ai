@@ -25,9 +25,14 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 
-# Только одна рабочая модель, как вы попросили
+# Старый маршрут (у вас работал раньше)
+NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://ai.api.nvidia.com/v1/genai")
+
+# Новый OpenAI-compatible маршрут (fallback)
+NVIDIA_OPENAI_BASE = os.getenv("NVIDIA_OPENAI_BASE", "https://integrate.api.nvidia.com/v1")
+
+# Только одна модель, как вы просили
 IMAGE_MODELS = {
     "img_flux2": {
         "title": "Flux 2 Klein",
@@ -39,8 +44,8 @@ IMAGE_MODELS = {
 def gen_type_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Картинка", callback_data="gen_type_image")],
-            [InlineKeyboardButton(text="Меню", callback_data="main_menu")],
+            [InlineKeyboardButton(text="🖼 Картинка", callback_data="gen_type_image")],
+            [InlineKeyboardButton(text="◀️ Меню", callback_data="main_menu")],
         ]
     )
 
@@ -48,25 +53,22 @@ def gen_type_keyboard() -> InlineKeyboardMarkup:
 def image_model_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Flux 2 Klein", callback_data="gen_model_img_flux2")],
-            [InlineKeyboardButton(text="Назад", callback_data="mode_image_gen")],
+            [InlineKeyboardButton(text="⚡️ Flux 2 Klein", callback_data="gen_model_img_flux2")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="mode_image_gen")],
         ]
     )
 
 
-def _build_url(path_or_url: str) -> str:
+def _build_url(base: str, path_or_url: str) -> str:
     if path_or_url.startswith("http"):
         return path_or_url
-    base = NVIDIA_BASE_URL.rstrip("/")
-    path = path_or_url if path_or_url.startswith("/") else f"/{path_or_url}"
-    return f"{base}{path}"
+    return f"{base.rstrip('/')}/{path_or_url.lstrip('/')}"
 
 
-async def _nvidia_post(path_or_url: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def _nvidia_post_full_url(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not NVIDIA_API_KEY:
         raise Exception("NVIDIA_API_KEY не задан")
 
-    url = _build_url(path_or_url)
     headers = {
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
         "Accept": "application/json",
@@ -78,6 +80,7 @@ async def _nvidia_post(path_or_url: str, payload: dict[str, Any]) -> dict[str, A
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, json=payload, headers=headers) as resp:
             raw = await resp.text()
+
             try:
                 data = json.loads(raw) if raw else {}
             except Exception:
@@ -93,7 +96,7 @@ async def _nvidia_post(path_or_url: str, payload: dict[str, Any]) -> dict[str, A
                     elif isinstance(data.get("message"), str):
                         detail = data["message"]
 
-                logger.error("NVIDIA image error status=%s url=%s body=%s", resp.status, str(resp.url), raw[:500])
+                logger.warning("NVIDIA HTTP %s url=%s body=%s", resp.status, str(resp.url), raw[:500])
                 raise Exception(f"HTTP {resp.status}: {detail or raw[:400]}")
 
             if not isinstance(data, dict):
@@ -110,10 +113,12 @@ def _extract_image_bytes(data: dict[str, Any]) -> bytes:
             return base64.b64decode(b64)
 
     arr = data.get("data")
-    if isinstance(arr, list) and arr and isinstance(arr[0], dict):
-        b64 = arr[0].get("b64_json") or arr[0].get("base64")
-        if isinstance(b64, str) and b64:
-            return base64.b64decode(b64)
+    if isinstance(arr, list) and arr:
+        for item in arr:
+            if isinstance(item, dict):
+                b64 = item.get("b64_json") or item.get("base64")
+                if isinstance(b64, str) and b64:
+                    return base64.b64decode(b64)
 
     raise Exception(f"Изображение не найдено в ответе: {str(data)[:400]}")
 
@@ -121,7 +126,17 @@ def _extract_image_bytes(data: dict[str, Any]) -> bytes:
 async def generate_image(prompt: str, selected_key: str) -> tuple[bytes, str]:
     model = IMAGE_MODELS.get(selected_key) or IMAGE_MODELS["img_flux2"]
 
-    payload = {
+    legacy_url = _build_url(NVIDIA_BASE_URL, model["path"])
+    legacy_payload = {
+        "prompt": prompt,
+        "width": 1024,
+        "height": 1024,
+        "steps": 4,
+        "seed": random.randint(1, 2_147_483_647),
+    }
+
+    openai_url = _build_url(NVIDIA_OPENAI_BASE, "/images/generations")
+    openai_payload = {
         "model": model["path"],
         "prompt": prompt,
         "n": 1,
@@ -130,9 +145,21 @@ async def generate_image(prompt: str, selected_key: str) -> tuple[bytes, str]:
         "seed": random.randint(1, 2_147_483_647),
     }
 
-    logger.info("Image attempt model=%s", model["path"])
-    data = await _nvidia_post("/images/generations", payload)
-    return _extract_image_bytes(data), model["title"]
+    # Сначала пробуем старый endpoint (у вас ранее был рабочим)
+    try:
+        logger.info("Image attempt legacy model=%s", model["path"])
+        data = await _nvidia_post_full_url(legacy_url, legacy_payload)
+        return _extract_image_bytes(data), model["title"]
+    except Exception as e1:
+        logger.warning("Legacy image endpoint failed: %s", str(e1))
+
+    # Если не вышло, fallback на новый endpoint
+    try:
+        logger.info("Image attempt openai model=%s", model["path"])
+        data = await _nvidia_post_full_url(openai_url, openai_payload)
+        return _extract_image_bytes(data), model["title"]
+    except Exception as e2:
+        raise Exception(f"Генерация картинки не удалась. Последняя ошибка: {e2}")
 
 
 @router.callback_query(F.data == "mode_image_gen")
@@ -140,7 +167,7 @@ async def enter_generation(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_generate)
     await state.update_data(gen_type=None, gen_model=None)
     await callback.message.edit_text(
-        "<b>Генерация</b>\n\nВыбери режим:",
+        "<b>Генерация</b>\n\nВыбери, что создать:",
         parse_mode="HTML",
         reply_markup=gen_type_keyboard(),
     )
@@ -150,7 +177,8 @@ async def enter_generation(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "mode_image_edit")
 async def edit_mode_disabled(callback: CallbackQuery):
     await callback.message.edit_text(
-        "<b>Редактирование фото отключено</b>\n\nДоступна только генерация картинки через Flux 2 Klein.",
+        "<b>Редактирование фото отключено</b>\n\n"
+        "Доступна только генерация картинки через Flux 2 Klein.",
         parse_mode="HTML",
         reply_markup=cancel_keyboard(),
     )
@@ -158,7 +186,7 @@ async def edit_mode_disabled(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "gen_type_image")
-async def select_image_type(callback: CallbackQuery, state: FSMContext):
+async def select_image_model(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_generate)
     await state.update_data(gen_type="image", gen_model="img_flux2")
     await callback.message.edit_text(
@@ -172,7 +200,8 @@ async def select_image_type(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "gen_type_video")
 async def video_disabled(callback: CallbackQuery):
     await callback.message.edit_text(
-        "<b>Генерация видео отключена</b>\n\nОставлена только генерация фото через Flux 2 Klein.",
+        "<b>Генерация видео отключена</b>\n\n"
+        "Оставлена только генерация фото через Flux 2 Klein.",
         parse_mode="HTML",
         reply_markup=cancel_keyboard(),
     )
@@ -180,7 +209,7 @@ async def video_disabled(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("gen_model_"))
-async def choose_gen_model(callback: CallbackQuery, state: FSMContext):
+async def set_generation_model(callback: CallbackQuery, state: FSMContext):
     key = callback.data.replace("gen_model_", "", 1)
 
     if key != "img_flux2":
@@ -204,7 +233,10 @@ async def do_generate(message: Message, state: FSMContext):
     prompt = (message.text or "").strip()
 
     if gen_type != "image":
-        await message.answer("Сначала выбери режим генерации картинки в меню.", reply_markup=cancel_keyboard())
+        await message.answer(
+            "Сначала выбери режим генерации картинки в меню.",
+            reply_markup=cancel_keyboard(),
+        )
         return
 
     if not prompt:
@@ -212,23 +244,23 @@ async def do_generate(message: Message, state: FSMContext):
         return
 
     await message.bot.send_chat_action(message.chat.id, "upload_photo")
-    status_msg = await message.answer("Генерирую...", parse_mode="HTML")
+    status_msg = await message.answer("⏳ Генерирую...", parse_mode="HTML")
 
     try:
         selected = gen_model if gen_model in IMAGE_MODELS else "img_flux2"
-        image_bytes, used = await generate_image(prompt, selected)
+        image_bytes, used_model = await generate_image(prompt, selected)
 
         await status_msg.delete()
         await message.answer_photo(
             photo=BufferedInputFile(image_bytes, filename="generated.png"),
-            caption=f"<b>Готово</b>\nМодель: {html.escape(used)}\n\n{html.escape(prompt)}",
+            caption=f"<b>Готово</b>\nМодель: {html.escape(used_model)}\n\n{html.escape(prompt)}",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
     except Exception as e:
         logger.exception("Generation error")
         await status_msg.edit_text(
-            f"Ошибка генерации:\n<code>{html.escape(str(e))}</code>",
+            f"❌ Ошибка генерации:\n<code>{html.escape(str(e))}</code>",
             parse_mode="HTML",
             reply_markup=cancel_keyboard(),
         )
