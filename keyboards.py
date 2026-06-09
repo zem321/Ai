@@ -1,3 +1,6 @@
+# В функции handle_text и handle_photo убраны все упоминания модели в конце ответа
+# В model_select_keyboard теперь кнопки разделены на ChatGPT и Other
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 CHATGPT_MODELS = {
