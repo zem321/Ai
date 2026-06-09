@@ -26,13 +26,13 @@ router = Router()
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 
-# Старый маршрут (у вас работал раньше)
+# Старый маршрут
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://ai.api.nvidia.com/v1/genai")
 
-# Новый OpenAI-compatible маршрут (fallback)
+# Новый OpenAI-compatible маршрут
 NVIDIA_OPENAI_BASE = os.getenv("NVIDIA_OPENAI_BASE", "https://integrate.api.nvidia.com/v1")
 
-# Только одна модель, как вы просили
+# Только одна модель
 IMAGE_MODELS = {
     "img_flux2": {
         "title": "Flux 2 Klein",
@@ -44,7 +44,7 @@ IMAGE_MODELS = {
 def gen_type_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🖼 Картинка", callback_data="gen_type_image")],
+            [InlineKeyboardButton(text="🖼 Генерация фото", callback_data="gen_type_image")],
             [InlineKeyboardButton(text="◀️ Меню", callback_data="main_menu")],
         ]
     )
@@ -145,7 +145,6 @@ async def generate_image(prompt: str, selected_key: str) -> tuple[bytes, str]:
         "seed": random.randint(1, 2_147_483_647),
     }
 
-    # Сначала пробуем старый endpoint (у вас ранее был рабочим)
     try:
         logger.info("Image attempt legacy model=%s", model["path"])
         data = await _nvidia_post_full_url(legacy_url, legacy_payload)
@@ -153,23 +152,23 @@ async def generate_image(prompt: str, selected_key: str) -> tuple[bytes, str]:
     except Exception as e1:
         logger.warning("Legacy image endpoint failed: %s", str(e1))
 
-    # Если не вышло, fallback на новый endpoint
     try:
         logger.info("Image attempt openai model=%s", model["path"])
         data = await _nvidia_post_full_url(openai_url, openai_payload)
         return _extract_image_bytes(data), model["title"]
     except Exception as e2:
-        raise Exception(f"Генерация картинки не удалась. Последняя ошибка: {e2}")
+        raise Exception(f"Генерация фото не удалась. Последняя ошибка: {e2}")
 
 
 @router.callback_query(F.data == "mode_image_gen")
 async def enter_generation(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_generate)
-    await state.update_data(gen_type=None, gen_model=None)
+    await state.update_data(gen_type="image", gen_model="img_flux2")
     await callback.message.edit_text(
-        "<b>Генерация</b>\n\nВыбери, что создать:",
+        "<b>Генерация фото</b>\n\n"
+        "Отправь текстовый запрос для генерации фото.",
         parse_mode="HTML",
-        reply_markup=gen_type_keyboard(),
+        reply_markup=cancel_keyboard(),
     )
     await callback.answer()
 
@@ -178,7 +177,7 @@ async def enter_generation(callback: CallbackQuery, state: FSMContext):
 async def edit_mode_disabled(callback: CallbackQuery):
     await callback.message.edit_text(
         "<b>Редактирование фото отключено</b>\n\n"
-        "Доступна только генерация картинки через Flux 2 Klein.",
+        "Доступна только генерация фото через Flux 2 Klein.",
         parse_mode="HTML",
         reply_markup=cancel_keyboard(),
     )
@@ -190,9 +189,10 @@ async def select_image_model(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.image_generate)
     await state.update_data(gen_type="image", gen_model="img_flux2")
     await callback.message.edit_text(
-        "<b>Генерация картинки</b>\n\nВыбери модель:",
+        "<b>Генерация фото</b>\n\n"
+        "Отправь текстовый запрос для генерации фото.",
         parse_mode="HTML",
-        reply_markup=image_model_keyboard(),
+        reply_markup=cancel_keyboard(),
     )
     await callback.answer()
 
@@ -201,7 +201,7 @@ async def select_image_model(callback: CallbackQuery, state: FSMContext):
 async def video_disabled(callback: CallbackQuery):
     await callback.message.edit_text(
         "<b>Генерация видео отключена</b>\n\n"
-        "Оставлена только генерация фото через Flux 2 Klein.",
+        "Доступна только генерация фото через Flux 2 Klein.",
         parse_mode="HTML",
         reply_markup=cancel_keyboard(),
     )
@@ -218,7 +218,8 @@ async def set_generation_model(callback: CallbackQuery, state: FSMContext):
 
     await state.update_data(gen_type="image", gen_model="img_flux2")
     await callback.message.edit_text(
-        "<b>Выбрано:</b> Flux 2 Klein\n\nТеперь отправь текстовый запрос.",
+        "<b>Генерация фото</b>\n\n"
+        "Отправь текстовый запрос для генерации фото.",
         parse_mode="HTML",
         reply_markup=cancel_keyboard(),
     )
@@ -234,7 +235,7 @@ async def do_generate(message: Message, state: FSMContext):
 
     if gen_type != "image":
         await message.answer(
-            "Сначала выбери режим генерации картинки в меню.",
+            "Сначала выбери режим генерации фото в меню.",
             reply_markup=cancel_keyboard(),
         )
         return
@@ -244,7 +245,7 @@ async def do_generate(message: Message, state: FSMContext):
         return
 
     await message.bot.send_chat_action(message.chat.id, "upload_photo")
-    status_msg = await message.answer("⏳ Генерирую...", parse_mode="HTML")
+    status_msg = await message.answer("⏳ Генерирую фото...", parse_mode="HTML")
 
     try:
         selected = gen_model if gen_model in IMAGE_MODELS else "img_flux2"
