@@ -150,7 +150,7 @@ async def cb_select_model(callback: CallbackQuery, state: FSMContext):
     current = get_model(data)
     await callback.message.edit_text(
         "<b>Выбери модель ИИ</b>\n\n"
-        "<i>Vision-модели поддерживают анализ фото</i>",
+        "<i>ChatGPT поддерживает текст и фото</i>",
         reply_markup=model_select_keyboard(current),
         parse_mode="HTML"
     )
@@ -180,7 +180,7 @@ async def enter_chat_mode_cmd(message: Message, state: FSMContext):
     model_id = get_model(data)
     model_name = MODELS.get(model_id, model_id)
     is_vision = model_id in VISION_MODELS
-    vision_note = "• Отправляй фото с подписью — отвечу\n" if is_vision else "• Для анализа фото выбери Vision-модель\n"
+    vision_note = "• Отправляй фото с подписью — отвечу\n" if is_vision else "• Для анализа фото выбери модель с поддержкой фото\n"
     await message.answer(
         f"<b>Режим чата</b>\n\n"
         f"Модель: <b>{model_name}</b>\n\n"
@@ -199,7 +199,7 @@ async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
     model_id = get_model(data)
     model_name = MODELS.get(model_id, model_id)
     is_vision = model_id in VISION_MODELS
-    vision_note = "• Отправляй фото с подписью — отвечу\n" if is_vision else "• Для анализа фото выбери Vision-модель\n"
+    vision_note = "• Отправляй фото с подписью — отвечу\n" if is_vision else "• Для анализа фото выбери модель с поддержкой фото\n"
     await callback.message.edit_text(
         f"<b>Режим чата</b>\n\n"
         f"Модель: <b>{model_name}</b>\n\n"
@@ -234,7 +234,7 @@ async def handle_photo(message: Message, state: FSMContext):
     if model_id not in VISION_MODELS:
         await message.answer(
             f"Модель <b>{model_name}</b> не поддерживает фото.\n\n"
-            f"Смени модель и выбери Vision.",
+            f"Выбери модель с поддержкой фото.",
             parse_mode="HTML",
             reply_markup=cancel_keyboard()
         )
