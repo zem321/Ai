@@ -23,7 +23,7 @@ MAX_HISTORY = 20
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 FREEMODEL_API_KEY = os.getenv("FREEMODEL_API_KEY", "")
-FREEMODEL_OPENAI_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.dev")
+FREEMODEL_API_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.dev")
 
 
 # ------------------ Вспомогательные функции ------------------
@@ -39,6 +39,8 @@ def get_model(data):
 def strip_provider_prefix(model_id: str) -> str:
     return model_id.replace("freemodel/", "", 1)
 
+
+# ------------------ Вызов моделей ------------------
 
 async def call_nvidia(model_id: str, messages: list) -> str:
     headers = {"Authorization": f"Bearer {NVIDIA_API_KEY}", "Content-Type": "application/json"}
@@ -67,14 +69,14 @@ async def call_freemodel_openai(raw_model: str, messages: list) -> str:
         "temperature": 0.7,
     }
 
-    url = f"{FREEMODEL_OPENAI_BASE.rstrip('/')}/v1/chat/completions"
+    url = f"{FREEMODEL_API_BASE.rstrip('/')}/v1/chat/completions"
 
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
             text = await resp.text()
-            if "application/json" in resp.headers.get("Content-Type", ""):
-                data = await resp.json()
-            else:
+            try:
+                data = json.loads(text)  # безопасный парсинг JSON
+            except Exception:
                 raise Exception(f"FreeModel вернул неожиданный ответ: {text[:300]}")
 
             if resp.status != 200:
