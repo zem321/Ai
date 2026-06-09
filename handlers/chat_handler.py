@@ -44,18 +44,42 @@ async def call_nvidia(model_id: str, messages: list) -> str:
     headers = {"Authorization": f"Bearer {NVIDIA_API_KEY}", "Content-Type": "application/json"}
     payload = {"model": model_id, "messages": messages, "max_tokens": 2048, "temperature": 0.7}
     async with aiohttp.ClientSession() as session:
-        async with session.post(NVIDIA_CHAT_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+        async with session.post(
+            NVIDIA_CHAT_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)
+        ) as resp:
             data = await resp.json()
             return data["choices"][0]["message"]["content"]
 
 
 async def call_freemodel_openai(raw_model: str, messages: list) -> str:
-    headers = {"Authorization": f"Bearer {FREEMODEL_API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": raw_model, "messages": messages, "max_tokens": 2048, "temperature": 0.7}
-    url = f"{FREEMODEL_OPENAI_BASE}/v1/chat/completions"
+    if not FREEMODEL_API_KEY:
+        raise Exception("FREEMODEL_API_KEY не задан")
+
+    headers = {
+        "Authorization": f"Bearer {FREEMODEL_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "model": raw_model,
+        "messages": messages,
+        "max_tokens": 2048,
+        "temperature": 0.7,
+    }
+
+    url = f"{FREEMODEL_OPENAI_BASE.rstrip('/')}/v1/chat/completions"
+
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-            data = await resp.json()
+            text = await resp.text()
+            if "application/json" in resp.headers.get("Content-Type", ""):
+                data = await resp.json()
+            else:
+                raise Exception(f"FreeModel вернул неожиданный ответ: {text[:300]}")
+
+            if resp.status != 200:
+                raise Exception(data.get("error", {}).get("message", str(data)[:300]))
+
             return data["choices"][0]["message"]["content"]
 
 
@@ -69,7 +93,11 @@ async def call_ai(model_id: str, messages: list) -> str:
 
 @router.callback_query(F.data == "select_model")
 async def select_model_group(callback: CallbackQuery):
-    await callback.message.edit_text("<b>Выберите группу моделей</b>", reply_markup=model_group_keyboard(), parse_mode="HTML")
+    await callback.message.edit_text(
+        "<b>Выберите группу моделей</b>",
+        reply_markup=model_group_keyboard(),
+        parse_mode="HTML"
+    )
     await callback.answer()
 
 
@@ -91,7 +119,11 @@ async def set_model(callback: CallbackQuery, state: FSMContext):
     model_id = callback.data.replace("model_", "")
     await state.update_data(selected_model=model_id)
     await state.set_state(BotStates.chat_mode)
-    await callback.message.edit_text("<b>Модель выбрана</b>\n\nПиши сообщения.", reply_markup=cancel_keyboard(), parse_mode="HTML")
+    await callback.message.edit_text(
+        "<b>Модель выбрана</b>\n\nПиши сообщения.",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML"
+    )
     await callback.answer()
 
 
