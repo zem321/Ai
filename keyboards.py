@@ -1,13 +1,17 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Текстовые модели
-TEXT_MODELS = {
+# ChatGPT модели
+CHATGPT_MODELS = {
+    "freemodel/gpt-5.4-nano": "GPT 5.4 Nano",
+    "freemodel/gpt-5.5": "GPT 5.5",
+}
+
+# Other модели
+OTHER_MODELS = {
     "qwen/qwen3.5-397b-a17b": "Qwen 3.5 397B",
     "deepseek-ai/deepseek-v4-pro": "DeepSeek V4 Pro",
     "nvidia/llama-3.3-nemotron-super-49b-v1.5": "Nemotron Super 49B",
     "moonshotai/kimi-k2.6": "Kimi K2.6",
-    "freemodel/gpt-5.4-nano": "GPT 5.4 Nano (FreeModel)",
-    "freemodel/gpt-5.5": "GPT 5.5 (FreeModel)",
 }
 
 # Vision модели
@@ -16,12 +20,17 @@ VISION_MODELS_DICT = {
     "meta/llama-3.2-11b-vision-instruct": "Llama 3.2 11B Vision",
 }
 
-MODELS = {**TEXT_MODELS, **VISION_MODELS_DICT}
-VISION_MODELS = set(VISION_MODELS_DICT.keys())
+# Для совместимости со старым импортом TEXT_MODELS
+TEXT_MODELS = {**OTHER_MODELS, **CHATGPT_MODELS}
 
-# Модель редактирования (оставили для совместимости интерфейса)
+MODELS = {**CHATGPT_MODELS, **OTHER_MODELS, **VISION_MODELS_DICT}
+
+# ChatGPT + Vision поддерживают фото
+VISION_MODELS = set(CHATGPT_MODELS.keys()) | set(VISION_MODELS_DICT.keys())
+
+# Модель редактирования, оставлена для совместимости интерфейса
 EDIT_MODELS = {
-    "flux.2-klein-4b": "Flux.2 Klein",
+    "flux.2-klein-4b": "Flux 2 Klein",
 }
 
 
@@ -29,7 +38,7 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="Чат с ИИ", callback_data="mode_chat"),
-            InlineKeyboardButton(text="Создать картинку", callback_data="mode_image_gen"),
+            InlineKeyboardButton(text="Генерация фото", callback_data="mode_image_gen"),
         ],
         [
             InlineKeyboardButton(text="Выбрать модель", callback_data="select_model"),
@@ -43,12 +52,18 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
 
 def model_select_keyboard(current: str = "") -> InlineKeyboardMarkup:
     buttons = []
-    buttons.append([InlineKeyboardButton(text="--- Текст ---", callback_data="noop")])
-    for model_id, model_name in TEXT_MODELS.items():
+
+    buttons.append([InlineKeyboardButton(text="--- ChatGPT ---", callback_data="noop")])
+    for model_id, model_name in CHATGPT_MODELS.items():
         label = f"[x] {model_name}" if model_id == current else model_name
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
 
-    buttons.append([InlineKeyboardButton(text="--- Vision (фото+текст) ---", callback_data="noop")])
+    buttons.append([InlineKeyboardButton(text="--- Other ---", callback_data="noop")])
+    for model_id, model_name in OTHER_MODELS.items():
+        label = f"[x] {model_name}" if model_id == current else model_name
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
+
+    buttons.append([InlineKeyboardButton(text="--- Vision ---", callback_data="noop")])
     for model_id, model_name in VISION_MODELS_DICT.items():
         label = f"[x] {model_name}" if model_id == current else model_name
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
@@ -68,7 +83,7 @@ def cancel_keyboard() -> InlineKeyboardMarkup:
 
 def edit_model_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Flux.2 Klein", callback_data="editmodel_flux.2-klein-4b")],
+        [InlineKeyboardButton(text="Flux 2 Klein", callback_data="editmodel_flux.2-klein-4b")],
         [InlineKeyboardButton(text="Назад", callback_data="main_menu")],
     ])
 
