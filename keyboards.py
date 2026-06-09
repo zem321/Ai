@@ -6,7 +6,7 @@ CHATGPT_MODELS = {
     "freemodel/gpt-5.5": "GPT 5.5",
 }
 
-# Другие модели (Other): текстовые + Vision
+# Остальные модели (Other): текстовые + Vision
 OTHER_MODELS = {
     "qwen/qwen3.5-397b-a17b": "Qwen 3.5 397B",
     "deepseek-ai/deepseek-v4-pro": "DeepSeek V4 Pro",
@@ -37,7 +37,7 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
 
 
 def model_group_keyboard() -> InlineKeyboardMarkup:
-    """Сначала выбор группы: ChatGPT / Other"""
+    """Показывает две кнопки: ChatGPT и Other"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="ChatGPT", callback_data="model_group_chatgpt")],
         [InlineKeyboardButton(text="Other", callback_data="model_group_other")],
@@ -58,7 +58,6 @@ def models_keyboard(group: str, current: str = "") -> InlineKeyboardMarkup:
             label = f"[x] {model_name}" if model_id == current else model_name
             buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
 
-    # Кнопка назад к выбору группы
     buttons.append([InlineKeyboardButton(text="Назад", callback_data="select_model")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
