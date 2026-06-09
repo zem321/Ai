@@ -10,7 +10,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from PIL import Image
 
-from keyboards import cancel_keyboard, model_select_keyboard, MODELS, VISION_MODELS
+from keyboards import cancel_keyboard, model_group_keyboard, models_keyboard, MODELS, CHATGPT_MODELS, OTHER_MODELS
 from states import BotStates
 
 logger = logging.getLogger(__name__)
@@ -70,247 +70,77 @@ def to_openai_messages(messages: list) -> list:
 
 
 async def call_nvidia(model_id: str, messages: list) -> str:
-    if not NVIDIA_API_KEY:
-        raise Exception("NVIDIA_API_KEY не задан")
-
-    headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model_id,
-        "messages": to_openai_messages(messages),
-        "max_tokens": 2048,
-        "temperature": 0.7,
-    }
-
+    headers = {"Authorization": f"Bearer {NVIDIA_API_KEY}", "Content-Type": "application/json"}
+    payload = {"model": model_id, "messages": to_openai_messages(messages), "max_tokens": 2048, "temperature": 0.7}
     async with aiohttp.ClientSession() as session:
-        async with session.post(
-            NVIDIA_CHAT_URL,
-            json=payload,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=60),
-        ) as resp:
+        async with session.post(NVIDIA_CHAT_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
             text = await resp.text()
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Ответ сервера: {text[:300]}")
-
-            if resp.status != 200:
-                logger.error("NVIDIA chat error status=%s url=%s body=%s", resp.status, str(resp.url), text[:500])
-                raise Exception(data.get("error", {}).get("message", str(data)[:300]))
-
+            data = json.loads(text)
             return data["choices"][0]["message"]["content"]
 
 
 async def call_freemodel_openai(raw_model: str, messages: list) -> str:
-    if not FREEMODEL_API_KEY:
-        raise Exception("FREEMODEL_API_KEY не задан")
-
-    headers = {
-        "Authorization": f"Bearer {FREEMODEL_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": raw_model,
-        "messages": to_openai_messages(messages),
-        "max_tokens": 2048,
-        "temperature": 0.7,
-    }
+    headers = {"Authorization": f"Bearer {FREEMODEL_API_KEY}", "Content-Type": "application/json"}
+    payload = {"model": raw_model, "messages": to_openai_messages(messages), "max_tokens": 2048, "temperature": 0.7}
     url = join_api_path(FREEMODEL_OPENAI_BASE, "/v1/chat/completions")
-
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
             text = await resp.text()
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Ответ сервера: {text[:300]}")
-
-            if resp.status != 200:
-                logger.error("FreeModel chat error status=%s url=%s model=%s body=%s", resp.status, str(resp.url), raw_model, text[:500])
-                raise Exception(data.get("error", {}).get("message", str(data)[:300]))
-
+            data = json.loads(text)
             return data["choices"][0]["message"]["content"]
 
 
 async def call_ai(model_id: str, messages: list) -> str:
-    provider = get_provider(model_id)
-    if provider == "nvidia":
-        return await call_nvidia(model_id, messages)
+    return await call_nvidia(model_id, messages) if not model_id.startswith("freemodel/") else await call_freemodel_openai(strip_provider_prefix(model_id), messages)
 
-    raw_model = strip_provider_prefix(model_id)
-    return await call_freemodel_openai(raw_model, messages)
 
+# ---------------- Обработчики выбора моделей ----------------
 
 @router.callback_query(F.data == "select_model")
-async def cb_select_model(callback: CallbackQuery, state: FSMContext):
+async def select_model_group(callback: CallbackQuery):
+    await callback.message.edit_text("<b>Выберите группу моделей</b>", reply_markup=model_group_keyboard(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("model_group_"))
+async def show_models_group(callback: CallbackQuery, state: FSMContext):
+    group = callback.data.replace("model_group_", "")
     data = await state.get_data()
-    current = get_model(data)
+    current = data.get("selected_model", "")
     await callback.message.edit_text(
-        "<b>Выбери модель ИИ</b>\n\n"
-        "<i>ChatGPT поддерживает текст и фото</i>",
-        reply_markup=model_select_keyboard(current),
+        f"<b>Модели группы {group.capitalize()}</b>",
+        reply_markup=models_keyboard(group, current),
         parse_mode="HTML"
     )
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("model_"))
-async def cb_model_selected(callback: CallbackQuery, state: FSMContext):
+async def set_generation_model(callback: CallbackQuery, state: FSMContext):
     model_id = callback.data.replace("model_", "", 1)
     await state.update_data(selected_model=model_id)
-    model_name = MODELS.get(model_id, model_id)
-    is_vision = model_id in VISION_MODELS
-    vision_note = "\n<i>Поддерживает анализ фото</i>" if is_vision else "\n<i>Только текст</i>"
     await state.set_state(BotStates.chat_mode)
-    await callback.message.edit_text(
-        f"<b>Модель:</b> {model_name}{vision_note}\n\nПиши сообщения.",
-        reply_markup=cancel_keyboard(),
-        parse_mode="HTML"
-    )
-    await callback.answer(model_name)
-
-
-@router.message(Command("chat"))
-async def enter_chat_mode_cmd(message: Message, state: FSMContext):
-    await state.set_state(BotStates.chat_mode)
-    data = await state.get_data()
-    model_id = get_model(data)
-    model_name = MODELS.get(model_id, model_id)
-    is_vision = model_id in VISION_MODELS
-    vision_note = "• Отправляй фото с подписью — отвечу\n" if is_vision else "• Для анализа фото выбери модель с поддержкой фото\n"
-    await message.answer(
-        f"<b>Режим чата</b>\n\n"
-        f"Модель: <b>{model_name}</b>\n\n"
-        f"• Пиши вопросы\n"
-        f"{vision_note}\n"
-        f"/clear — очистить историю",
-        reply_markup=cancel_keyboard(),
-        parse_mode="HTML"
-    )
-
-
-@router.callback_query(F.data == "mode_chat")
-async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(BotStates.chat_mode)
-    data = await state.get_data()
-    model_id = get_model(data)
-    model_name = MODELS.get(model_id, model_id)
-    is_vision = model_id in VISION_MODELS
-    vision_note = "• Отправляй фото с подписью — отвечу\n" if is_vision else "• Для анализа фото выбери модель с поддержкой фото\n"
-    await callback.message.edit_text(
-        f"<b>Режим чата</b>\n\n"
-        f"Модель: <b>{model_name}</b>\n\n"
-        f"• Пиши вопросы\n"
-        f"{vision_note}\n"
-        f"/clear — очистить историю",
-        reply_markup=cancel_keyboard(),
-        parse_mode="HTML"
-    )
+    await callback.message.edit_text("<b>Модель выбрана</b>\n\nПиши сообщения.", reply_markup=cancel_keyboard(), parse_mode="HTML")
     await callback.answer()
 
 
-@router.message(Command("clear"))
-async def clear_history_cmd(message: Message, state: FSMContext):
-    await state.update_data(chat_history=[])
-    await message.answer("<b>История очищена</b>", reply_markup=cancel_keyboard(), parse_mode="HTML")
-
-
-@router.callback_query(F.data == "clear_history")
-async def clear_history_cb(callback: CallbackQuery, state: FSMContext):
-    await state.update_data(chat_history=[])
-    await callback.message.edit_text("<b>История очищена</b>", reply_markup=cancel_keyboard(), parse_mode="HTML")
-    await callback.answer("История очищена")
-
-
-@router.message(BotStates.chat_mode, F.photo)
-async def handle_photo(message: Message, state: FSMContext):
-    data = await state.get_data()
-    model_id = get_model(data)
-    model_name = MODELS.get(model_id, model_id)
-
-    if model_id not in VISION_MODELS:
-        await message.answer(
-            f"Модель <b>{model_name}</b> не поддерживает фото.\n\n"
-            f"Выбери модель с поддержкой фото.",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard()
-        )
-        return
-
-    caption = message.caption or "Подробно опиши что на этом фото"
-    status_msg = await message.answer("<i>Анализирую фото...</i>", parse_mode="HTML")
-
-    try:
-        photo = message.photo[-1]
-        file = await message.bot.get_file(photo.file_id)
-        file_bytes = await message.bot.download_file(file.file_path)
-        image_b64 = compress_image(file_bytes.read())
-
-        history = get_history(data)
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "text", "text": caption},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
-            ]
-        })
-
-        reply = await call_ai(model_id, messages)
-
-        history.append({"role": "user", "content": f"[Фото] {caption}"})
-        history.append({"role": "assistant", "content": reply})
-        if len(history) > MAX_HISTORY:
-            history = history[-MAX_HISTORY:]
-        await state.update_data(chat_history=history)
-
-        await status_msg.edit_text(
-            f"<b>Анализ фото:</b>\n\n{reply}\n\n<i>{model_name}</i>",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard()
-        )
-    except Exception as e:
-        logger.error("Photo error: %s", e, exc_info=True)
-        await status_msg.edit_text(
-            f"<b>Ошибка:</b>\n<code>{str(e)}</code>",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard()
-        )
-
+# ---------------- Чат ----------------
 
 @router.message(BotStates.chat_mode, F.text)
 async def handle_text(message: Message, state: FSMContext):
     data = await state.get_data()
     model_id = get_model(data)
-    model_name = MODELS.get(model_id, model_id)
-
     await message.bot.send_chat_action(message.chat.id, "typing")
     status_msg = await message.answer("<i>Думаю...</i>", parse_mode="HTML")
-
     try:
         history = get_history(data)
         history.append({"role": "user", "content": message.text})
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
-
         reply = await call_ai(model_id, messages)
-
         history.append({"role": "assistant", "content": reply})
         if len(history) > MAX_HISTORY:
             history = history[-MAX_HISTORY:]
         await state.update_data(chat_history=history)
-
-        await status_msg.edit_text(
-            f"{reply}\n\n<i>{model_name}</i>",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard()
-        )
+        await status_msg.edit_text(reply, parse_mode="HTML", reply_markup=cancel_keyboard())
     except Exception as e:
-        logger.error("Chat error: %s", e, exc_info=True)
-        await status_msg.edit_text(
-            f"<b>Ошибка:</b>\n<code>{str(e)}</code>",
-            parse_mode="HTML",
-            reply_markup=cancel_keyboard()
-        )
+        await status_msg.edit_text(f"<b>Ошибка:</b>\n<code>{str(e)}</code>", parse_mode="HTML", reply_markup=cancel_keyboard())
