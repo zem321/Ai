@@ -18,12 +18,18 @@ FREEMODEL_API_KEY = os.getenv("FREEMODEL_API_KEY", "")
 FREEMODEL_OPENAI_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.dev")
 
 
+# ------------------ Вспомогательные функции ------------------
+
 def get_history(data):
     return data.get("chat_history", [])
 
 
 def get_model(data):
     return data.get("selected_model", list(CHATGPT_MODELS.keys())[0])
+
+
+def strip_provider_prefix(model_id: str) -> str:
+    return model_id.replace("freemodel/", "", 1)
 
 
 async def call_ai(model_id: str, messages: list) -> str:
@@ -36,7 +42,8 @@ async def call_ai(model_id: str, messages: list) -> str:
             return data["choices"][0]["message"]["content"]
 
 
-# ---------------- Обработчики выбора моделей ----------------
+# ------------------ Обработчики выбора моделей ------------------
+
 @router.callback_query(F.data == "select_model")
 async def select_model_group(callback: CallbackQuery):
     await callback.message.edit_text("<b>Выберите группу моделей</b>", reply_markup=model_group_keyboard(), parse_mode="HTML")
@@ -48,7 +55,11 @@ async def show_models_group(callback: CallbackQuery, state: FSMContext):
     group = callback.data.replace("model_group_", "")
     data = await state.get_data()
     current = data.get("selected_model", "")
-    await callback.message.edit_text(f"<b>Модели группы {group.capitalize()}</b>", reply_markup=models_keyboard(group, current), parse_mode="HTML")
+    await callback.message.edit_text(
+        f"<b>Модели группы {group.capitalize()}</b>", 
+        reply_markup=models_keyboard(group, current), 
+        parse_mode="HTML"
+    )
     await callback.answer()
 
 
@@ -61,7 +72,25 @@ async def set_model(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# ---------------- Чат ----------------
+# ------------------ Обработчик кнопки "Чат с ИИ" ------------------
+
+@router.callback_query(F.data == "mode_chat")
+async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    model_id = data.get("selected_model") or list(CHATGPT_MODELS.keys())[0]
+    await state.set_state(BotStates.chat_mode)
+    await callback.message.edit_text(
+        "<b>Режим чата активирован</b>\n\n"
+        "Пиши свои сообщения. Для анализа фото выбери модель с поддержкой Vision.\n"
+        "/clear — очистить историю",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+# ------------------ Обработчики чата ------------------
+
 @router.message(BotStates.chat_mode, F.text)
 async def handle_text(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -73,7 +102,12 @@ async def handle_text(message: Message, state: FSMContext):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-MAX_HISTORY:]
         reply = await call_ai(model_id, messages)
         history.append({"role": "assistant", "content": reply})
+        if len(history) > MAX_HISTORY:
+            history = history[-MAX_HISTORY:]
         await state.update_data(chat_history=history)
         await status_msg.edit_text(reply, parse_mode="HTML", reply_markup=cancel_keyboard())
     except Exception as e:
         await status_msg.edit_text(f"<b>Ошибка:</b> {str(e)}", parse_mode="HTML", reply_markup=cancel_keyboard())
+
+
+# В дальнейшем можно добавить обработку фото, если нужна поддержка Vision моделей
