@@ -1,12 +1,20 @@
 import os
 import json
+import logging
 import aiohttp
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
-from keyboards import cancel_keyboard, model_group_keyboard, models_keyboard, CHATGPT_MODELS, OTHER_MODELS, MODELS
+from keyboards import (
+    cancel_keyboard,
+    model_group_keyboard,
+    models_keyboard,
+    CHATGPT_MODELS,
+    OTHER_MODELS,
+)
 from states import BotStates
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 SYSTEM_PROMPT = "Ты полезный ИИ-ассистент. Отвечай на русском языке если вопрос на русском. Будь точным и лаконичным."
@@ -32,14 +40,29 @@ def strip_provider_prefix(model_id: str) -> str:
     return model_id.replace("freemodel/", "", 1)
 
 
-async def call_ai(model_id: str, messages: list) -> str:
-    headers = {"Authorization": f"Bearer {FREEMODEL_API_KEY if 'freemodel' in model_id else NVIDIA_API_KEY}", "Content-Type": "application/json"}
+async def call_nvidia(model_id: str, messages: list) -> str:
+    headers = {"Authorization": f"Bearer {NVIDIA_API_KEY}", "Content-Type": "application/json"}
     payload = {"model": model_id, "messages": messages, "max_tokens": 2048, "temperature": 0.7}
-    url = FREEMODEL_OPENAI_BASE + "/v1/chat/completions" if "freemodel" in model_id else NVIDIA_CHAT_URL
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload, headers=headers) as resp:
+        async with session.post(NVIDIA_CHAT_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
             data = await resp.json()
             return data["choices"][0]["message"]["content"]
+
+
+async def call_freemodel_openai(raw_model: str, messages: list) -> str:
+    headers = {"Authorization": f"Bearer {FREEMODEL_API_KEY}", "Content-Type": "application/json"}
+    payload = {"model": raw_model, "messages": messages, "max_tokens": 2048, "temperature": 0.7}
+    url = f"{FREEMODEL_OPENAI_BASE}/v1/chat/completions"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            data = await resp.json()
+            return data["choices"][0]["message"]["content"]
+
+
+async def call_ai(model_id: str, messages: list) -> str:
+    if model_id.startswith("freemodel/"):
+        return await call_freemodel_openai(strip_provider_prefix(model_id), messages)
+    return await call_nvidia(model_id, messages)
 
 
 # ------------------ Обработчики выбора моделей ------------------
@@ -56,8 +79,8 @@ async def show_models_group(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     current = data.get("selected_model", "")
     await callback.message.edit_text(
-        f"<b>Модели группы {group.capitalize()}</b>", 
-        reply_markup=models_keyboard(group, current), 
+        f"<b>Модели группы {group.capitalize()}</b>",
+        reply_markup=models_keyboard(group, current),
         parse_mode="HTML"
     )
     await callback.answer()
@@ -108,6 +131,3 @@ async def handle_text(message: Message, state: FSMContext):
         await status_msg.edit_text(reply, parse_mode="HTML", reply_markup=cancel_keyboard())
     except Exception as e:
         await status_msg.edit_text(f"<b>Ошибка:</b> {str(e)}", parse_mode="HTML", reply_markup=cancel_keyboard())
-
-
-# В дальнейшем можно добавить обработку фото, если нужна поддержка Vision моделей
