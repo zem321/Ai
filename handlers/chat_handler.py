@@ -15,6 +15,7 @@ from keyboards import (
     model_group_keyboard,
     models_keyboard,
     CHATGPT_MODELS,
+    GEMINI_MODELS,
     OTHER_MODELS,
 )
 from states import BotStates
@@ -37,6 +38,9 @@ NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 FREEMODEL_API_KEY = os.getenv("FREEMODEL_API_KEY", "")
 FREEMODEL_API_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.dev")
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
 
 
 # ------------------ Вспомогательные функции ------------------
@@ -258,9 +262,56 @@ async def call_freemodel_openai(raw_model: str, messages: list) -> str:
                 raise Exception(f"Неверный формат ответа FreeModel: {json.dumps(data, ensure_ascii=False)[:500]}")
 
 
+async def call_gemini(model_id: str, messages: list) -> str:
+    if not GEMINI_API_KEY:
+        raise Exception("GEMINI_API_KEY не задан.")
+
+    # Убираем префикс "gemini/" для запроса
+    raw_model = model_id.replace("gemini/", "", 1)
+
+    headers = {
+        "Authorization": f"Bearer {GEMINI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "model": raw_model,
+        "messages": messages,
+        "max_tokens": 2048,
+        "temperature": 0.7,
+    }
+
+    url = f"{GEMINI_API_BASE.rstrip('/')}/chat/completions"
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=60),
+        ) as resp:
+            text = await resp.text()
+
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"Gemini вернул неожиданный ответ: {text[:500]}")
+
+            if resp.status != 200:
+                raise Exception(extract_api_error(data))
+
+            try:
+                return data["choices"][0]["message"]["content"]
+            except Exception:
+                raise Exception(f"Неверный формат ответа Gemini: {json.dumps(data, ensure_ascii=False)[:500]}")
+
+
 async def call_ai(model_id: str, messages: list) -> str:
     if model_id.startswith("freemodel/"):
         return await call_freemodel_openai(strip_provider_prefix(model_id), messages)
+
+    if model_id.startswith("gemini/"):
+        return await call_gemini(model_id, messages)
 
     return await call_nvidia(model_id, messages)
 
