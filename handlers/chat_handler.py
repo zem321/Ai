@@ -22,6 +22,8 @@ from states import BotStates
 
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 router = Router()
 
 SYSTEM_PROMPT = (
@@ -41,6 +43,34 @@ FREEMODEL_API_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.d
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+# Если включено (по умолчанию да), бот после каждого ответа отправляет
+# отдельное сообщение с диагностикой: какая модель запрошена, какой URL
+# использован, и что вернул провайдер в поле "model".
+# Отключить можно переменной окружения DEBUG_MODE=0.
+DEBUG_MODE = os.getenv("DEBUG_MODE", "1") not in ("0", "false", "False", "")
+
+
+# ------------------ Диагностика конфигурации при импорте ------------------
+
+logger.info("NVIDIA_CHAT_URL = %s", NVIDIA_CHAT_URL)
+logger.info("FREEMODEL_API_BASE = %s", FREEMODEL_API_BASE)
+logger.info("GEMINI_API_BASE = %s", GEMINI_API_BASE)
+logger.info("DEBUG_MODE = %s", DEBUG_MODE)
+
+if "openai.com" in FREEMODEL_API_BASE.lower():
+    logger.warning(
+        "FREEMODEL_API_BASE указывает на домен openai.com (%s). "
+        "Если вы используете freemodel/claude-* модели, проверьте переменную "
+        "окружения FREEMODEL_OPENAI_BASE.",
+        FREEMODEL_API_BASE,
+    )
+
+if not FREEMODEL_API_KEY:
+    logger.warning(
+        "FREEMODEL_API_KEY не задан. Все запросы к моделям freemodel/* "
+        "(включая Claude и ChatGPT из этого бота) будут падать с ошибкой."
+    )
 
 
 # ------------------ Вспомогательные функции ------------------
@@ -130,6 +160,32 @@ async def send_ai_reply(status_msg: Message, reply: str):
         )
 
 
+async def send_debug_info(status_msg: Message, debug: dict):
+    """
+    Отправляет отдельным сообщением диагностику: какая модель была
+    запрошена, на какой URL ушёл запрос, и что провайдер вернул
+    в поле "model" своего ответа.
+    """
+    if not DEBUG_MODE or not debug:
+        return
+
+    lines = ["🔧 <b>Debug info</b>"]
+    lines.append(f"Выбрана в боте: <code>{escape(str(debug.get('requested_model', '?')))}</code>")
+    lines.append(f"Endpoint: <code>{escape(str(debug.get('url', '?')))}</code>")
+    lines.append(f"Отправлено в payload.model: <code>{escape(str(debug.get('sent_model', '?')))}</code>")
+
+    provider_model = debug.get("provider_model")
+    if provider_model:
+        lines.append(f"Ответ provider.model: <code>{escape(str(provider_model))}</code>")
+    else:
+        lines.append("Ответ provider.model: <i>провайдер не вернул это поле</i>")
+
+    try:
+        await status_msg.answer("\n".join(lines), parse_mode="HTML")
+    except Exception:
+        logger.exception("Не удалось отправить debug info")
+
+
 async def telegram_file_to_data_url(message: Message, file_id: str, mime_type: str | None = None) -> str:
     """
     Скачивает файл из Telegram и превращает его в data:image/...;base64,...
@@ -181,8 +237,11 @@ def make_vision_content(prompt: str, image_data_url: str) -> list:
 
 
 # ------------------ Вызов моделей ------------------
+#
+# Каждая call_* функция возвращает (content, debug), где debug — словарь
+# с ключами "url", "sent_model", "provider_model" для диагностики.
 
-async def call_nvidia(model_id: str, messages: list) -> str:
+async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
     if not NVIDIA_API_KEY:
         raise Exception("NVIDIA_API_KEY не задан.")
 
@@ -197,6 +256,8 @@ async def call_nvidia(model_id: str, messages: list) -> str:
         "max_tokens": 2048,
         "temperature": 0.7,
     }
+
+    logger.info("call_nvidia -> url=%s model=%s", NVIDIA_CHAT_URL, model_id)
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
@@ -215,13 +276,21 @@ async def call_nvidia(model_id: str, messages: list) -> str:
             if resp.status != 200:
                 raise Exception(extract_api_error(data))
 
+            logger.info("call_nvidia <- responded model=%s", data.get("model"))
+
+            debug = {
+                "url": NVIDIA_CHAT_URL,
+                "sent_model": model_id,
+                "provider_model": data.get("model"),
+            }
+
             try:
-                return data["choices"][0]["message"]["content"]
+                return data["choices"][0]["message"]["content"], debug
             except Exception:
                 raise Exception(f"Nеверный формат ответа NVIDIA: {json.dumps(data, ensure_ascii=False)[:500]}")
 
 
-async def call_freemodel_openai(raw_model: str, messages: list) -> str:
+async def call_freemodel_openai(raw_model: str, messages: list) -> tuple[str, dict]:
     if not FREEMODEL_API_KEY:
         raise Exception("FREEMODEL_API_KEY не задан.")
 
@@ -238,6 +307,8 @@ async def call_freemodel_openai(raw_model: str, messages: list) -> str:
     }
 
     url = f"{FREEMODEL_API_BASE.rstrip('/')}/v1/chat/completions"
+
+    logger.info("call_freemodel_openai -> url=%s model=%s", url, raw_model)
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
@@ -256,13 +327,21 @@ async def call_freemodel_openai(raw_model: str, messages: list) -> str:
             if resp.status != 200:
                 raise Exception(extract_api_error(data))
 
+            logger.info("call_freemodel_openai <- responded model=%s", data.get("model"))
+
+            debug = {
+                "url": url,
+                "sent_model": raw_model,
+                "provider_model": data.get("model"),
+            }
+
             try:
-                return data["choices"][0]["message"]["content"]
+                return data["choices"][0]["message"]["content"], debug
             except Exception:
                 raise Exception(f"Неверный формат ответа FreeModel: {json.dumps(data, ensure_ascii=False)[:500]}")
 
 
-async def call_gemini(model_id: str, messages: list) -> str:
+async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
     if not GEMINI_API_KEY:
         raise Exception("GEMINI_API_KEY не задан.")
 
@@ -283,6 +362,8 @@ async def call_gemini(model_id: str, messages: list) -> str:
 
     url = f"{GEMINI_API_BASE.rstrip('/')}/chat/completions"
 
+    logger.info("call_gemini -> url=%s model=%s", url, raw_model)
+
     async with aiohttp.ClientSession() as session:
         async with session.post(
             url,
@@ -300,20 +381,32 @@ async def call_gemini(model_id: str, messages: list) -> str:
             if resp.status != 200:
                 raise Exception(extract_api_error(data))
 
+            logger.info("call_gemini <- responded model=%s", data.get("model"))
+
+            debug = {
+                "url": url,
+                "sent_model": raw_model,
+                "provider_model": data.get("model"),
+            }
+
             try:
-                return data["choices"][0]["message"]["content"]
+                return data["choices"][0]["message"]["content"], debug
             except Exception:
                 raise Exception(f"Неверный формат ответа Gemini: {json.dumps(data, ensure_ascii=False)[:500]}")
 
 
-async def call_ai(model_id: str, messages: list) -> str:
+async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
+    logger.info("call_ai: selected_model=%s", model_id)
+
     if model_id.startswith("freemodel/"):
-        return await call_freemodel_openai(strip_provider_prefix(model_id), messages)
+        content, debug = await call_freemodel_openai(strip_provider_prefix(model_id), messages)
+    elif model_id.startswith("gemini/"):
+        content, debug = await call_gemini(model_id, messages)
+    else:
+        content, debug = await call_nvidia(model_id, messages)
 
-    if model_id.startswith("gemini/"):
-        return await call_gemini(model_id, messages)
-
-    return await call_nvidia(model_id, messages)
+    debug["requested_model"] = model_id
+    return content, debug
 
 
 # ------------------ Обработчики выбора моделей ------------------
@@ -347,6 +440,8 @@ async def show_models_group(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("model_"))
 async def set_model(callback: CallbackQuery, state: FSMContext):
     model_id = callback.data.replace("model_", "")
+
+    logger.info("set_model: пользователь выбрал model_id=%s", model_id)
 
     await state.update_data(selected_model=model_id)
     await state.set_state(BotStates.chat_mode)
@@ -406,7 +501,7 @@ async def handle_text(message: Message, state: FSMContext):
             }
         ] + trim_history(history)
 
-        reply = await call_ai(model_id, messages)
+        reply, debug = await call_ai(model_id, messages)
 
         history.append({
             "role": "assistant",
@@ -415,6 +510,7 @@ async def handle_text(message: Message, state: FSMContext):
 
         await state.update_data(chat_history=trim_history(history))
         await send_ai_reply(status_msg, reply)
+        await send_debug_info(status_msg, debug)
 
     except Exception as e:
         await edit_error(status_msg, "Ошибка", e)
@@ -456,7 +552,7 @@ async def handle_photo(message: Message, state: FSMContext):
             }
         ]
 
-        reply = await call_ai(model_id, messages)
+        reply, debug = await call_ai(model_id, messages)
 
         history.append({
             "role": "user",
@@ -470,6 +566,7 @@ async def handle_photo(message: Message, state: FSMContext):
 
         await state.update_data(chat_history=trim_history(history))
         await send_ai_reply(status_msg, reply)
+        await send_debug_info(status_msg, debug)
 
     except Exception as e:
         await edit_error(
@@ -535,7 +632,7 @@ async def handle_image_document(message: Message, state: FSMContext):
             }
         ]
 
-        reply = await call_ai(model_id, messages)
+        reply, debug = await call_ai(model_id, messages)
 
         history.append({
             "role": "user",
@@ -549,6 +646,7 @@ async def handle_image_document(message: Message, state: FSMContext):
 
         await state.update_data(chat_history=trim_history(history))
         await send_ai_reply(status_msg, reply)
+        await send_debug_info(status_msg, debug)
 
     except Exception as e:
         await edit_error(
