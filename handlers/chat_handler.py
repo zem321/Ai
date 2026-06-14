@@ -53,6 +53,17 @@ FREEMODEL_CLAUDE_BASE = os.getenv("FREEMODEL_CLAUDE_BASE", "https://ai-proxy.izi
 # пробуем FREEMODEL_API_KEY (на случай, если это один и тот же провайдер).
 FREEMODEL_CLAUDE_API_KEY = os.getenv("FREEMODEL_CLAUDE_API_KEY")
 
+# На ai-proxy.izisoft.xyz некоторые модели Claude находятся в allowlist
+# под именем с префиксом "anthropic/", а не просто "claude-...".
+# Это соответствие специфично именно для данного прокси.
+# Модель "claude-fable-5" в их allowlist отсутствует — для неё маппинга нет.
+FREEMODEL_CLAUDE_MODEL_MAP = {
+    "claude-sonnet-4-6": "anthropic/claude-sonnet-4-6",
+    "claude-opus-4-6": "anthropic/claude-opus-4-6",
+    "claude-opus-4-7": "anthropic/claude-opus-4-7",
+    "claude-opus-4-8": "anthropic/claude-opus-4-8",
+}
+
 # Версия Anthropic API, передаётся в заголовке anthropic-version.
 ANTHROPIC_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
 
@@ -449,6 +460,10 @@ async def call_freemodel_anthropic(raw_model: str, messages: list, base_url: str
     if not api_key:
         raise Exception("Не задан ни FREEMODEL_CLAUDE_API_KEY, ни FREEMODEL_API_KEY.")
 
+    # Подменяем имя модели на то, что есть в allowlist данного прокси
+    # (например "claude-sonnet-4-6" -> "anthropic/claude-sonnet-4-6").
+    sent_model = FREEMODEL_CLAUDE_MODEL_MAP.get(raw_model, raw_model)
+
     system_prompt, anthropic_messages = convert_messages_to_anthropic(messages)
 
     headers = {
@@ -462,7 +477,7 @@ async def call_freemodel_anthropic(raw_model: str, messages: list, base_url: str
     }
 
     payload = {
-        "model": raw_model,
+        "model": sent_model,
         "max_tokens": 2048,
         "messages": anthropic_messages,
         "temperature": 0.7,
@@ -473,7 +488,7 @@ async def call_freemodel_anthropic(raw_model: str, messages: list, base_url: str
 
     url = f"{base_url.rstrip('/')}/v1/messages"
 
-    logger.info("call_freemodel_anthropic -> url=%s model=%s", url, raw_model)
+    logger.info("call_freemodel_anthropic -> url=%s model=%s (исходно %s)", url, sent_model, raw_model)
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
@@ -498,7 +513,7 @@ async def call_freemodel_anthropic(raw_model: str, messages: list, base_url: str
 
             debug = {
                 "url": url,
-                "sent_model": raw_model,
+                "sent_model": sent_model,
                 "provider_model": data.get("model"),
             }
 
