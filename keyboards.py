@@ -16,9 +16,9 @@ GEMINI_MODELS = {
 # Остальные модели (Other)
 OTHER_MODELS = {
     "meta/llama-4-maverick-17b-128e-instruct": "Llama 4 Maverick 17B",
-    "mistralai/mistral-medium-3.5-128b": "Mistral Medium 3.5 128B",
     "z-ai/glm-5.1": "GLM-5.1",
-    "nvidia/llama-3.3-nemotron-ultra-253b-v1": "Nemotron Ultra 253B",
+    "nvidia/llama-3.1-nemotron-ultra-253b-v1": "Nemotron Ultra 253B",
+    "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
 }
 
 MODELS = {**CHATGPT_MODELS, **GEMINI_MODELS, **OTHER_MODELS}
