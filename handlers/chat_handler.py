@@ -48,6 +48,11 @@ FREEMODEL_API_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.d
 # Эндпоинт: {base}/v1/messages
 FREEMODEL_CLAUDE_BASE = os.getenv("FREEMODEL_CLAUDE_BASE", "https://ai-proxy.izisoft.xyz")
 
+# Ключ для ai-proxy.izisoft.xyz — это ОТДЕЛЬНЫЙ сервис, не freemodel.dev,
+# поэтому у него свой ключ. Если переменная не задана, по умолчанию
+# пробуем FREEMODEL_API_KEY (на случай, если это один и тот же провайдер).
+FREEMODEL_CLAUDE_API_KEY = os.getenv("FREEMODEL_CLAUDE_API_KEY")
+
 # Версия Anthropic API, передаётся в заголовке anthropic-version.
 ANTHROPIC_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
 
@@ -68,6 +73,7 @@ logger.info("FREEMODEL_API_BASE (для freemodel/gpt-* и др., /v1/chat/compl
 logger.info("FREEMODEL_CLAUDE_BASE (для freemodel/claude-*, /v1/messages) = %s", FREEMODEL_CLAUDE_BASE)
 logger.info("GEMINI_API_BASE = %s", GEMINI_API_BASE)
 logger.info("DEBUG_MODE = %s", DEBUG_MODE)
+logger.info("FREEMODEL_CLAUDE_API_KEY задан = %s", bool(FREEMODEL_CLAUDE_API_KEY))
 
 if not FREEMODEL_API_KEY:
     logger.warning(
@@ -438,16 +444,18 @@ async def call_freemodel_anthropic(raw_model: str, messages: list, base_url: str
     Вызов через нативный Anthropic Messages API /v1/messages
     (используется для freemodel/claude-*, эндпоинт cc.freemodel.dev).
     """
-    if not FREEMODEL_API_KEY:
-        raise Exception("FREEMODEL_API_KEY не задан.")
+    api_key = FREEMODEL_CLAUDE_API_KEY or FREEMODEL_API_KEY
+
+    if not api_key:
+        raise Exception("Не задан ни FREEMODEL_CLAUDE_API_KEY, ни FREEMODEL_API_KEY.")
 
     system_prompt, anthropic_messages = convert_messages_to_anthropic(messages)
 
     headers = {
         # Нативный Anthropic API использует x-api-key, но на случай если
         # прокси ожидает Bearer-токен — отправляем оба варианта.
-        "x-api-key": FREEMODEL_API_KEY,
-        "Authorization": f"Bearer {FREEMODEL_API_KEY}",
+        "x-api-key": api_key,
+        "Authorization": f"Bearer {api_key}",
         "anthropic-version": ANTHROPIC_VERSION,
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (compatible; freemodel-bot/1.0)",
