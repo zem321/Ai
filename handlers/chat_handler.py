@@ -333,7 +333,9 @@ async def call_freemodel_openai(raw_model: str, messages: list, base_url: str) -
             try:
                 data = json.loads(text)
             except Exception:
-                raise Exception(f"FreeModel вернул неожиданный ответ: {text[:500]}")
+                raise Exception(
+                    f"FreeModel вернул неожиданный ответ (HTTP {resp.status}, url={url}): {text[:500]}"
+                )
 
             if resp.status != 200:
                 raise Exception(extract_api_error(data))
