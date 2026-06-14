@@ -17,11 +17,30 @@ GEMINI_MODELS = {
 OTHER_MODELS = {
     "meta/llama-4-maverick-17b-128e-instruct": "Llama 4 Maverick 17B",
     "z-ai/glm-5.1": "GLM-5.1",
-    "nvidia/llama-3.1-nemotron-ultra-253b-v1": "Nemotron Ultra 253B",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
 }
 
-MODELS = {**CHATGPT_MODELS, **GEMINI_MODELS, **OTHER_MODELS}
+# Совет ИИ-моделей: запрос параллельно уходит трём моделям-участникам
+# (см. handlers.COUNCIL_MEMBER_MODELS), их ответы анонимизируются как
+# A/B/C, и модель-судья (handlers.COUNCIL_JUDGE_MODEL) выбирает лучший
+# ответ/делает синтез и кратко объясняет выбор.
+#
+# Это "виртуальный" model_id — никакого отдельного провайдера для него
+# нет, вся логика обрабатывается функцией call_ai_council() в handlers.py,
+# которая просто несколько раз использует уже существующие call_ai().
+COUNCIL_MODELS = {
+    "council/ai-council": "Совет ИИ-моделей",
+}
+
+MODELS = {**CHATGPT_MODELS, **GEMINI_MODELS, **OTHER_MODELS, **COUNCIL_MODELS}
+
+# Человекочитаемые названия групп моделей (для заголовков экрана выбора модели)
+GROUP_TITLES = {
+    "chatgpt": "ChatGPT",
+    "gemini": "Gemini",
+    "other": "Other",
+    "council": "Совет ИИ-моделей",
+}
 
 # -------------------- Клавиатуры --------------------
 
@@ -46,6 +65,7 @@ def model_group_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="ChatGPT", callback_data="model_group_chatgpt")],
         [InlineKeyboardButton(text="Gemini", callback_data="model_group_gemini")],
         [InlineKeyboardButton(text="Other", callback_data="model_group_other")],
+        [InlineKeyboardButton(text="Совет ИИ-моделей", callback_data="model_group_council")],
         [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
     ])
 
@@ -62,6 +82,10 @@ def models_keyboard(group: str, current: str = "") -> InlineKeyboardMarkup:
             buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
     elif group == "other":
         for model_id, model_name in OTHER_MODELS.items():
+            label = f"[x] {model_name}" if model_id == current else model_name
+            buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
+    elif group == "council":
+        for model_id, model_name in COUNCIL_MODELS.items():
             label = f"[x] {model_name}" if model_id == current else model_name
             buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
     buttons.append([InlineKeyboardButton(text="Назад", callback_data="select_model")])
