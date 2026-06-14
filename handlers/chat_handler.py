@@ -40,11 +40,16 @@ NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 FREEMODEL_API_KEY = os.getenv("FREEMODEL_API_KEY", "")
 
-# Базовый адрес для большинства моделей freemodel/* (например freemodel/gpt-*).
+# Базовый адрес для большинства моделей freemodel/* (OpenAI-совместимый формат,
+# например freemodel/gpt-*). Эндпоинт: {base}/v1/chat/completions
 FREEMODEL_API_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.dev")
 
-# Отдельный адрес для моделей freemodel/claude-* (Anthropic-совместимый эндпоинт).
+# Базовый адрес для моделей freemodel/claude-* — нативный Anthropic Messages API.
+# Эндпоинт: {base}/v1/messages
 FREEMODEL_CLAUDE_BASE = os.getenv("FREEMODEL_CLAUDE_BASE", "https://cc.freemodel.dev")
+
+# Версия Anthropic API, передаётся в заголовке anthropic-version.
+ANTHROPIC_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -59,8 +64,8 @@ DEBUG_MODE = os.getenv("DEBUG_MODE", "1") not in ("0", "false", "False", "")
 # ------------------ Диагностика конфигурации при импорте ------------------
 
 logger.info("NVIDIA_CHAT_URL = %s", NVIDIA_CHAT_URL)
-logger.info("FREEMODEL_API_BASE (для freemodel/gpt-* и др.) = %s", FREEMODEL_API_BASE)
-logger.info("FREEMODEL_CLAUDE_BASE (для freemodel/claude-*) = %s", FREEMODEL_CLAUDE_BASE)
+logger.info("FREEMODEL_API_BASE (для freemodel/gpt-* и др., /v1/chat/completions) = %s", FREEMODEL_API_BASE)
+logger.info("FREEMODEL_CLAUDE_BASE (для freemodel/claude-*, /v1/messages) = %s", FREEMODEL_CLAUDE_BASE)
 logger.info("GEMINI_API_BASE = %s", GEMINI_API_BASE)
 logger.info("DEBUG_MODE = %s", DEBUG_MODE)
 
@@ -83,19 +88,6 @@ def get_model(data):
 
 def strip_provider_prefix(model_id: str) -> str:
     return model_id.replace("freemodel/", "", 1)
-
-
-def freemodel_base_for(raw_model: str) -> str:
-    """
-    Выбирает базовый URL для freemodel/* в зависимости от имени модели
-    (без префикса "freemodel/").
-
-    Claude-модели (claude-*) идут на FREEMODEL_CLAUDE_BASE (cc.freemodel.dev),
-    все остальные (gpt-*, и т.п.) — на FREEMODEL_API_BASE (api.freemodel.dev).
-    """
-    if raw_model.startswith("claude-"):
-        return FREEMODEL_CLAUDE_BASE
-    return FREEMODEL_API_BASE
 
 
 def trim_history(history: list) -> list:
@@ -247,6 +239,88 @@ def make_vision_content(prompt: str, image_data_url: str) -> list:
     ]
 
 
+def convert_messages_to_anthropic(messages: list) -> tuple[str | None, list]:
+    """
+    Конвертирует список сообщений из "OpenAI chat.completions" формата
+    (system как отдельное сообщение в массиве, картинки как image_url с data: URL)
+    в формат Anthropic Messages API:
+      - system выносится в отдельное поле (возвращается отдельно от messages);
+      - картинки переводятся в блоки {"type": "image", "source": {...}}.
+    """
+    system_prompt_parts: list[str] = []
+    converted: list[dict] = []
+
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content")
+
+        if role == "system":
+            if isinstance(content, str):
+                system_prompt_parts.append(content)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        system_prompt_parts.append(block.get("text", ""))
+            continue
+
+        if isinstance(content, str):
+            converted.append({"role": role, "content": content})
+            continue
+
+        if isinstance(content, list):
+            new_blocks = []
+
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+
+                block_type = block.get("type")
+
+                if block_type == "text":
+                    new_blocks.append({
+                        "type": "text",
+                        "text": block.get("text", ""),
+                    })
+                elif block_type == "image_url":
+                    image_url = (block.get("image_url") or {}).get("url", "")
+
+                    if image_url.startswith("data:"):
+                        try:
+                            header, b64data = image_url.split(",", 1)
+                            media_type = header[len("data:"):].split(";")[0] or "image/jpeg"
+                        except ValueError:
+                            media_type = "image/jpeg"
+                            b64data = ""
+
+                        new_blocks.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": b64data,
+                            },
+                        })
+                    else:
+                        # Внешний URL без data: — Anthropic поддерживает source type "url"
+                        new_blocks.append({
+                            "type": "image",
+                            "source": {
+                                "type": "url",
+                                "url": image_url,
+                            },
+                        })
+                else:
+                    new_blocks.append(block)
+
+            converted.append({"role": role, "content": new_blocks})
+            continue
+
+        converted.append({"role": role, "content": str(content)})
+
+    system_prompt = "\n".join(part for part in system_prompt_parts if part) or None
+    return system_prompt, converted
+
+
 # ------------------ Вызов моделей ------------------
 #
 # Каждая call_* функция возвращает (content, debug), где debug — словарь
@@ -302,12 +376,17 @@ async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
 
 
 async def call_freemodel_openai(raw_model: str, messages: list, base_url: str) -> tuple[str, dict]:
+    """
+    Вызов через OpenAI-совместимый эндпоинт /v1/chat/completions
+    (используется для freemodel/gpt-* и т.п.).
+    """
     if not FREEMODEL_API_KEY:
         raise Exception("FREEMODEL_API_KEY не задан.")
 
     headers = {
         "Authorization": f"Bearer {FREEMODEL_API_KEY}",
         "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; freemodel-bot/1.0)",
     }
 
     payload = {
@@ -352,6 +431,84 @@ async def call_freemodel_openai(raw_model: str, messages: list, base_url: str) -
                 return data["choices"][0]["message"]["content"], debug
             except Exception:
                 raise Exception(f"Неверный формат ответа FreeModel: {json.dumps(data, ensure_ascii=False)[:500]}")
+
+
+async def call_freemodel_anthropic(raw_model: str, messages: list, base_url: str) -> tuple[str, dict]:
+    """
+    Вызов через нативный Anthropic Messages API /v1/messages
+    (используется для freemodel/claude-*, эндпоинт cc.freemodel.dev).
+    """
+    if not FREEMODEL_API_KEY:
+        raise Exception("FREEMODEL_API_KEY не задан.")
+
+    system_prompt, anthropic_messages = convert_messages_to_anthropic(messages)
+
+    headers = {
+        # Нативный Anthropic API использует x-api-key, но на случай если
+        # прокси ожидает Bearer-токен — отправляем оба варианта.
+        "x-api-key": FREEMODEL_API_KEY,
+        "Authorization": f"Bearer {FREEMODEL_API_KEY}",
+        "anthropic-version": ANTHROPIC_VERSION,
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; freemodel-bot/1.0)",
+    }
+
+    payload = {
+        "model": raw_model,
+        "max_tokens": 2048,
+        "messages": anthropic_messages,
+        "temperature": 0.7,
+    }
+
+    if system_prompt:
+        payload["system"] = system_prompt
+
+    url = f"{base_url.rstrip('/')}/v1/messages"
+
+    logger.info("call_freemodel_anthropic -> url=%s model=%s", url, raw_model)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=60),
+        ) as resp:
+            text = await resp.text()
+
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(
+                    f"FreeModel (Anthropic) вернул неожиданный ответ (HTTP {resp.status}, url={url}): {text[:500]}"
+                )
+
+            if resp.status != 200:
+                raise Exception(extract_api_error(data))
+
+            logger.info("call_freemodel_anthropic <- responded model=%s", data.get("model"))
+
+            debug = {
+                "url": url,
+                "sent_model": raw_model,
+                "provider_model": data.get("model"),
+            }
+
+            try:
+                content_blocks = data.get("content", [])
+
+                text_parts = [
+                    block.get("text", "")
+                    for block in content_blocks
+                    if isinstance(block, dict) and block.get("type") == "text"
+                ]
+
+                reply = "\n".join(part for part in text_parts if part)
+                return reply, debug
+            except Exception:
+                raise Exception(
+                    f"Неверный формат ответа FreeModel (Anthropic): {json.dumps(data, ensure_ascii=False)[:500]}"
+                )
 
 
 async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
@@ -413,8 +570,11 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
 
     if model_id.startswith("freemodel/"):
         raw_model = strip_provider_prefix(model_id)
-        base_url = freemodel_base_for(raw_model)
-        content, debug = await call_freemodel_openai(raw_model, messages, base_url)
+
+        if raw_model.startswith("claude-"):
+            content, debug = await call_freemodel_anthropic(raw_model, messages, FREEMODEL_CLAUDE_BASE)
+        else:
+            content, debug = await call_freemodel_openai(raw_model, messages, FREEMODEL_API_BASE)
     elif model_id.startswith("gemini/"):
         content, debug = await call_gemini(model_id, messages)
     else:
