@@ -48,16 +48,19 @@ FREEMODEL_API_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.d
 # на ai-proxy.izisoft.xyz. Эндпоинт: {base}/v1/chat/completions
 FREEMODEL_CLAUDE_BASE = os.getenv("FREEMODEL_CLAUDE_BASE", "https://ai-proxy.izisoft.xyz")
 
+# Отдельный ключ для ai-proxy.izisoft.xyz. Если не задан — используется FREEMODEL_API_KEY.
+FREEMODEL_CLAUDE_API_KEY = os.getenv("FREEMODEL_CLAUDE_API_KEY", "")
+
 # Маппинг из внутренних ID бота -> точные имена моделей на роутере ai-proxy.izisoft.xyz
 FREEMODEL_CLAUDE_MODEL_MAP = {
-    "claude-sonnet-4-6":         "anthropic/claude-sonnet-4-6",
-    "claude-opus-4-6":           "anthropic/claude-opus-4-6",
-    "claude-opus-4-7":           "anthropic/claude-opus-4-7",
-    "claude-opus-4-8":           "anthropic/claude-opus-4-8",
-    "claude-haiku-4-5":          "claude-haiku-4-5",
-    "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
-    "claude-sonnet-4-5":         "claude-sonnet-4-5",
-    "claude-sonnet-4-5-20250929":"claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-6":          "anthropic/claude-sonnet-4-6",
+    "claude-opus-4-6":            "anthropic/claude-opus-4-6",
+    "claude-opus-4-7":            "anthropic/claude-opus-4-7",
+    "claude-opus-4-8":            "anthropic/claude-opus-4-8",
+    "claude-haiku-4-5":           "claude-haiku-4-5",
+    "claude-haiku-4-5-20251001":  "claude-haiku-4-5-20251001",
+    "claude-sonnet-4-5":          "claude-sonnet-4-5",
+    "claude-sonnet-4-5-20250929": "claude-sonnet-4-5-20250929",
 }
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -73,15 +76,21 @@ DEBUG_MODE = os.getenv("DEBUG_MODE", "1") not in ("0", "false", "False", "")
 # ------------------ Диагностика конфигурации при импорте ------------------
 
 logger.info("NVIDIA_CHAT_URL = %s", NVIDIA_CHAT_URL)
-logger.info("FREEMODEL_API_BASE (для freemodel/gpt-* и др., /v1/chat/completions) = %s", FREEMODEL_API_BASE)
-logger.info("FREEMODEL_CLAUDE_BASE (для freemodel/claude-*, /v1/chat/completions) = %s", FREEMODEL_CLAUDE_BASE)
+logger.info("FREEMODEL_API_BASE (для freemodel/gpt-* и др.) = %s", FREEMODEL_API_BASE)
+logger.info("FREEMODEL_CLAUDE_BASE (для freemodel/claude-*) = %s", FREEMODEL_CLAUDE_BASE)
+logger.info("FREEMODEL_CLAUDE_API_KEY задан = %s", bool(FREEMODEL_CLAUDE_API_KEY))
 logger.info("GEMINI_API_BASE = %s", GEMINI_API_BASE)
 logger.info("DEBUG_MODE = %s", DEBUG_MODE)
 
 if not FREEMODEL_API_KEY:
     logger.warning(
-        "FREEMODEL_API_KEY не задан. Все запросы к моделям freemodel/* "
-        "(включая Claude и ChatGPT из этого бота) будут падать с ошибкой."
+        "FREEMODEL_API_KEY не задан. Запросы к freemodel/gpt-* будут падать с ошибкой."
+    )
+
+if not FREEMODEL_CLAUDE_API_KEY and not FREEMODEL_API_KEY:
+    logger.warning(
+        "Ни FREEMODEL_CLAUDE_API_KEY, ни FREEMODEL_API_KEY не заданы. "
+        "Запросы к Claude через ai-proxy.izisoft.xyz будут падать с ошибкой."
     )
 
 
@@ -302,17 +311,25 @@ async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
                 raise Exception(f"Неверный формат ответа NVIDIA: {json.dumps(data, ensure_ascii=False)[:500]}")
 
 
-async def call_freemodel_openai(raw_model: str, messages: list, base_url: str) -> tuple[str, dict]:
+async def call_freemodel_openai(
+    raw_model: str,
+    messages: list,
+    base_url: str,
+    api_key: str | None = None,
+) -> tuple[str, dict]:
     """
     Вызов через OpenAI-совместимый эндпоинт /v1/chat/completions.
     Используется для всех freemodel/* моделей, включая Claude —
     через роутер ai-proxy.izisoft.xyz.
+    Параметр api_key позволяет передать отдельный ключ для конкретного роутера.
     """
-    if not FREEMODEL_API_KEY:
-        raise Exception("FREEMODEL_API_KEY не задан.")
+    key = api_key or FREEMODEL_API_KEY
+
+    if not key:
+        raise Exception("API ключ не задан (FREEMODEL_API_KEY или FREEMODEL_CLAUDE_API_KEY).")
 
     headers = {
-        "Authorization": f"Bearer {FREEMODEL_API_KEY}",
+        "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (compatible; freemodel-bot/1.0)",
     }
@@ -424,9 +441,13 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
         if raw_model.startswith("claude-"):
             # Claude идёт через OpenAI-совместимый роутер ai-proxy.izisoft.xyz
             # с подменой имени модели через FREEMODEL_CLAUDE_MODEL_MAP
+            # и отдельным ключом FREEMODEL_CLAUDE_API_KEY (если задан)
             mapped_model = FREEMODEL_CLAUDE_MODEL_MAP.get(raw_model, raw_model)
-            logger.info("call_ai: claude маппинг %s -> %s", raw_model, mapped_model)
-            content, debug = await call_freemodel_openai(mapped_model, messages, FREEMODEL_CLAUDE_BASE)
+            claude_key = FREEMODEL_CLAUDE_API_KEY or FREEMODEL_API_KEY
+            logger.info("call_ai: claude маппинг %s -> %s, base=%s", raw_model, mapped_model, FREEMODEL_CLAUDE_BASE)
+            content, debug = await call_freemodel_openai(
+                mapped_model, messages, FREEMODEL_CLAUDE_BASE, api_key=claude_key
+            )
         else:
             content, debug = await call_freemodel_openai(raw_model, messages, FREEMODEL_API_BASE)
     elif model_id.startswith("gemini/"):
