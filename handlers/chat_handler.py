@@ -44,23 +44,23 @@ FREEMODEL_API_KEY = os.getenv("FREEMODEL_API_KEY") or os.getenv("API_KEY", "")
 # например freemodel/gpt-*). Эндпоинт: {base}/v1/chat/completions
 FREEMODEL_API_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.dev")
 
-# Базовый адрес для моделей freemodel/claude-* — OpenAI-совместимый роутер
-# на ai-proxy.izisoft.xyz. Эндпоинт: {base}/v1/chat/completions
-FREEMODEL_CLAUDE_BASE = os.getenv("FREEMODEL_CLAUDE_BASE", "https://ai-proxy.izisoft.xyz")
+# Базовый адрес для моделей freemodel/claude-* — OpenRouter.
+# Эндпоинт: {base}/v1/chat/completions
+FREEMODEL_CLAUDE_BASE = os.getenv("FREEMODEL_CLAUDE_BASE", "https://openrouter.ai/api")
 
-# Отдельный ключ для ai-proxy.izisoft.xyz. Если не задан — используется FREEMODEL_API_KEY.
+# Отдельный ключ для OpenRouter. Если не задан — используется FREEMODEL_API_KEY.
 FREEMODEL_CLAUDE_API_KEY = os.getenv("FREEMODEL_CLAUDE_API_KEY", "")
 
-# Маппинг из внутренних ID бота -> точные имена моделей на роутере ai-proxy.izisoft.xyz
+# Маппинг из внутренних ID бота -> точные имена моделей на OpenRouter
 FREEMODEL_CLAUDE_MODEL_MAP = {
     "claude-sonnet-4-6":          "anthropic/claude-sonnet-4-6",
     "claude-opus-4-6":            "anthropic/claude-opus-4-6",
     "claude-opus-4-7":            "anthropic/claude-opus-4-7",
     "claude-opus-4-8":            "anthropic/claude-opus-4-8",
-    "claude-haiku-4-5":           "claude-haiku-4-5",
-    "claude-haiku-4-5-20251001":  "claude-haiku-4-5-20251001",
-    "claude-sonnet-4-5":          "claude-sonnet-4-5",
-    "claude-sonnet-4-5-20250929": "claude-sonnet-4-5-20250929",
+    "claude-haiku-4-5":           "anthropic/claude-haiku-4-5",
+    "claude-haiku-4-5-20251001":  "anthropic/claude-haiku-4-5-20251001",
+    "claude-sonnet-4-5":          "anthropic/claude-sonnet-4-5",
+    "claude-sonnet-4-5-20250929": "anthropic/claude-sonnet-4-5-20250929",
 }
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -77,7 +77,7 @@ DEBUG_MODE = os.getenv("DEBUG_MODE", "1") not in ("0", "false", "False", "")
 
 logger.info("NVIDIA_CHAT_URL = %s", NVIDIA_CHAT_URL)
 logger.info("FREEMODEL_API_BASE (для freemodel/gpt-* и др.) = %s", FREEMODEL_API_BASE)
-logger.info("FREEMODEL_CLAUDE_BASE (для freemodel/claude-*) = %s", FREEMODEL_CLAUDE_BASE)
+logger.info("FREEMODEL_CLAUDE_BASE (для freemodel/claude-*, OpenRouter) = %s", FREEMODEL_CLAUDE_BASE)
 logger.info("FREEMODEL_CLAUDE_API_KEY задан = %s", bool(FREEMODEL_CLAUDE_API_KEY))
 logger.info("GEMINI_API_BASE = %s", GEMINI_API_BASE)
 logger.info("DEBUG_MODE = %s", DEBUG_MODE)
@@ -90,7 +90,7 @@ if not FREEMODEL_API_KEY:
 if not FREEMODEL_CLAUDE_API_KEY and not FREEMODEL_API_KEY:
     logger.warning(
         "Ни FREEMODEL_CLAUDE_API_KEY, ни FREEMODEL_API_KEY не заданы. "
-        "Запросы к Claude через ai-proxy.izisoft.xyz будут падать с ошибкой."
+        "Запросы к Claude через OpenRouter будут падать с ошибкой."
     )
 
 
@@ -316,12 +316,13 @@ async def call_freemodel_openai(
     messages: list,
     base_url: str,
     api_key: str | None = None,
+    extra_headers: dict | None = None,
 ) -> tuple[str, dict]:
     """
     Вызов через OpenAI-совместимый эндпоинт /v1/chat/completions.
-    Используется для всех freemodel/* моделей, включая Claude —
-    через роутер ai-proxy.izisoft.xyz.
+    Используется для всех freemodel/* моделей, включая Claude — через OpenRouter.
     Параметр api_key позволяет передать отдельный ключ для конкретного роутера.
+    extra_headers — дополнительные заголовки (например, для OpenRouter).
     """
     key = api_key or FREEMODEL_API_KEY
 
@@ -333,6 +334,9 @@ async def call_freemodel_openai(
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (compatible; freemodel-bot/1.0)",
     }
+
+    if extra_headers:
+        headers.update(extra_headers)
 
     payload = {
         "model": raw_model,
@@ -439,14 +443,26 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
         raw_model = strip_provider_prefix(model_id)
 
         if raw_model.startswith("claude-"):
-            # Claude идёт через OpenAI-совместимый роутер ai-proxy.izisoft.xyz
+            # Claude идёт через OpenRouter (/api/v1/chat/completions)
             # с подменой имени модели через FREEMODEL_CLAUDE_MODEL_MAP
             # и отдельным ключом FREEMODEL_CLAUDE_API_KEY (если задан)
-            mapped_model = FREEMODEL_CLAUDE_MODEL_MAP.get(raw_model, raw_model)
+            mapped_model = FREEMODEL_CLAUDE_MODEL_MAP.get(raw_model, f"anthropic/{raw_model}")
             claude_key = FREEMODEL_CLAUDE_API_KEY or FREEMODEL_API_KEY
-            logger.info("call_ai: claude маппинг %s -> %s, base=%s", raw_model, mapped_model, FREEMODEL_CLAUDE_BASE)
+            # OpenRouter рекомендует передавать HTTP-Referer и X-Title
+            openrouter_headers = {
+                "HTTP-Referer": "https://t.me/",
+                "X-Title": "Telegram AI Bot",
+            }
+            logger.info(
+                "call_ai: claude маппинг %s -> %s, base=%s",
+                raw_model, mapped_model, FREEMODEL_CLAUDE_BASE,
+            )
             content, debug = await call_freemodel_openai(
-                mapped_model, messages, FREEMODEL_CLAUDE_BASE, api_key=claude_key
+                mapped_model,
+                messages,
+                FREEMODEL_CLAUDE_BASE,
+                api_key=claude_key,
+                extra_headers=openrouter_headers,
             )
         else:
             content, debug = await call_freemodel_openai(raw_model, messages, FREEMODEL_API_BASE)
