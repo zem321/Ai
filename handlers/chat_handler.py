@@ -1,3 +1,4 @@
+import asyncio
 import os
 import json
 import base64
@@ -17,6 +18,8 @@ from keyboards import (
     CHATGPT_MODELS,
     GEMINI_MODELS,
     OTHER_MODELS,
+    COUNCIL_MODELS,
+    GROUP_TITLES,
 )
 from states import BotStates
 
@@ -186,6 +189,9 @@ async def send_debug_info(status_msg: Message, debug: dict):
     Отправляет отдельным сообщением диагностику: какая модель была
     запрошена, на какой URL ушёл запрос, и что провайдер вернул
     в поле "model" своего ответа.
+
+    Для "Совета ИИ-моделей" дополнительно показывается статус каждой
+    модели-участника (A/B/C) и параметры запроса к модели-судье.
     """
     if not DEBUG_MODE or not debug:
         return
@@ -200,6 +206,32 @@ async def send_debug_info(status_msg: Message, debug: dict):
         lines.append(f"Ответ provider.model: <code>{escape(str(provider_model))}</code>")
     else:
         lines.append("Ответ provider.model: <i>провайдер не вернул это поле</i>")
+
+    council_members = debug.get("council_members")
+    if council_members:
+        lines.append("")
+        lines.append("<b>Совет — участники:</b>")
+
+        for member in council_members:
+            label = member.get("label", "?")
+            model = member.get("model", "?")
+            member_debug = member.get("debug") or {}
+
+            if "error" in member_debug:
+                status = f"ошибка: {member_debug['error']}"
+            else:
+                status = (
+                    f"url={member_debug.get('url', '?')}, "
+                    f"provider.model={member_debug.get('provider_model', '?')}"
+                )
+
+            lines.append(f"{label}: <code>{escape(str(model))}</code> — {escape(str(status))}")
+
+        judge_debug = debug.get("judge_debug") or {}
+        lines.append("")
+        lines.append("<b>Совет — судья:</b>")
+        lines.append(f"Endpoint: <code>{escape(str(judge_debug.get('url', '?')))}</code>")
+        lines.append(f"Отправлено в payload.model: <code>{escape(str(judge_debug.get('sent_model', '?')))}</code>")
 
     try:
         await status_msg.answer("\n".join(lines), parse_mode="HTML")
@@ -436,10 +468,150 @@ async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
                 raise Exception(f"Неверный формат ответа Gemini: {json.dumps(data, ensure_ascii=False)[:500]}")
 
 
+# ------------------ Совет ИИ-моделей ------------------
+#
+# "Совет ИИ-моделей" — виртуальная модель (model_id = COUNCIL_MODEL_ID).
+# Никакого отдельного провайдера для неё нет: запрос параллельно уходит
+# трём моделям-участникам (COUNCIL_MEMBER_MODELS) через уже существующий
+# call_ai(), их ответы анонимизируются как A/B/C и передаются
+# модели-судье (COUNCIL_JUDGE_MODEL), которая выбирает лучший ответ или
+# делает синтез и кратко объясняет выбор.
+#
+# call_nvidia / call_freemodel_openai / call_gemini при этом не меняются —
+# совет лишь несколько раз переиспользует их через call_ai().
+
+COUNCIL_MODEL_ID = list(COUNCIL_MODELS.keys())[0]
+
+# Модели-участники совета (отвечают параллельно, анонимно как A, B, C)
+COUNCIL_MEMBER_MODELS = [
+    "meta/llama-4-maverick-17b-128e-instruct",   # A — Llama 4 Maverick
+    "z-ai/glm-5.1",                              # B — GLM-5.1
+    "nvidia/nemotron-3-super-120b-a12b",         # C — Nemotron 3 Super 120B-A12B
+]
+
+COUNCIL_LABELS = ["A", "B", "C"]
+
+# Модель-судья
+COUNCIL_JUDGE_MODEL = "freemodel/gpt-5.5"
+
+COUNCIL_JUDGE_SYSTEM_PROMPT = (
+    "Ты выступаешь в роли судьи в \"Совете ИИ-моделей\". Пользователь задал "
+    "вопрос, и несколько разных ИИ-моделей дали на него ответы. Их ответы "
+    "анонимно обозначены буквами (A, B, C...) — названия моделей тебе не "
+    "сообщаются, не пытайся их угадывать и не упоминай в ответе.\n\n"
+    "Твоя задача:\n"
+    "1. Внимательно изучи исходный вопрос пользователя (и контекст переписки, "
+    "если он есть) и все варианты ответов.\n"
+    "2. Выбери наиболее точный, полезный и полный вариант, либо составь синтез "
+    "лучших частей нескольких вариантов.\n"
+    "3. Дай пользователю единый финальный ответ на исходный вопрос.\n"
+    "4. После финального ответа кратко (1-3 предложения) поясни свой выбор: "
+    "что было сильнее или слабее в разных вариантах (точность, полнота, "
+    "структура, ошибки и т.п.), без упоминания букв-обозначений или названий "
+    "моделей.\n\n"
+    "Отвечай на том языке, на котором задан исходный вопрос пользователя."
+)
+
+
+async def call_council_member(model_id: str, messages: list) -> tuple[str, dict]:
+    """
+    Вызывает одну модель-участника совета. Ошибки не прерывают весь
+    процесс — вместо ответа подставляется текст с пояснением ошибки,
+    чтобы судья мог продолжить работу с оставшимися вариантами.
+    """
+    try:
+        return await call_ai(model_id, messages)
+    except Exception as e:
+        logger.warning("call_council_member: модель %s не ответила: %s", model_id, e)
+        return (
+            f"[Эта модель не смогла ответить: {e}]",
+            {"requested_model": model_id, "error": str(e)},
+        )
+
+
+def build_council_judge_messages(original_messages: list, labeled_answers: list) -> list:
+    """
+    Собирает список сообщений для модели-судьи:
+    - системный промпт судьи (вместо обычного SYSTEM_PROMPT);
+    - исходная переписка пользователя (без системного сообщения бота);
+    - анонимизированные варианты ответов A/B/C с просьбой выбрать лучший
+      или сделать синтез.
+    """
+    judge_messages = [
+        {
+            "role": "system",
+            "content": COUNCIL_JUDGE_SYSTEM_PROMPT,
+        }
+    ]
+
+    for msg in original_messages:
+        if msg.get("role") == "system":
+            continue
+        judge_messages.append(msg)
+
+    answers_text = "\n\n".join(
+        f"Вариант ответа {label}:\n{content}"
+        for label, content in labeled_answers
+    )
+
+    judge_messages.append({
+        "role": "user",
+        "content": (
+            "Вот варианты ответов разных ИИ-моделей на вопрос выше "
+            "(анонимно, без названий моделей):\n\n"
+            f"{answers_text}\n\n"
+            "Выбери лучший вариант или составь синтез лучших частей, дай "
+            "финальный ответ пользователю и кратко поясни свой выбор."
+        ),
+    })
+
+    return judge_messages
+
+
+async def call_ai_council(messages: list) -> tuple[str, dict]:
+    """
+    Реализация "Совета ИИ-моделей":
+    1. Параллельно опрашивает COUNCIL_MEMBER_MODELS.
+    2. Анонимизирует их ответы как A, B, C.
+    3. Передаёт их вместе с исходным вопросом модели COUNCIL_JUDGE_MODEL.
+    4. Возвращает финальный ответ судьи + диагностику по всем вызовам.
+    """
+    tasks = [call_council_member(model_id, messages) for model_id in COUNCIL_MEMBER_MODELS]
+    results = await asyncio.gather(*tasks)
+
+    labeled_answers = []
+    members_debug = []
+
+    for label, model_id, (content, member_debug) in zip(COUNCIL_LABELS, COUNCIL_MEMBER_MODELS, results):
+        labeled_answers.append((label, content))
+        members_debug.append({
+            "label": label,
+            "model": model_id,
+            "debug": member_debug,
+        })
+
+    judge_messages = build_council_judge_messages(messages, labeled_answers)
+
+    logger.info("call_ai_council: отправляю ответы A/B/C судье %s", COUNCIL_JUDGE_MODEL)
+    final_content, judge_debug = await call_ai(COUNCIL_JUDGE_MODEL, judge_messages)
+
+    debug = {
+        "url": "Совет ИИ-моделей (3 модели + судья)",
+        "sent_model": judge_debug.get("sent_model"),
+        "provider_model": judge_debug.get("provider_model"),
+        "council_members": members_debug,
+        "judge_debug": judge_debug,
+    }
+
+    return final_content, debug
+
+
 async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
     logger.info("call_ai: selected_model=%s", model_id)
 
-    if model_id.startswith("freemodel/"):
+    if model_id == COUNCIL_MODEL_ID:
+        content, debug = await call_ai_council(messages)
+    elif model_id.startswith("freemodel/"):
         raw_model = strip_provider_prefix(model_id)
 
         if raw_model.startswith("claude-"):
@@ -494,8 +666,10 @@ async def show_models_group(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     current = data.get("selected_model", "")
 
+    title = GROUP_TITLES.get(group, group.capitalize())
+
     await callback.message.edit_text(
-        f"<b>Модели группы {escape(group.capitalize())}</b>",
+        f"<b>Модели группы {escape(title)}</b>",
         reply_markup=models_keyboard(group, current),
         parse_mode="HTML",
     )
