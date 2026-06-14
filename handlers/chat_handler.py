@@ -38,7 +38,7 @@ MAX_IMAGE_BYTES = 15 * 1024 * 1024
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
-FREEMODEL_API_KEY = os.getenv("FREEMODEL_API_KEY", "")
+FREEMODEL_API_KEY = os.getenv("FREEMODEL_API_KEY") or os.getenv("API_KEY", "")
 
 # Базовый адрес для большинства моделей freemodel/* (OpenAI-совместимый формат,
 # например freemodel/gpt-*). Эндпоинт: {base}/v1/chat/completions
@@ -46,7 +46,7 @@ FREEMODEL_API_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.d
 
 # Базовый адрес для моделей freemodel/claude-* — нативный Anthropic Messages API.
 # Эндпоинт: {base}/v1/messages
-FREEMODEL_CLAUDE_BASE = os.getenv("FREEMODEL_CLAUDE_BASE", "https://cc.freemodel.dev")
+FREEMODEL_CLAUDE_BASE = os.getenv("FREEMODEL_CLAUDE_BASE", "https://ai-proxy.izisoft.xyz")
 
 # Версия Anthropic API, передаётся в заголовке anthropic-version.
 ANTHROPIC_VERSION = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
