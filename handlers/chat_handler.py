@@ -39,7 +39,12 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 FREEMODEL_API_KEY = os.getenv("FREEMODEL_API_KEY", "")
+
+# Базовый адрес для большинства моделей freemodel/* (например freemodel/gpt-*).
 FREEMODEL_API_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.dev")
+
+# Отдельный адрес для моделей freemodel/claude-* (Anthropic-совместимый эндпоинт).
+FREEMODEL_CLAUDE_BASE = os.getenv("FREEMODEL_CLAUDE_BASE", "https://cc.freemodel.dev")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -54,17 +59,10 @@ DEBUG_MODE = os.getenv("DEBUG_MODE", "1") not in ("0", "false", "False", "")
 # ------------------ Диагностика конфигурации при импорте ------------------
 
 logger.info("NVIDIA_CHAT_URL = %s", NVIDIA_CHAT_URL)
-logger.info("FREEMODEL_API_BASE = %s", FREEMODEL_API_BASE)
+logger.info("FREEMODEL_API_BASE (для freemodel/gpt-* и др.) = %s", FREEMODEL_API_BASE)
+logger.info("FREEMODEL_CLAUDE_BASE (для freemodel/claude-*) = %s", FREEMODEL_CLAUDE_BASE)
 logger.info("GEMINI_API_BASE = %s", GEMINI_API_BASE)
 logger.info("DEBUG_MODE = %s", DEBUG_MODE)
-
-if "openai.com" in FREEMODEL_API_BASE.lower():
-    logger.warning(
-        "FREEMODEL_API_BASE указывает на домен openai.com (%s). "
-        "Если вы используете freemodel/claude-* модели, проверьте переменную "
-        "окружения FREEMODEL_OPENAI_BASE.",
-        FREEMODEL_API_BASE,
-    )
 
 if not FREEMODEL_API_KEY:
     logger.warning(
@@ -85,6 +83,19 @@ def get_model(data):
 
 def strip_provider_prefix(model_id: str) -> str:
     return model_id.replace("freemodel/", "", 1)
+
+
+def freemodel_base_for(raw_model: str) -> str:
+    """
+    Выбирает базовый URL для freemodel/* в зависимости от имени модели
+    (без префикса "freemodel/").
+
+    Claude-модели (claude-*) идут на FREEMODEL_CLAUDE_BASE (cc.freemodel.dev),
+    все остальные (gpt-*, и т.п.) — на FREEMODEL_API_BASE (api.freemodel.dev).
+    """
+    if raw_model.startswith("claude-"):
+        return FREEMODEL_CLAUDE_BASE
+    return FREEMODEL_API_BASE
 
 
 def trim_history(history: list) -> list:
@@ -290,7 +301,7 @@ async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
                 raise Exception(f"Nеверный формат ответа NVIDIA: {json.dumps(data, ensure_ascii=False)[:500]}")
 
 
-async def call_freemodel_openai(raw_model: str, messages: list) -> tuple[str, dict]:
+async def call_freemodel_openai(raw_model: str, messages: list, base_url: str) -> tuple[str, dict]:
     if not FREEMODEL_API_KEY:
         raise Exception("FREEMODEL_API_KEY не задан.")
 
@@ -306,7 +317,7 @@ async def call_freemodel_openai(raw_model: str, messages: list) -> tuple[str, di
         "temperature": 0.7,
     }
 
-    url = f"{FREEMODEL_API_BASE.rstrip('/')}/v1/chat/completions"
+    url = f"{base_url.rstrip('/')}/v1/chat/completions"
 
     logger.info("call_freemodel_openai -> url=%s model=%s", url, raw_model)
 
@@ -399,7 +410,9 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
     logger.info("call_ai: selected_model=%s", model_id)
 
     if model_id.startswith("freemodel/"):
-        content, debug = await call_freemodel_openai(strip_provider_prefix(model_id), messages)
+        raw_model = strip_provider_prefix(model_id)
+        base_url = freemodel_base_for(raw_model)
+        content, debug = await call_freemodel_openai(raw_model, messages, base_url)
     elif model_id.startswith("gemini/"):
         content, debug = await call_gemini(model_id, messages)
     else:
