@@ -48,21 +48,21 @@ async def notify_admin(bot: Bot, user):
 async def cmd_start(message: Message, state: FSMContext):
     user_id = message.from_user.id
     if user_id == ADMIN_ID:
-        db.approve_user(user_id)
+        await db.approve_user(user_id)
         await state.set_state(BotStates.main_menu)
         await message.answer(WELCOME_TEXT, reply_markup=main_menu_keyboard(), parse_mode="HTML")
         return
-    if db.is_approved(user_id):
+    if await db.is_approved(user_id):
         await state.set_state(BotStates.main_menu)
         await message.answer(WELCOME_TEXT, reply_markup=main_menu_keyboard(), parse_mode="HTML")
         return
-    if db.is_pending(user_id):
+    if await db.is_pending(user_id):
         await message.answer("⏳ <b>Запрос уже отправлен!</b> Ожидай одобрения.", parse_mode="HTML")
         return
-    if db.is_rejected(user_id):
+    if await db.is_rejected(user_id):
         await message.answer("🚫 <b>Доступ отклонён.</b>", parse_mode="HTML")
         return
-    db.add_pending(user_id)
+    await db.add_pending(user_id)
     await notify_admin(message.bot, message.from_user)
     await message.answer("📨 <b>Запрос отправлен!</b>\n\nОжидай одобрения от администратора.", parse_mode="HTML")
 
@@ -94,8 +94,8 @@ async def cb_help(callback: CallbackQuery):
 async def cmd_admin(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
-    approved = db.get_all_approved()
-    pending = db.get_all_pending()
+    approved = await db.get_all_approved()
+    pending = await db.get_all_pending()
     await message.answer(
         f"🛠 <b>Панель администратора</b>\n\n✅ Одобрено: <b>{len(approved)}</b>\n⏳ Ожидают: <b>{len(pending)}</b>",
         reply_markup=admin_panel_keyboard(), parse_mode="HTML"
@@ -108,7 +108,7 @@ async def cb_approve(callback: CallbackQuery, bot: Bot):
         await callback.answer("🚫 Нет доступа", show_alert=True)
         return
     user_id = int(callback.data.split("_")[1])
-    db.approve_user(user_id)
+    await db.approve_user(user_id)
     await callback.message.edit_text(callback.message.text + "\n\n✅ <b>Одобрен!</b>", parse_mode="HTML")
     await callback.answer("✅ Одобрен!")
     try:
@@ -123,7 +123,7 @@ async def cb_reject(callback: CallbackQuery, bot: Bot):
         await callback.answer("🚫 Нет доступа", show_alert=True)
         return
     user_id = int(callback.data.split("_")[1])
-    db.reject_user(user_id)
+    await db.reject_user(user_id)
     await callback.message.edit_text(callback.message.text + "\n\n❌ <b>Отклонён.</b>", parse_mode="HTML")
     await callback.answer("❌ Отклонён")
     try:
@@ -138,7 +138,7 @@ async def cb_revoke(callback: CallbackQuery, bot: Bot):
         await callback.answer("🚫 Нет доступа", show_alert=True)
         return
     user_id = int(callback.data.split("_")[1])
-    db.revoke_user(user_id)
+    await db.revoke_user(user_id)
     await callback.answer("🚫 Доступ отозван", show_alert=True)
     await callback.message.edit_text(
         f"🚫 Доступ пользователя <code>{user_id}</code> отозван.",
@@ -157,8 +157,8 @@ async def cb_revoke(callback: CallbackQuery, bot: Bot):
 async def cb_admin_panel(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
-    approved = db.get_all_approved()
-    pending = db.get_all_pending()
+    approved = await db.get_all_approved()
+    pending = await db.get_all_pending()
     await callback.message.edit_text(
         f"🛠 <b>Панель администратора</b>\n\n✅ Одобрено: <b>{len(approved)}</b>\n⏳ Ожидают: <b>{len(pending)}</b>",
         reply_markup=admin_panel_keyboard(), parse_mode="HTML"
@@ -170,7 +170,7 @@ async def cb_admin_panel(callback: CallbackQuery):
 async def cb_list_approved(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
-    approved = db.get_all_approved()
+    approved = await db.get_all_approved()
     if not approved:
         await callback.answer("Список пуст", show_alert=True)
         return
@@ -193,7 +193,7 @@ async def cb_list_approved(callback: CallbackQuery):
 async def cb_list_pending(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
-    pending = db.get_all_pending()
+    pending = await db.get_all_pending()
     if not pending:
         await callback.answer("Нет ожидающих", show_alert=True)
         return
@@ -217,8 +217,8 @@ async def cb_list_pending(callback: CallbackQuery):
 async def cb_stats(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
-    approved = db.get_all_approved()
-    pending = db.get_all_pending()
+    approved = await db.get_all_approved()
+    pending = await db.get_all_pending()
     await callback.message.edit_text(
         f"📊 <b>Статистика</b>\n\n✅ Одобрено: <b>{len(approved)}</b>\n⏳ Ожидают: <b>{len(pending)}</b>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
