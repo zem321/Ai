@@ -1,94 +1,126 @@
-import os
-import asyncpg
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+# ChatGPT модели
+CHATGPT_MODELS = {
+    "freemodel/gpt-5.4-nano": "GPT 5.4 Nano",
+    "freemodel/gpt-5.5": "GPT 5.5",
+}
 
-_pool: asyncpg.Pool | None = None
+# Gemini модели
+GEMINI_MODELS = {
+    "gemini/gemini-3.1-flash-lite": "Gemini 3.1 Flash Lite",
+    "gemini/gemini-3.5-flash": "Gemini 3.5 Flash",
+    "gemini/gemini-3.1-pro": "Gemini 3.1 Pro",
+}
 
+# Остальные модели (Other)
+OTHER_MODELS = {
+    "meta/llama-4-maverick-17b-128e-instruct": "Llama 4 Maverick 17B",
+    "z-ai/glm-5.1": "GLM-5.1",
+    "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
+}
 
-async def init_db():
-    """Вызови один раз при старте бота (например, в main перед start_polling)."""
-    global _pool
-    _pool = await asyncpg.create_pool(DATABASE_URL)
-    async with _pool.acquire() as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                user_id BIGINT PRIMARY KEY,
-                status TEXT NOT NULL CHECK (status IN ('approved', 'pending', 'rejected'))
-            )
-            """
-        )
+# Совет ИИ-моделей: запрос параллельно уходит трём моделям-участникам
+# (см. handlers.COUNCIL_MEMBER_MODELS), их ответы анонимизируются как
+# A/B/C, и модель-судья (handlers.COUNCIL_JUDGE_MODEL) выбирает лучший
+# ответ/делает синтез и кратко объясняет выбор.
+#
+# Это "виртуальный" model_id — никакого отдельного провайдера для него
+# нет, вся логика обрабатывается функцией call_ai_council() в handlers.py,
+# которая просто несколько раз использует уже существующие call_ai().
+COUNCIL_MODELS = {
+    "council/ai-council": "Совет ИИ-моделей",
+}
 
+MODELS = {**CHATGPT_MODELS, **GEMINI_MODELS, **OTHER_MODELS, **COUNCIL_MODELS}
 
-async def _get_status(user_id: int) -> str | None:
-    async with _pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT status FROM users WHERE user_id = $1", user_id)
-        return row["status"] if row else None
+# Человекочитаемые названия групп моделей (для заголовков экрана выбора модели)
+GROUP_TITLES = {
+    "chatgpt": "ChatGPT",
+    "gemini": "Gemini",
+    "other": "Other",
+    "council": "Совет ИИ-моделей",
+}
 
+# -------------------- Клавиатуры --------------------
 
-async def is_approved(user_id: int) -> bool:
-    return await _get_status(user_id) == "approved"
-
-
-async def is_pending(user_id: int) -> bool:
-    return await _get_status(user_id) == "pending"
-
-
-async def is_rejected(user_id: int) -> bool:
-    return await _get_status(user_id) == "rejected"
-
-
-async def add_pending(user_id: int):
-    async with _pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (user_id, status) VALUES ($1, 'pending')
-            ON CONFLICT (user_id) DO NOTHING
-            """,
-            user_id,
-        )
-
-
-async def approve_user(user_id: int):
-    async with _pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (user_id, status) VALUES ($1, 'approved')
-            ON CONFLICT (user_id) DO UPDATE SET status = 'approved'
-            """,
-            user_id,
-        )
-
-
-async def reject_user(user_id: int):
-    async with _pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (user_id, status) VALUES ($1, 'rejected')
-            ON CONFLICT (user_id) DO UPDATE SET status = 'rejected'
-            """,
-            user_id,
-        )
+def main_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Чат с ИИ", callback_data="mode_chat"),
+            InlineKeyboardButton(text="Генерация фото", callback_data="mode_image_gen"),
+        ],
+        [
+            InlineKeyboardButton(text="Выбрать модель", callback_data="select_model"),
+            InlineKeyboardButton(text="Очистить историю", callback_data="clear_history"),
+        ],
+        [
+            InlineKeyboardButton(text="Помощь", callback_data="help"),
+        ]
+    ])
 
 
-async def revoke_user(user_id: int):
-    await reject_user(user_id)
+def model_group_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="ChatGPT", callback_data="model_group_chatgpt")],
+        [InlineKeyboardButton(text="Gemini", callback_data="model_group_gemini")],
+        [InlineKeyboardButton(text="Other", callback_data="model_group_other")],
+        [InlineKeyboardButton(text="Совет ИИ-моделей", callback_data="model_group_council")],
+        [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
+    ])
 
 
-async def get_all_approved() -> list[int]:
-    async with _pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id FROM users WHERE status = 'approved'")
-        return [r["user_id"] for r in rows]
+def models_keyboard(group: str, current: str = "") -> InlineKeyboardMarkup:
+    buttons = []
+    if group == "chatgpt":
+        for model_id, model_name in CHATGPT_MODELS.items():
+            label = f"[x] {model_name}" if model_id == current else model_name
+            buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
+    elif group == "gemini":
+        for model_id, model_name in GEMINI_MODELS.items():
+            label = f"[x] {model_name}" if model_id == current else model_name
+            buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
+    elif group == "other":
+        for model_id, model_name in OTHER_MODELS.items():
+            label = f"[x] {model_name}" if model_id == current else model_name
+            buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
+    elif group == "council":
+        for model_id, model_name in COUNCIL_MODELS.items():
+            label = f"[x] {model_name}" if model_id == current else model_name
+            buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
+    buttons.append([InlineKeyboardButton(text="Назад", callback_data="select_model")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-async def get_all_pending() -> list[int]:
-    async with _pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id FROM users WHERE status = 'pending'")
-        return [r["user_id"] for r in rows]
+def cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Сменить модель", callback_data="select_model"),
+            InlineKeyboardButton(text="Меню", callback_data="main_menu"),
+        ]
+    ])
 
 
-async def get_all_rejected() -> list[int]:
-    async with _pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id FROM users WHERE status = 'rejected'")
-        return [r["user_id"] for r in rows]
+def edit_model_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Flux 2 Klein", callback_data="editmodel_flux.2-klein-4b")],
+        [InlineKeyboardButton(text="Назад", callback_data="main_menu")],
+    ])
+
+
+def admin_notify_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Одобрить", callback_data=f"approve_{user_id}"),
+            InlineKeyboardButton(text="Отклонить", callback_data=f"reject_{user_id}"),
+        ]
+    ])
+
+
+def admin_panel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Одобренные", callback_data="admin_list_approved")],
+        [InlineKeyboardButton(text="Ожидают", callback_data="admin_list_pending")],
+        [InlineKeyboardButton(text="Отклонённые", callback_data="admin_list_rejected")],
+        [InlineKeyboardButton(text="Статистика", callback_data="admin_stats")],
+    ])
