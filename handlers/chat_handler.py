@@ -20,6 +20,7 @@ from keyboards import (
     OTHER_MODELS,
     COUNCIL_MODELS,
     GROUP_TITLES,
+    MODELS,
 )
 from states import BotStates
 
@@ -663,6 +664,13 @@ async def select_model_group(callback: CallbackQuery):
 async def show_models_group(callback: CallbackQuery, state: FSMContext):
     group = callback.data.replace("model_group_", "")
 
+    # "Совет ИИ-моделей" — это единственный режим в своей группе, поэтому
+    # выбираем его сразу одним кликом, без промежуточного подменю.
+    if group == "council":
+        model_id = list(COUNCIL_MODELS.keys())[0]
+        await activate_model(callback, state, model_id)
+        return
+
     data = await state.get_data()
     current = data.get("selected_model", "")
 
@@ -677,22 +685,29 @@ async def show_models_group(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("model_"))
-async def set_model(callback: CallbackQuery, state: FSMContext):
-    model_id = callback.data.replace("model_", "")
-
-    logger.info("set_model: пользователь выбрал model_id=%s", model_id)
+async def activate_model(callback: CallbackQuery, state: FSMContext, model_id: str):
+    """Сохраняет выбранную модель, переключает в режим чата и показывает
+    подтверждение с человекочитаемым названием модели."""
+    logger.info("activate_model: пользователь выбрал model_id=%s", model_id)
 
     await state.update_data(selected_model=model_id)
     await state.set_state(BotStates.chat_mode)
 
+    model_name = MODELS.get(model_id, model_id)
+
     await callback.message.edit_text(
-        "<b>Модель выбрана</b>\n\nПиши сообщения.",
+        f"<b>Модель выбрана:</b> {escape(model_name)}\n\nПиши сообщения.",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML",
     )
 
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("model_"))
+async def set_model(callback: CallbackQuery, state: FSMContext):
+    model_id = callback.data.replace("model_", "")
+    await activate_model(callback, state, model_id)
 
 
 # ------------------ Обработчик кнопки "Чат с ИИ" ------------------
@@ -715,6 +730,14 @@ async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
     )
 
     await callback.answer()
+
+
+# ------------------ Очистка истории ------------------
+
+@router.callback_query(F.data == "clear_history")
+async def cb_clear_history(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(chat_history=[])
+    await callback.answer("История очищена ✅", show_alert=True)
 
 
 # ------------------ Обработчики чата ------------------
