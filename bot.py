@@ -69,9 +69,11 @@ async def set_commands(bot: Bot):
 
 
 async def main():
+    await db.init_db()
+
     admin_id = int(os.getenv("ADMIN_ID", "0"))
     if admin_id:
-        db.approve_user(admin_id)
+        await db.approve_user(admin_id)
         logger.info("Admin %s approved on startup", admin_id)
 
     web_runner = await start_web()
