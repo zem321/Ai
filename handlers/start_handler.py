@@ -213,6 +213,29 @@ async def cb_list_pending(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data == "admin_list_rejected")
+async def cb_list_rejected(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    rejected = await db.get_all_rejected()
+    if not rejected:
+        await callback.answer("Список пуст", show_alert=True)
+        return
+    buttons = []
+    for uid in rejected:
+        buttons.append([
+            InlineKeyboardButton(text=f"🆔 {uid}", callback_data="noop"),
+            InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_{uid}"),
+        ])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_panel")])
+    await callback.message.edit_text(
+        f"❌ <b>Отклонённые/отозванные ({len(rejected)}):</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "admin_stats")
 async def cb_stats(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
