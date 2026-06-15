@@ -86,3 +86,9 @@ async def get_all_pending() -> list[int]:
     async with _pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM users WHERE status = 'pending'")
         return [r["user_id"] for r in rows]
+
+
+async def get_all_rejected() -> list[int]:
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id FROM users WHERE status = 'rejected'")
+        return [r["user_id"] for r in rows]
