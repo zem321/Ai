@@ -11,6 +11,7 @@ from handlers.start_handler import router as start_router
 from handlers.chat_handler import router as chat_router
 from handlers.image_handler import router as image_router
 from middleware import AccessMiddleware
+from webapp_api import setup_webapp_routes
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +48,11 @@ async def start_web() -> web.AppRunner:
     app.router.add_get("/", miniapp)
     app.router.add_get("/app", miniapp)
     app.router.add_get("/health", health)
+
+    # Роуты HTTP API для мини-аппа: /api/me, /api/chat, /api/image.
+    # Логика внутри переиспользует call_ai()/generate_image() из тех же
+    # модулей, что использует и сам бот — никакой новой бизнес-логики.
+    setup_webapp_routes(app)
 
     runner = web.AppRunner(app)
     await runner.setup()
