@@ -453,16 +453,17 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
 .gb-name{font-size:16px;font-weight:600;color:var(--text);position:relative;z-index:1;}
 .gb-chev{font-size:18px;color:var(--sub);position:relative;z-index:1;font-weight:300;}
 
-/* Контейнер для вью — высота по максимальному контенту (список моделей) */
+/* Контейнер для вью — скроллится, если контент (4 группы / список моделей) не влезает */
 .sheet-body{
   position:relative;
-  height:158px;
-  overflow:hidden;
+  max-height:min(52vh,420px);
+  overflow-y:auto;
+  overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;
 }
 
 /* Список моделей */
 .view-models{
-  position:absolute;top:0;left:0;right:0;
   opacity:0;
   pointer-events:none;
   transform:translateX(18px);
@@ -476,8 +477,7 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
 
 /* Группы */
 .view-groups{
-  position:absolute;top:0;left:0;right:0;
-  padding:0 14px;display:flex;flex-direction:column;gap:10px;
+  padding:0 14px 14px;display:flex;flex-direction:column;gap:10px;
   will-change:transform,opacity;
   opacity:1;
   transform:translateX(0);
@@ -899,6 +899,7 @@ const MODEL_NAME_TO_ID = {
    Поле ввода заблокировано (disabled) изначально прямо в HTML.
    Разблокируем его JS-ом ТОЛЬКО после успешного подтверждения
    доступа сервером — никакой логики "по умолчанию разрешено". */
+console.log('Oracle mini-app build: auth-enforced-v2');
 let accessGranted = false;
 
 (function initTelegramAccess(){
