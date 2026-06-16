@@ -453,17 +453,21 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
 .gb-name{font-size:16px;font-weight:600;color:var(--text);position:relative;z-index:1;}
 .gb-chev{font-size:18px;color:var(--sub);position:relative;z-index:1;font-weight:300;}
 
-/* Контейнер для вью — скроллится, если контент (4 группы / список моделей) не влезает */
+/* Контейнер для вью — абсолютные дети (для плавной анимации без скачков),
+   высота выставляется JS-ом по содержимому текущего видимого вью (см. fitSheetBody()).
+   overflow-y:auto на случай если контент всё равно не влезает по высоте экрана. */
 .sheet-body{
   position:relative;
-  max-height:min(52vh,420px);
   overflow-y:auto;
   overflow-x:hidden;
   -webkit-overflow-scrolling:touch;
+  max-height:60vh;
+  transition:height .3s cubic-bezier(0.16,1,0.3,1);
 }
 
 /* Список моделей */
 .view-models{
+  position:absolute;top:0;left:0;right:0;
   opacity:0;
   pointer-events:none;
   transform:translateX(18px);
@@ -477,6 +481,7 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
 
 /* Группы */
 .view-groups{
+  position:absolute;top:0;left:0;right:0;
   padding:0 14px 14px;display:flex;flex-direction:column;gap:10px;
   will-change:transform,opacity;
   opacity:1;
@@ -837,33 +842,42 @@ let gr='Добрый день';for(const[t,v]of greetings){if(hr>=t)gr=v;}
 document.getElementById('greeting').textContent=gr;
 
 // iOS/Telegram WebView keyboard fix — держим высоту .app строго равной
-// видимой области (visualViewport), а не layout viewport, который
-// Safari не уменьшает при открытии клавиатуры. Без этого верстка
-// "прыгает", потому что position:fixed считается от старой высоты.
+// видимой области. В Telegram WebView window.visualViewport не всегда
+// корректно уменьшается при открытии клавиатуры (даёт зазор между полем
+// ввода и клавиатурой), поэтому в приоритете — Telegram.WebApp.viewportHeight,
+// который Telegram обновляет именно под клавиатуру. visualViewport — фоллбек
+// для случаев, когда мини-апп открыт не во Telegram (напр. браузер).
 const ta=document.getElementById('ta');
 const appEl=document.querySelector('.app');
 
+function getViewportHeight(){
+  if(window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.viewportHeight){
+    return window.Telegram.WebApp.viewportHeight;
+  }
+  if(window.visualViewport) return window.visualViewport.height;
+  return window.innerHeight;
+}
+
 function lockViewportHeight(){
-  const h = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
-  if(appEl) appEl.style.height = h + 'px';
+  if(appEl) appEl.style.height = getViewportHeight() + 'px';
 }
 lockViewportHeight();
 
+if(window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.onEvent){
+  window.Telegram.WebApp.onEvent('viewportChanged', lockViewportHeight);
+}
 if(window.visualViewport){
   window.visualViewport.addEventListener('resize', lockViewportHeight);
   window.visualViewport.addEventListener('scroll', lockViewportHeight);
-} else {
-  window.addEventListener('resize', lockViewportHeight);
 }
+window.addEventListener('resize', lockViewportHeight);
 
 ta.addEventListener('focus',()=>{
-  // Даём клавиатуре время открыться, пересчитываем высоту и скроллим вниз
-  setTimeout(()=>{lockViewportHeight();scrollB();},50);
-  setTimeout(()=>{lockViewportHeight();scrollB();},320);
+  // Клавиатуре нужно время чтобы открыться — пересчитываем несколько раз
+  [30,100,200,350,500].forEach(t=>setTimeout(()=>{lockViewportHeight();scrollB();},t));
 });
 ta.addEventListener('blur',()=>{
-  setTimeout(lockViewportHeight,50);
-  setTimeout(lockViewportHeight,320);
+  [30,100,200,350,500].forEach(t=>setTimeout(lockViewportHeight,t));
 });
 
 // Prevent scroll on body when keyboard is open
@@ -914,19 +928,22 @@ let accessGranted = false;
 
   fetch('/api/me', { headers:{ 'Authorization':'tma '+initData } })
     .then(r => {
+      console.log('Oracle: /api/me status =', r.status);
       if(!r.ok) return r.json().then(d=>{throw d;}).catch(()=>{throw {message:'Нет доступа.'};});
       return r.json();
     })
     .then((data)=>{
-      if(data && data.ok){
+      console.log('Oracle: /api/me data =', data);
+      if(data && data.ok===true){
         accessGranted = true;
         const taEl = document.getElementById('ta');
         if(taEl) taEl.disabled = false;
       } else {
-        showAccessDenied('Нет доступа. Откройте бота в Telegram и отправьте /start.');
+        showAccessDenied((data && data.message) || 'Нет доступа. Откройте бота в Telegram и отправьте /start.');
       }
     })
     .catch((err)=>{
+      console.log('Oracle: /api/me error =', err);
       const msg = (err && err.message) || 'Нет доступа. Откройте бота в Telegram и отправьте /start.';
       showAccessDenied(msg);
     });
@@ -971,7 +988,20 @@ function toggleInc(){
   if(isInc){document.getElementById('messages').style.display='none';}
 }
 
-/* ── Sheet ── */
+/* ── Sheet ──
+   .view-groups/.view-models позиционируются absolute внутри .sheet-body
+   (для плавного crossfade без скачков), поэтому .sheet-body сам не знает
+   свою высоту — выставляем её явно по содержимому видимого блока. */
+function fitSheetBody(){
+  const body=document.querySelector('.sheet-body');
+  if(!body) return;
+  const vg=document.getElementById('vg');
+  const vm=document.getElementById('vm');
+  const visible = (vm.style.display==='block') ? vm : vg;
+  // scrollHeight даёт реальную высоту содержимого независимо от absolute-позиционирования
+  body.style.height = visible.scrollHeight + 'px';
+}
+
 function openSheet(){
   // Reset to groups view before opening
   const vg=document.getElementById('vg');
@@ -987,6 +1017,7 @@ function openSheet(){
   document.getElementById('sheet-title').textContent='Select model';
   document.getElementById('sheet').classList.add('open');
   document.getElementById('sheet-bd').classList.add('open');
+  requestAnimationFrame(fitSheetBody);
 }
 function closeSheet(){
   const sheet=document.getElementById('sheet');
@@ -1035,6 +1066,7 @@ function showGrp(g){
   vm.style.transform='translateX(18px)';
   vm.style.display='block';
   vm.style.pointerEvents='none';
+  requestAnimationFrame(fitSheetBody);
 
   // Модели начинают появляться почти сразу
   setTimeout(()=>{
@@ -1076,6 +1108,7 @@ function backToGrp(){
     vg.style.transform='translateX(-18px)';
     vg.style.transition='none';
     vg.style.pointerEvents='none';
+    fitSheetBody();
     requestAnimationFrame(()=>{
       requestAnimationFrame(()=>{
         vg.style.transition=`opacity .6s ${ease}, transform .65s ${ease}`;
