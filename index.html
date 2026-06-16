@@ -295,7 +295,7 @@ textarea{
   resize:none;
   min-height:22px;max-height:120px;
   display:block;
-  caret-color:var(--accent);
+  caret-color:#8FB52E;
 }
 textarea::placeholder{color:var(--sub);}
 textarea:focus{outline:none !important;box-shadow:none !important;}
@@ -696,7 +696,8 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
       <textarea id="ta" rows="1"
         placeholder="Написать сообщение…"
         oninput="resize(this);toggleSend()"
-        onkeydown="onKey(event)"></textarea>
+        onkeydown="onKey(event)"
+        disabled></textarea>
       <div class="input-toolbar">
         <button class="pill pill-plus">
           <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
@@ -737,8 +738,16 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
       <span class="gb-name">ChatGPT</span>
       <span class="gb-chev">›</span>
     </button>
+    <button class="group-btn" onclick="showGrp('gemini')">
+      <span class="gb-name">Gemini</span>
+      <span class="gb-chev">›</span>
+    </button>
     <button class="group-btn" onclick="showGrp('other')">
       <span class="gb-name">Other</span>
+      <span class="gb-chev">›</span>
+    </button>
+    <button class="group-btn" onclick="showGrp('council')">
+      <span class="gb-name">Совет ИИ-моделей</span>
       <span class="gb-chev">›</span>
     </button>
   </div>
@@ -763,9 +772,37 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
         <span class="mi-check">✓</span>
       </div>
     </div>
+    <div class="model-list" id="ml-gemini" style="display:none">
+      <div class="model-item" data-n="Gemini 3.1 Flash Lite" onclick="pickModel(this)">
+        <div class="mi-info"><div class="mi-name">Gemini 3.1 Flash Lite</div><div class="mi-desc">Lightweight and fast</div></div>
+        <span class="mi-check">✓</span>
+      </div>
+      <div class="model-item" data-n="Gemini 3.5 Flash" onclick="pickModel(this)">
+        <div class="mi-info"><div class="mi-name">Gemini 3.5 Flash</div><div class="mi-desc">Balanced speed and quality</div></div>
+        <span class="mi-check">✓</span>
+      </div>
+      <div class="model-item" data-n="Gemini 3.1 Pro" onclick="pickModel(this)">
+        <div class="mi-info"><div class="mi-name">Gemini 3.1 Pro</div><div class="mi-desc">Most capable Gemini model</div></div>
+        <span class="mi-check">✓</span>
+      </div>
+    </div>
     <div class="model-list" id="ml-other" style="display:none">
       <div class="model-item" data-n="Llama 4" onclick="pickModel(this)">
         <div class="mi-info"><div class="mi-name">Llama 4</div><div class="mi-desc">Open-source by Meta</div></div>
+        <span class="mi-check">✓</span>
+      </div>
+      <div class="model-item" data-n="GLM-5.1" onclick="pickModel(this)">
+        <div class="mi-info"><div class="mi-name">GLM-5.1</div><div class="mi-desc">By Zhipu AI</div></div>
+        <span class="mi-check">✓</span>
+      </div>
+      <div class="model-item" data-n="Nemotron 3 Super" onclick="pickModel(this)">
+        <div class="mi-info"><div class="mi-name">Nemotron 3 Super</div><div class="mi-desc">By NVIDIA</div></div>
+        <span class="mi-check">✓</span>
+      </div>
+    </div>
+    <div class="model-list" id="ml-council" style="display:none">
+      <div class="model-item" data-n="Совет ИИ-моделей" onclick="pickModel(this)">
+        <div class="mi-info"><div class="mi-name">Совет ИИ-моделей</div><div class="mi-desc">Несколько моделей отвечают, судья выбирает лучший ответ</div></div>
         <span class="mi-check">✓</span>
       </div>
     </div>
@@ -799,13 +836,36 @@ const greetings=[[0,'Доброй ночи'],[6,'Доброе утро'],[12,'Д
 let gr='Добрый день';for(const[t,v]of greetings){if(hr>=t)gr=v;}
 document.getElementById('greeting').textContent=gr;
 
-// iOS keyboard fix — prevent layout jump when keyboard opens
-// The textarea focuses, keyboard appears, but we keep layout stable
+// iOS/Telegram WebView keyboard fix — держим высоту .app строго равной
+// видимой области (visualViewport), а не layout viewport, который
+// Safari не уменьшает при открытии клавиатуры. Без этого верстка
+// "прыгает", потому что position:fixed считается от старой высоты.
 const ta=document.getElementById('ta');
+const appEl=document.querySelector('.app');
+
+function lockViewportHeight(){
+  const h = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
+  if(appEl) appEl.style.height = h + 'px';
+}
+lockViewportHeight();
+
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', lockViewportHeight);
+  window.visualViewport.addEventListener('scroll', lockViewportHeight);
+} else {
+  window.addEventListener('resize', lockViewportHeight);
+}
+
 ta.addEventListener('focus',()=>{
-  // Give keyboard time to open, then scroll messages to bottom
-  setTimeout(()=>{scrollB();},300);
+  // Даём клавиатуре время открыться, пересчитываем высоту и скроллим вниз
+  setTimeout(()=>{lockViewportHeight();scrollB();},50);
+  setTimeout(()=>{lockViewportHeight();scrollB();},320);
 });
+ta.addEventListener('blur',()=>{
+  setTimeout(lockViewportHeight,50);
+  setTimeout(lockViewportHeight,320);
+});
+
 // Prevent scroll on body when keyboard is open
 document.body.addEventListener('touchmove',(e)=>{
   if(e.target===document.body)e.preventDefault();
@@ -826,10 +886,21 @@ let chatHistory=[];
 const MODEL_NAME_TO_ID = {
   'GPT-5.5': 'freemodel/gpt-5.5',
   'GPT-5.4 Mini': 'freemodel/gpt-5.4-nano',
+  'Gemini 3.1 Flash Lite': 'gemini/gemini-3.1-flash-lite',
+  'Gemini 3.5 Flash': 'gemini/gemini-3.5-flash',
+  'Gemini 3.1 Pro': 'gemini/gemini-3.1-pro',
   'Llama 4': 'meta/llama-4-maverick-17b-128e-instruct',
+  'GLM-5.1': 'z-ai/glm-5.1',
+  'Nemotron 3 Super': 'nvidia/nemotron-3-super-120b-a12b',
+  'Совет ИИ-моделей': 'council/ai-council',
 };
 
-/* ── Telegram WebApp init + проверка доступа ── */
+/* ── Telegram WebApp init + проверка доступа ──
+   Поле ввода заблокировано (disabled) изначально прямо в HTML.
+   Разблокируем его JS-ом ТОЛЬКО после успешного подтверждения
+   доступа сервером — никакой логики "по умолчанию разрешено". */
+let accessGranted = false;
+
 (function initTelegramAccess(){
   try{
     if(window.Telegram && window.Telegram.WebApp){
@@ -841,8 +912,19 @@ const MODEL_NAME_TO_ID = {
   const initData = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp.initData : '';
 
   fetch('/api/me', { headers:{ 'Authorization':'tma '+initData } })
-    .then(r => r.ok ? r.json() : r.json().then(d=>{throw d;}))
-    .then(()=>{ /* доступ есть — ничего не делаем, обычный экран */ })
+    .then(r => {
+      if(!r.ok) return r.json().then(d=>{throw d;}).catch(()=>{throw {message:'Нет доступа.'};});
+      return r.json();
+    })
+    .then((data)=>{
+      if(data && data.ok){
+        accessGranted = true;
+        const taEl = document.getElementById('ta');
+        if(taEl) taEl.disabled = false;
+      } else {
+        showAccessDenied('Нет доступа. Откройте бота в Telegram и отправьте /start.');
+      }
+    })
     .catch((err)=>{
       const msg = (err && err.message) || 'Нет доступа. Откройте бота в Telegram и отправьте /start.';
       showAccessDenied(msg);
@@ -850,8 +932,12 @@ const MODEL_NAME_TO_ID = {
 })();
 
 function showAccessDenied(message){
-  const app = document.querySelector('.app');
-  if(!app) return;
+  accessGranted = false;
+  const taEl = document.getElementById('ta');
+  if(taEl) taEl.disabled = true;
+  const sendBtn = document.getElementById('send-btn');
+  if(sendBtn) sendBtn.disabled = true;
+
   const overlay = document.createElement('div');
   overlay.style.position='fixed';
   overlay.style.inset='0';
@@ -923,6 +1009,9 @@ function setTitle(text){
   },180);
 }
 
+const GRP_TITLES={chatgpt:'ChatGPT',gemini:'Gemini',other:'Other',council:'Совет ИИ-моделей'};
+const GRP_IDS=['chatgpt','gemini','other','council'];
+
 function showGrp(g){
   const vg=document.getElementById('vg');
   const vm=document.getElementById('vm');
@@ -933,11 +1022,13 @@ function showGrp(g){
   vg.style.opacity='0';
   vg.style.transform='translateX(-18px)';
   vg.style.pointerEvents='none';
-  setTitle(g==='chatgpt'?'ChatGPT':'Other');
+  setTitle(GRP_TITLES[g]||'Select model');
 
   // Подготавливаем модели — показываем справа, невидимые
-  document.getElementById('ml-chatgpt').style.display=g==='chatgpt'?'':'none';
-  document.getElementById('ml-other').style.display=g==='other'?'':'none';
+  GRP_IDS.forEach(id=>{
+    const list=document.getElementById('ml-'+id);
+    if(list) list.style.display=(id===g)?'':'none';
+  });
   vm.style.transition='none';
   vm.style.opacity='0';
   vm.style.transform='translateX(18px)';
@@ -1051,6 +1142,10 @@ function onKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(documen
 
 /* ── Send ── */
 function send(){
+  if(!accessGranted){
+    showAccessDenied('Нет доступа. Откройте бота в Telegram и отправьте /start.');
+    return;
+  }
   const ta=document.getElementById('ta');
   const txt=ta.value.trim();if(!txt)return;
   ta.value='';ta.style.height='auto';
