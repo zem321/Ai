@@ -30,6 +30,7 @@ from handlers.chat_handler import call_ai, SYSTEM_PROMPT, trim_history, make_vis
 from handlers.image_handler import generate_image
 
 logger = logging.getLogger(__name__)
+logger.info("webapp_api module loaded: build=auth-enforced-v3")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
@@ -182,8 +183,11 @@ async def _authorize(request: web.Request) -> tuple[int | None, web.Response | N
 async def api_me(request: web.Request) -> web.Response:
     """Проверка доступа — мини-апп вызывает это при старте."""
     user_id, err = await _authorize(request)
-    if err:
+    if err is not None:
         return err
+    if not isinstance(user_id, int):
+        logger.error("webapp_api: /api/me — user_id некорректен (%r), отклоняю", user_id)
+        return web.json_response({"error": "unauthorized"}, status=401)
     return web.json_response({"ok": True, "user_id": user_id})
 
 
@@ -197,8 +201,12 @@ async def api_chat(request: web.Request) -> web.Response:
     возвращается base64 картинки вместо текста (intent == "image").
     """
     user_id, err = await _authorize(request)
-    if err:
+    if err is not None:
+        logger.info("webapp_api: /api/chat — отказ в доступе, прерываю запрос")
         return err
+    if not isinstance(user_id, int):
+        logger.error("webapp_api: /api/chat — user_id некорректен (%r), отклоняю", user_id)
+        return web.json_response({"error": "unauthorized"}, status=401)
 
     try:
         payload = await request.json()
@@ -249,8 +257,11 @@ async def api_chat(request: web.Request) -> web.Response:
 async def api_image(request: web.Request) -> web.Response:
     """Принудительная генерация изображения, минуя автоопределение."""
     user_id, err = await _authorize(request)
-    if err:
+    if err is not None:
         return err
+    if not isinstance(user_id, int):
+        logger.error("webapp_api: /api/image — user_id некорректен (%r), отклоняю", user_id)
+        return web.json_response({"error": "unauthorized"}, status=401)
 
     try:
         payload = await request.json()
