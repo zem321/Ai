@@ -77,7 +77,12 @@ def _check_init_data(init_data: str) -> dict | None:
 
     Возвращает распарсенные данные (включая user) при успехе, иначе None.
     """
-    if not init_data or not BOT_TOKEN:
+    if not BOT_TOKEN:
+        logger.error("webapp_api: BOT_TOKEN не задан — все запросы мини-аппа будут отклонены")
+        return None
+
+    if not init_data:
+        logger.warning("webapp_api: запрос без initData (заголовок Authorization отсутствует/пуст)")
         return None
 
     try:
@@ -88,12 +93,14 @@ def _check_init_data(init_data: str) -> dict | None:
     data = dict(pairs)
     received_hash = data.pop("hash", None)
     if not received_hash:
+        logger.warning("webapp_api: initData без hash — отклонено")
         return None
 
     auth_date = data.get("auth_date")
     if auth_date:
         try:
             if time.time() - int(auth_date) > INIT_DATA_MAX_AGE:
+                logger.warning("webapp_api: initData просрочена")
                 return None
         except ValueError:
             pass
@@ -104,6 +111,7 @@ def _check_init_data(init_data: str) -> dict | None:
     computed_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(computed_hash, received_hash):
+        logger.warning("webapp_api: подпись initData не совпала — отклонено")
         return None
 
     user_raw = data.get("user")
@@ -149,17 +157,20 @@ async def _authorize(request: web.Request) -> tuple[int | None, web.Response | N
         return user_id, None
 
     if await db.is_pending(user_id):
+        logger.info("webapp_api: пользователь %s — доступ ожидает одобрения", user_id)
         return None, web.json_response(
             {"error": "pending", "message": "Запрос на доступ ещё не одобрен."},
             status=403,
         )
 
     if await db.is_rejected(user_id):
+        logger.info("webapp_api: пользователь %s — доступ отклонён", user_id)
         return None, web.json_response(
             {"error": "rejected", "message": "Доступ отклонён."},
             status=403,
         )
 
+    logger.info("webapp_api: пользователь %s — не найден в базе, нет доступа", user_id)
     return None, web.json_response(
         {"error": "no_access", "message": "Нет доступа. Откройте бота и отправьте /start."},
         status=403,
