@@ -87,7 +87,7 @@
 }
 
 html,body{
-  height:100dvh;
+  height:100%;
   background:var(--bg);
   color:var(--text);
   font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
@@ -104,7 +104,7 @@ html,body{
 
 .app{
   display:flex;flex-direction:column;
-  height:100dvh;
+  height:100%;
   max-width:430px;margin:0 auto;
   position:relative;
   overflow:hidden;
@@ -319,7 +319,7 @@ html,body{
 /* === MESSAGES === */
 .messages{
   flex:1;overflow-y:auto;
-  padding:64px 16px 16px;
+  padding:64px 16px 112px;
   display:flex;flex-direction:column;gap:18px;
   scroll-behavior:smooth;
 }
@@ -369,13 +369,16 @@ html,body{
 
 /* === INPUT AREA === */
 .input-area{
-  position:relative;
-  flex-shrink:0;
+  position:fixed;
+  left:0;right:0;bottom:0;
+  max-width:430px;margin:0 auto;
   z-index:20;
   padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 14px);
   background:transparent;
   pointer-events:none;
   -webkit-tap-highlight-color:transparent;
+  transform:translateY(calc(-1 * var(--kb-offset, 0px)));
+  will-change:transform;
 }
 .input-card{pointer-events:auto;}
 .input-card{
@@ -767,9 +770,14 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
 #file-input{display:none;}
 .attach-strip{
   display:none;flex-direction:row;gap:8px;
-  padding:8px 16px 0;overflow-x:auto;overflow-y:hidden;
-  flex-shrink:0;
-  position:relative;z-index:19;
+  padding:0 16px 8px;overflow-x:auto;overflow-y:hidden;
+  position:fixed;
+  left:0;right:0;
+  bottom:calc(env(safe-area-inset-bottom, 0px) + 92px);
+  max-width:430px;margin:0 auto;
+  z-index:19;
+  transform:translateY(calc(-1 * var(--kb-offset, 0px)));
+  will-change:transform;
 }
 .attach-strip.has-files{display:flex;}
 .attach-strip::-webkit-scrollbar{height:0;}
@@ -1048,7 +1056,7 @@ html,body,.app{
 /* === Final UX tweaks === */
 :root{--bg:#F2EFE8;}
 html,body,.app{background:#F2EFE8 !important;}
-.messages{padding-bottom:16px !important;}
+.messages{padding-bottom:176px !important;}
 /* attach-strip — обычный flex-элемент, см. выше */
 .sheet{height:228px !important;}
 @media(prefers-color-scheme:dark){
@@ -1169,13 +1177,30 @@ let gr='Добрый день';for(const[t,v]of greetings){if(hr>=t)gr=v;}
 document.getElementById('greeting').textContent=gr;
 
 const ta=document.getElementById('ta');
-// Высота больше не управляется JS — используем нативный CSS 100dvh,
-// браузер сам плавно подстраивается под клавиатуру без рывков.
-// На фокус только аккуратно подскролливаем список сообщений.
+
+// === Плавное слежение островка за клавиатурой через visualViewport ===
+// Layout (.app, .messages) НЕ трогаем — он стоит на полной высоте экрана.
+// Поднимаем только островок и стрип вложений на высоту клавиатуры,
+// используя visualViewport.height — оно обновляется кадр-в-кадр.
+function updateKeyboardOffset(){
+  if(!window.visualViewport){document.documentElement.style.setProperty('--kb-offset','0px');return;}
+  const vv=window.visualViewport;
+  // высота клавиатуры = разница между layout и visual viewport
+  const kb=Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  document.documentElement.style.setProperty('--kb-offset', kb + 'px');
+}
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',updateKeyboardOffset);
+  window.visualViewport.addEventListener('scroll',updateKeyboardOffset);
+}
+updateKeyboardOffset();
+
 if(ta){
   ta.addEventListener('focus',()=>{
-    // несколько мягких скроллов вниз пока клавиатура едет
-    [120,260,420].forEach(t=>setTimeout(scrollB,t));
+    [120,260,420].forEach(t=>setTimeout(()=>{updateKeyboardOffset();scrollB();},t));
+  });
+  ta.addEventListener('blur',()=>{
+    [60,180,360].forEach(t=>setTimeout(updateKeyboardOffset,t));
   });
 }
 document.body.addEventListener('touchmove',e=>{if(e.target===document.body)e.preventDefault();},{passive:false});
@@ -1589,5 +1614,5 @@ function hideKeyboardOnOutsideTap(ev){
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d45cf689744259',t:'MTc4MTcyMzUxOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d4632baed74259',t:'MTc4MTcyMzc3Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
