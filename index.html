@@ -1196,6 +1196,7 @@ animStyle.textContent='@keyframes oracleDot{0%,80%,100%{opacity:.25;transform:tr
 document.head.appendChild(animStyle);
 
 let model='GPT-5.5',msgs=[],chats=[],activeChatId=null,isInc=false,loaderToggle=0,chatHistory=[],accessGranted=false,pendingFiles=[];
+(function(){try{const s=localStorage.getItem('chatHistory');if(s){const d=JSON.parse(s);if(d \&\& d.t>Date.now()-172800000)chatHistory=d.h||[];}}catch(e){}})();
 const modelGroups={
   chatgpt:[['GPT-5.5','Most capable model'],['GPT-5.4 Mini','Fastest for quick answers']],
   gemini:[['Gemini 3.1 Flash Lite','Lightweight and fast'],['Gemini 3.5 Flash','Balanced speed and quality'],['Gemini 3.1 Pro','Most capable Gemini model']],
@@ -1439,6 +1440,7 @@ async function sendToBackend(txt,files,msgEl){
       chatHistory.push({role:'assistant',content:reply});
     }
     if(chatHistory.length>40)chatHistory=chatHistory.slice(-40);
+try{localStorage.setItem("chatHistory",JSON.stringify({h:chatHistory,t:Date.now()}));}catch(e){}
   }catch(e){
     appendBotError(msgEl,'Не удалось связаться с сервером. Проверь подключение.');
   }
