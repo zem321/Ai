@@ -1196,7 +1196,27 @@ animStyle.textContent='@keyframes oracleDot{0%,80%,100%{opacity:.25;transform:tr
 document.head.appendChild(animStyle);
 
 let model='GPT-5.5',msgs=[],chats=[],activeChatId=null,isInc=false,loaderToggle=0,chatHistory=[],accessGranted=false,pendingFiles=[];
-(function(){try{const s=localStorage.getItem('chatHistory');if(s){const d=JSON.parse(s);if(d && d.t>Date.now()-172800000)chatHistory=d.h||[];}}catch(e){}})();
+
+// === Хранилище чатов: всё локально в localStorage ===
+const CHATS_KEY='oracle_chats_v1';
+const ACTIVE_KEY='oracle_active_chat_v1';
+function loadChats(){
+  try{const s=localStorage.getItem(CHATS_KEY);if(s){const arr=JSON.parse(s);if(Array.isArray(arr))return arr;}}catch(e){}
+  return [];
+}
+function saveChats(){
+  try{localStorage.setItem(CHATS_KEY,JSON.stringify(chats));}catch(e){}
+}
+function saveActiveChat(){
+  if(!activeChatId||isInc)return;
+  const ch=chats.find(c=>c.id===activeChatId);
+  if(!ch)return;
+  ch.history=chatHistory.slice(-60);
+  ch.updated=Date.now();
+  saveChats();
+}
+chats=loadChats();
+(function(){try{const id=localStorage.getItem(ACTIVE_KEY);if(id){const ch=chats.find(c=>c.id===id);if(ch){activeChatId=ch.id;chatHistory=(ch.history||[]).slice();}}}catch(e){}})();
 const modelGroups={
   chatgpt:[['GPT-5.5','Most capable model'],['GPT-5.4 Mini','Fastest for quick answers']],
   gemini:[['Gemini 3.1 Flash Lite','Lightweight and fast'],['Gemini 3.5 Flash','Balanced speed and quality'],['Gemini 3.1 Pro','Most capable Gemini model']],
@@ -1288,10 +1308,23 @@ function closeSidebar(){document.getElementById('sidebar').classList.remove('ope
 function renderSb(){
   const el=document.getElementById('sb-list');
   if(!chats.length){el.innerHTML='<div class="sb-empty">Чатов пока нет</div>';return;}
-  el.innerHTML=[...chats].reverse().map(c=>`<div class="sb-item" onclick="closeSidebar()"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><span class="sb-item-txt">${x(c.title)}</span></div>`).join('');
+  el.innerHTML=[...chats].sort((a,b)=>(b.updated||0)-(a.updated||0)).map(c=>`<div class="sb-item" onclick="openChat('${c.id}')"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><span class="sb-item-txt">${x(c.title)}</span></div>`).join('');
+}
+function openChat(id){
+  const ch=chats.find(c=>c.id===id);
+  if(!ch)return;
+  isInc=false;
+  document.getElementById('inc-btn').classList.remove('inc-on');
+  document.getElementById('inc-screen').classList.remove('show');
+  activeChatId=ch.id;
+  chatHistory=(ch.history||[]).slice();
+  try{localStorage.setItem(ACTIVE_KEY,activeChatId);}catch(e){}
+  rerenderActiveChat();
+  closeSidebar();
 }
 function newChat(){
   closeSidebar();isInc=false;activeChatId=null;chatHistory=[];msgs=[];
+  try{localStorage.removeItem(ACTIVE_KEY);}catch(e){}
   clearPendingFiles();
   if(ta){ta.value='';ta.style.height='auto';}
   document.getElementById('inc-btn').classList.remove('inc-on');
@@ -1369,7 +1402,12 @@ function send(){
     document.getElementById('inc-screen').classList.remove('show');
     msgEl.style.display='flex';
     activeChatId='c'+Date.now();
-    if(!isInc)chats.push({id:activeChatId,title:(txt||'Вложения').length>44?(txt||'Вложения').slice(0,44)+'…':(txt||'Вложения')});
+    if(!isInc){
+      const title=(txt||'Вложения').length>44?(txt||'Вложения').slice(0,44)+'…':(txt||'Вложения');
+      chats.push({id:activeChatId,title:title,history:[],updated:Date.now()});
+      saveChats();
+      try{localStorage.setItem(ACTIVE_KEY,activeChatId);}catch(e){}
+    }
   }
   const u=document.createElement('div');
   u.className='msg-row user';
@@ -1432,15 +1470,15 @@ async function sendToBackend(txt,files,msgEl){
     if(data.intent==='image'){
       appendBotImage(msgEl,data.image_base64,data.prompt);
       chatHistory.push({role:'user',content:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')});
-      chatHistory.push({role:'assistant',content:'[изображение отправлено]'});try{localStorage.setItem("chatHistory",JSON.stringify({h:chatHistory,t:Date.now()}));}catch(e){}
+      chatHistory.push({role:'assistant',content:'[изображение отправлено]'});
     }else{
       const reply=data.reply||'';
       appendBotText(msgEl,reply);
       chatHistory.push({role:'user',content:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')});
-      chatHistory.push({role:'assistant',content:reply});try{localStorage.setItem("chatHistory",JSON.stringify({h:chatHistory,t:Date.now()}));}catch(e){}
+      chatHistory.push({role:'assistant',content:reply});
     }
-    if(chatHistory.length>40)chatHistory=chatHistory.slice(-40);
-try{localStorage.setItem("chatHistory",JSON.stringify({h:chatHistory,t:Date.now()}));}catch(e){}
+    if(chatHistory.length>60)chatHistory=chatHistory.slice(-60);
+    saveActiveChat();
   }catch(e){
     appendBotError(msgEl,'Не удалось связаться с сервером. Проверь подключение.');
   }
@@ -1485,26 +1523,54 @@ function x(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 })();
 
 renderSb();
-</script>
 
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d140ecdc48dc80',t:'MTc4MTY5MDkxMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
-document.addEventListener('visibilitychange',()=>{if(document.hidden)try{localStorage.setItem("chatHistory",JSON.stringify({h:chatHistory,t:Date.now()}));}catch(e){}});
-
-
-document.addEventListener('touchstart', function(ev) {
-  const textarea = document.getElementById('ta');
-  if (!textarea) return;
-  if (document.activeElement !== textarea) return;
-  
-  // Check if tap is inside the input container
-  const inputContainer = textarea.closest('div[class*="input"]') || textarea.parentElement.parentElement;
-  if (inputContainer && !inputContainer.contains(ev.target)) {
-    textarea.blur();
+// === Восстановление активного чата на экране при загрузке ===
+function rerenderActiveChat(){
+  if(!activeChatId)return;
+  const msgEl=document.getElementById('messages');
+  if(!msgEl)return;
+  document.getElementById('welcome').style.display='none';
+  document.getElementById('inc-screen').classList.remove('show');
+  msgEl.style.display='flex';
+  msgEl.innerHTML='';
+  for(const m of chatHistory){
+    const row=document.createElement('div');
+    if(m.role==='user'){
+      row.className='msg-row user';
+      row.innerHTML=`<div class="user-bubble">${x(m.content||'')}</div>`;
+    }else{
+      row.className='msg-row bot';
+      row.dataset.copyText=m.content||'';
+      row.innerHTML=`<div class="bot-msg"><div class="bot-text">${x(m.content||'')}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
+    }
+    msgEl.appendChild(row);
   }
-}, {passive: true, capture: false});
+  scrollB();
+}
+rerenderActiveChat();
 
-<!-- v5 keyboard+history fixed -->
+document.addEventListener('visibilitychange',()=>{if(document.hidden)saveActiveChat();});
+window.addEventListener('beforeunload',()=>{saveActiveChat();});
 
-window.addEventListener('beforeunload',()=>{try{localStorage.setItem("chatHistory",JSON.stringify({h:chatHistory,t:Date.now()}));}catch(e){}});
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d2e9a87b096668',t:'MTc4MTcwODMwOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+// === Скрытие клавиатуры при тапе вне островка ввода ===
+function hideKeyboardOnOutsideTap(ev){
+  const textarea=document.getElementById('ta');
+  if(!textarea) return;
+  if(document.activeElement!==textarea) return;
+  const inputArea=document.querySelector('.input-area');
+  const sheet=document.getElementById('sheet');
+  const sidebar=document.getElementById('sidebar');
+  const attachStrip=document.getElementById('attach-strip');
+  const target=ev.target;
+  // не скрывать, если тап внутри инпута, шита, сайдбара или стрипа вложений
+  if(inputArea && inputArea.contains(target)) return;
+  if(attachStrip && attachStrip.contains(target)) return;
+  if(sheet && sheet.contains(target) && sheet.classList.contains('open')) return;
+  if(sidebar && sidebar.contains(target) && sidebar.classList.contains('open')) return;
+  textarea.blur();
+}
+document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
+document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
+</script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d3f1ee6a4966f0',t:'MTc4MTcxOTEzNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
