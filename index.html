@@ -319,7 +319,7 @@ html,body{
 /* === MESSAGES === */
 .messages{
   flex:1;overflow-y:auto;
-  padding:64px 16px 112px;
+  padding:64px 16px 16px;
   display:flex;flex-direction:column;gap:18px;
   scroll-behavior:smooth;
 }
@@ -369,8 +369,8 @@ html,body{
 
 /* === INPUT AREA === */
 .input-area{
-  position:absolute;
-  left:0;right:0;bottom:0;
+  position:relative;
+  flex-shrink:0;
   z-index:20;
   padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 14px);
   background:transparent;
@@ -769,6 +769,7 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
   display:none;flex-direction:row;gap:8px;
   padding:8px 16px 0;overflow-x:auto;overflow-y:hidden;
   flex-shrink:0;
+  position:relative;z-index:19;
 }
 .attach-strip.has-files{display:flex;}
 .attach-strip::-webkit-scrollbar{height:0;}
@@ -1047,14 +1048,8 @@ html,body,.app{
 /* === Final UX tweaks === */
 :root{--bg:#F2EFE8;}
 html,body,.app{background:#F2EFE8 !important;}
-.messages{padding-bottom:176px !important;}
-.attach-strip{
-  position:absolute;
-  left:0;right:0;
-  bottom:calc(env(safe-area-inset-bottom, 0px) + 92px);
-  z-index:19;
-  padding:0 16px 8px;
-}
+.messages{padding-bottom:16px !important;}
+/* attach-strip — обычный flex-элемент, см. выше */
 .sheet{height:228px !important;}
 @media(prefers-color-scheme:dark){
   :root{--bg:#111110;}
@@ -1258,9 +1253,8 @@ function modelIdFor(name){return MODEL_NAME_TO_ID[name]||'freemodel/gpt-5.5';}
       const tg=window.Telegram.WebApp;
       tg.ready();
       tg.expand();
-      // фиксируем во весь экран если возможно — клавиатура не будет «прыгать»
-      try{tg.requestFullscreen&&tg.requestFullscreen();}catch(e){}
-      try{tg.disableVerticalSwipes&&tg.disableVerticalSwipes();}catch(e){}
+      // НЕ вызываем requestFullscreen / disableVerticalSwipes —
+      // иначе пользователь не сможет регулировать высоту Mini App свайпом.
     }
   }catch(e){}
   const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
@@ -1595,5 +1589,5 @@ function hideKeyboardOnOutsideTap(ev){
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d450de3cad4259',t:'MTc4MTcyMzAyMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d45cf689744259',t:'MTc4MTcyMzUxOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
