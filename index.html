@@ -87,7 +87,7 @@
 }
 
 html,body{
-  height:100%;
+  height:100dvh;
   background:var(--bg);
   color:var(--text);
   font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
@@ -104,7 +104,7 @@ html,body{
 
 .app{
   display:flex;flex-direction:column;
-  height:100%;
+  height:100dvh;
   max-width:430px;margin:0 auto;
   position:relative;
   overflow:hidden;
@@ -1174,55 +1174,13 @@ let gr='Добрый день';for(const[t,v]of greetings){if(hr>=t)gr=v;}
 document.getElementById('greeting').textContent=gr;
 
 const ta=document.getElementById('ta');
-const appEl=document.querySelector('.app');
-function getViewportHeight(){
-  if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.viewportHeight){return window.Telegram.WebApp.viewportHeight;}
-  if(window.visualViewport)return window.visualViewport.height;
-  return window.innerHeight;
-}
-let _lastVh=0;
-function lockViewportHeight(){
-  if(!appEl)return;
-  const vh=getViewportHeight();
-  if(Math.abs(vh-_lastVh)<2)return; // не дёргаем при микро-изменениях
-  _lastVh=vh;
-  appEl.style.height=vh+'px';
-}
-// плавный transition высоты, чтобы скачки выглядели мягко
-if(appEl){appEl.style.transition='height .22s cubic-bezier(0.22,1,0.36,1)';}
-lockViewportHeight();
-if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.onEvent){window.Telegram.WebApp.onEvent('viewportChanged',lockViewportHeight);}
-if(window.visualViewport){window.visualViewport.addEventListener('resize',lockViewportHeight);window.visualViewport.addEventListener('scroll',lockViewportHeight);}
-window.addEventListener('resize',lockViewportHeight);
+// Высота больше не управляется JS — используем нативный CSS 100dvh,
+// браузер сам плавно подстраивается под клавиатуру без рывков.
+// На фокус только аккуратно подскролливаем список сообщений.
 if(ta){
-  // на focus: ждём пока клавиатура реально подъедет и применяем высоту ОДИН раз, по финальному значению.
-  // Раньше серия [30,100,200,350,500]ms сначала ставила «полную» высоту (клавиатуры ещё нет),
-  // а потом резко уменьшала — это и был видимый рывок.
   ta.addEventListener('focus',()=>{
-    let last=getViewportHeight(),stable=0,tries=0;
-    const iv=setInterval(()=>{
-      const v=getViewportHeight();
-      if(Math.abs(v-last)<2){stable++;}else{stable=0;last=v;}
-      tries++;
-      // как только высота стабилизировалась на 2 проверках подряд — применяем
-      if(stable>=2 || tries>20){
-        clearInterval(iv);
-        lockViewportHeight();
-        scrollB();
-      }
-    },80);
-  });
-  ta.addEventListener('blur',()=>{
-    let last=getViewportHeight(),stable=0,tries=0;
-    const iv=setInterval(()=>{
-      const v=getViewportHeight();
-      if(Math.abs(v-last)<2){stable++;}else{stable=0;last=v;}
-      tries++;
-      if(stable>=2 || tries>20){
-        clearInterval(iv);
-        lockViewportHeight();
-      }
-    },80);
+    // несколько мягких скроллов вниз пока клавиатура едет
+    [120,260,420].forEach(t=>setTimeout(scrollB,t));
   });
 }
 document.body.addEventListener('touchmove',e=>{if(e.target===document.body)e.preventDefault();},{passive:false});
@@ -1295,7 +1253,16 @@ const MODEL_NAME_TO_ID={
 function modelIdFor(name){return MODEL_NAME_TO_ID[name]||'freemodel/gpt-5.5';}
 
 (function initTelegramAccess(){
-  try{if(window.Telegram&&window.Telegram.WebApp){window.Telegram.WebApp.ready();window.Telegram.WebApp.expand();}}catch(e){}
+  try{
+    if(window.Telegram&&window.Telegram.WebApp){
+      const tg=window.Telegram.WebApp;
+      tg.ready();
+      tg.expand();
+      // фиксируем во весь экран если возможно — клавиатура не будет «прыгать»
+      try{tg.requestFullscreen&&tg.requestFullscreen();}catch(e){}
+      try{tg.disableVerticalSwipes&&tg.disableVerticalSwipes();}catch(e){}
+    }
+  }catch(e){}
   const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
   fetch('/api/me',{headers:{'Authorization':'tma '+initData}})
     .then(r=>{if(!r.ok)return r.json().then(d=>{throw d;}).catch(()=>{throw {message:'Нет доступа.'};});return r.json();})
@@ -1628,5 +1595,5 @@ function hideKeyboardOnOutsideTap(ev){
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d441a12fa38df5',t:'MTc4MTcyMjM5OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d450de3cad4259',t:'MTc4MTcyMzAyMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
