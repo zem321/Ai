@@ -372,7 +372,7 @@ html,body{
   position:absolute;
   left:0;right:0;bottom:0;
   z-index:20;
-  padding:6px 12px max(env(safe-area-inset-bottom), 10px);
+  padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 14px);
   background:transparent;
   pointer-events:none;
   -webkit-tap-highlight-color:transparent;
@@ -1051,7 +1051,7 @@ html,body,.app{background:#F2EFE8 !important;}
 .attach-strip{
   position:absolute;
   left:0;right:0;
-  bottom:calc(env(safe-area-inset-bottom, 0px) + 78px);
+  bottom:calc(env(safe-area-inset-bottom, 0px) + 92px);
   z-index:19;
   padding:0 16px 8px;
 }
@@ -1180,14 +1180,50 @@ function getViewportHeight(){
   if(window.visualViewport)return window.visualViewport.height;
   return window.innerHeight;
 }
-function lockViewportHeight(){if(appEl)appEl.style.height=getViewportHeight()+'px';}
+let _lastVh=0;
+function lockViewportHeight(){
+  if(!appEl)return;
+  const vh=getViewportHeight();
+  if(Math.abs(vh-_lastVh)<2)return; // не дёргаем при микро-изменениях
+  _lastVh=vh;
+  appEl.style.height=vh+'px';
+}
+// плавный transition высоты, чтобы скачки выглядели мягко
+if(appEl){appEl.style.transition='height .22s cubic-bezier(0.22,1,0.36,1)';}
 lockViewportHeight();
 if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.onEvent){window.Telegram.WebApp.onEvent('viewportChanged',lockViewportHeight);}
 if(window.visualViewport){window.visualViewport.addEventListener('resize',lockViewportHeight);window.visualViewport.addEventListener('scroll',lockViewportHeight);}
 window.addEventListener('resize',lockViewportHeight);
 if(ta){
-  ta.addEventListener('focus',()=>{[30,100,200,350,500].forEach(t=>setTimeout(()=>{lockViewportHeight();scrollB();},t));});
-  ta.addEventListener('blur',()=>{[30,100,200,350,500].forEach(t=>setTimeout(lockViewportHeight,t));});
+  // на focus: ждём пока клавиатура реально подъедет и применяем высоту ОДИН раз, по финальному значению.
+  // Раньше серия [30,100,200,350,500]ms сначала ставила «полную» высоту (клавиатуры ещё нет),
+  // а потом резко уменьшала — это и был видимый рывок.
+  ta.addEventListener('focus',()=>{
+    let last=getViewportHeight(),stable=0,tries=0;
+    const iv=setInterval(()=>{
+      const v=getViewportHeight();
+      if(Math.abs(v-last)<2){stable++;}else{stable=0;last=v;}
+      tries++;
+      // как только высота стабилизировалась на 2 проверках подряд — применяем
+      if(stable>=2 || tries>20){
+        clearInterval(iv);
+        lockViewportHeight();
+        scrollB();
+      }
+    },80);
+  });
+  ta.addEventListener('blur',()=>{
+    let last=getViewportHeight(),stable=0,tries=0;
+    const iv=setInterval(()=>{
+      const v=getViewportHeight();
+      if(Math.abs(v-last)<2){stable++;}else{stable=0;last=v;}
+      tries++;
+      if(stable>=2 || tries>20){
+        clearInterval(iv);
+        lockViewportHeight();
+      }
+    },80);
+  });
 }
 document.body.addEventListener('touchmove',e=>{if(e.target===document.body)e.preventDefault();},{passive:false});
 
@@ -1200,12 +1236,29 @@ let model='GPT-5.5',msgs=[],chats=[],activeChatId=null,isInc=false,loaderToggle=
 // === Хранилище чатов: всё локально в localStorage ===
 const CHATS_KEY='oracle_chats_v1';
 const ACTIVE_KEY='oracle_active_chat_v1';
+const CHAT_TTL_MS=30*24*60*60*1000; // 30 дней
 function loadChats(){
   try{const s=localStorage.getItem(CHATS_KEY);if(s){const arr=JSON.parse(s);if(Array.isArray(arr))return arr;}}catch(e){}
   return [];
 }
 function saveChats(){
   try{localStorage.setItem(CHATS_KEY,JSON.stringify(chats));}catch(e){}
+}
+function pruneOldChats(){
+  const now=Date.now();
+  const before=chats.length;
+  chats=chats.filter(c=>{
+    const t=c.updated||c.created||0;
+    return (now-t)<CHAT_TTL_MS;
+  });
+  if(chats.length!==before){
+    saveChats();
+    // если активный чат был удалён — сбросить
+    if(activeChatId && !chats.find(c=>c.id===activeChatId)){
+      activeChatId=null;
+      try{localStorage.removeItem(ACTIVE_KEY);}catch(e){}
+    }
+  }
 }
 function saveActiveChat(){
   if(!activeChatId||isInc)return;
@@ -1217,6 +1270,9 @@ function saveActiveChat(){
 }
 chats=loadChats();
 (function(){try{const id=localStorage.getItem(ACTIVE_KEY);if(id){const ch=chats.find(c=>c.id===id);if(ch){activeChatId=ch.id;chatHistory=(ch.history||[]).slice();}}}catch(e){}})();
+pruneOldChats();
+// плановая проверка каждый час, на случай если приложение открыто долго
+setInterval(pruneOldChats,60*60*1000);
 const modelGroups={
   chatgpt:[['GPT-5.5','Most capable model'],['GPT-5.4 Mini','Fastest for quick answers']],
   gemini:[['Gemini 3.1 Flash Lite','Lightweight and fast'],['Gemini 3.5 Flash','Balanced speed and quality'],['Gemini 3.1 Pro','Most capable Gemini model']],
@@ -1404,7 +1460,7 @@ function send(){
     activeChatId='c'+Date.now();
     if(!isInc){
       const title=(txt||'Вложения').length>44?(txt||'Вложения').slice(0,44)+'…':(txt||'Вложения');
-      chats.push({id:activeChatId,title:title,history:[],updated:Date.now()});
+      chats.push({id:activeChatId,title:title,history:[],created:Date.now(),updated:Date.now()});
       saveChats();
       try{localStorage.setItem(ACTIVE_KEY,activeChatId);}catch(e){}
     }
@@ -1572,5 +1628,5 @@ function hideKeyboardOnOutsideTap(ev){
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d3f1ee6a4966f0',t:'MTc4MTcxOTEzNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d441a12fa38df5',t:'MTc4MTcyMjM5OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
