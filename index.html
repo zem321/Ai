@@ -1196,7 +1196,7 @@ animStyle.textContent='@keyframes oracleDot{0%,80%,100%{opacity:.25;transform:tr
 document.head.appendChild(animStyle);
 
 let model='GPT-5.5',msgs=[],chats=[],activeChatId=null,isInc=false,loaderToggle=0,chatHistory=[],accessGranted=false,pendingFiles=[];
-(function(){try{const s=localStorage.getItem('chatHistory');if(s){const d=JSON.parse(s);if(d \&\& d.t>Date.now()-172800000)chatHistory=d.h||[];}}catch(e){}})();
+(function(){try{const s=localStorage.getItem('chatHistory');if(s){const d=JSON.parse(s);if(d && d.t>Date.now()-172800000)chatHistory=d.h||[];}}catch(e){}})();
 const modelGroups={
   chatgpt:[['GPT-5.5','Most capable model'],['GPT-5.4 Mini','Fastest for quick answers']],
   gemini:[['Gemini 3.1 Flash Lite','Lightweight and fast'],['Gemini 3.5 Flash','Balanced speed and quality'],['Gemini 3.1 Pro','Most capable Gemini model']],
