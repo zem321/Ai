@@ -369,16 +369,13 @@ html,body{
 
 /* === INPUT AREA === */
 .input-area{
-  position:fixed;
+  position:absolute;
   left:0;right:0;bottom:0;
-  max-width:430px;margin:0 auto;
   z-index:20;
   padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 14px);
   background:transparent;
   pointer-events:none;
   -webkit-tap-highlight-color:transparent;
-  transform:translateY(calc(-1 * var(--kb-offset, 0px)));
-  will-change:transform;
 }
 .input-card{pointer-events:auto;}
 .input-card{
@@ -770,14 +767,8 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
 #file-input{display:none;}
 .attach-strip{
   display:none;flex-direction:row;gap:8px;
-  padding:0 16px 8px;overflow-x:auto;overflow-y:hidden;
-  position:fixed;
-  left:0;right:0;
-  bottom:calc(env(safe-area-inset-bottom, 0px) + 92px);
-  max-width:430px;margin:0 auto;
-  z-index:19;
-  transform:translateY(calc(-1 * var(--kb-offset, 0px)));
-  will-change:transform;
+  padding:8px 16px 0;overflow-x:auto;overflow-y:hidden;
+  flex-shrink:0;
 }
 .attach-strip.has-files{display:flex;}
 .attach-strip::-webkit-scrollbar{height:0;}
@@ -1057,7 +1048,7 @@ html,body,.app{
 :root{--bg:#F2EFE8;}
 html,body,.app{background:#F2EFE8 !important;}
 .messages{padding-bottom:176px !important;}
-/* attach-strip — обычный flex-элемент, см. выше */
+
 .sheet{height:228px !important;}
 @media(prefers-color-scheme:dark){
   :root{--bg:#111110;}
@@ -1177,41 +1168,20 @@ let gr='Добрый день';for(const[t,v]of greetings){if(hr>=t)gr=v;}
 document.getElementById('greeting').textContent=gr;
 
 const ta=document.getElementById('ta');
-
-// === Плавное слежение островка за клавиатурой через visualViewport ===
-// Layout (.app, .messages) НЕ трогаем — он стоит на полной высоте экрана.
-// Поднимаем только островок и стрип вложений на высоту клавиатуры,
-// используя visualViewport.height — оно обновляется кадр-в-кадр.
-let _maxViewportH = 0;
-function currentViewportH(){
-  if(window.visualViewport) return window.visualViewport.height;
+const appEl=document.querySelector('.app');
+function getViewportHeight(){
+  if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.viewportHeight){return window.Telegram.WebApp.viewportHeight;}
+  if(window.visualViewport)return window.visualViewport.height;
   return window.innerHeight;
 }
-function updateKeyboardOffset(){
-  const h = currentViewportH();
-  // запоминаем максимум — это "viewport без клавиатуры"
-  if(h > _maxViewportH) _maxViewportH = h;
-  // клавиатура = насколько viewport сейчас меньше максимума
-  const kb = Math.max(0, _maxViewportH - h);
-  // защита от мусорных значений (< 80px — это не клавиатура, а UI-бары)
-  const offset = kb < 80 ? 0 : kb;
-  document.documentElement.style.setProperty('--kb-offset', offset + 'px');
-}
-if(window.visualViewport){
-  window.visualViewport.addEventListener('resize',updateKeyboardOffset);
-  window.visualViewport.addEventListener('scroll',updateKeyboardOffset);
-}
-// инициализация — сначала запоминаем текущую высоту как максимум, потом ставим 0
-_maxViewportH = currentViewportH();
-document.documentElement.style.setProperty('--kb-offset','0px');
-
+function lockViewportHeight(){if(appEl)appEl.style.height=getViewportHeight()+'px';}
+lockViewportHeight();
+if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.onEvent){window.Telegram.WebApp.onEvent('viewportChanged',lockViewportHeight);}
+if(window.visualViewport){window.visualViewport.addEventListener('resize',lockViewportHeight);window.visualViewport.addEventListener('scroll',lockViewportHeight);}
+window.addEventListener('resize',lockViewportHeight);
 if(ta){
-  ta.addEventListener('focus',()=>{
-    [120,260,420].forEach(t=>setTimeout(()=>{updateKeyboardOffset();scrollB();},t));
-  });
-  ta.addEventListener('blur',()=>{
-    [60,180,360].forEach(t=>setTimeout(updateKeyboardOffset,t));
-  });
+  ta.addEventListener('focus',()=>{[30,100,200,350,500].forEach(t=>setTimeout(()=>{lockViewportHeight();scrollB();},t));});
+  ta.addEventListener('blur',()=>{[30,100,200,350,500].forEach(t=>setTimeout(lockViewportHeight,t));});
 }
 document.body.addEventListener('touchmove',e=>{if(e.target===document.body)e.preventDefault();},{passive:false});
 
@@ -1624,5 +1594,5 @@ function hideKeyboardOnOutsideTap(ev){
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d468079e214259',t:'MTc4MTcyMzk3MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d46f11fa8c4259',t:'MTc4MTcyNDI2MA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
