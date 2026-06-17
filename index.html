@@ -1491,16 +1491,20 @@ renderSb();
 document.addEventListener('visibilitychange',()=>{if(document.hidden)try{localStorage.setItem("chatHistory",JSON.stringify({h:chatHistory,t:Date.now()}));}catch(e){}});
 
 
-document.addEventListener('touchstart', function(e) {
-  const ta = document.getElementById('ta');
-  if (!ta) return;
-  if (document.activeElement === ta) {
-    const comp = document.getElementById('composer');
-    if (comp && !comp.contains(e.target)) {
-      ta.blur();
-    }
+document.addEventListener('touchstart', function(ev) {
+  const textarea = document.getElementById('ta');
+  if (!textarea) return;
+  if (document.activeElement !== textarea) return;
+  
+  // Check if tap is inside the input container
+  const inputContainer = textarea.closest('div[class*="input"]') || textarea.parentElement.parentElement;
+  if (inputContainer && !inputContainer.contains(ev.target)) {
+    textarea.blur();
   }
-}, {passive: true});
+}, {passive: true, capture: false});
 
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d2e20e7a94e459',t:'MTc4MTcwNzk5OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<!-- v5 keyboard+history fixed -->
+
+window.addEventListener('beforeunload',()=>{try{localStorage.setItem("chatHistory",JSON.stringify({h:chatHistory,t:Date.now()}));}catch(e){}});
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d2e9a87b096668',t:'MTc4MTcwODMwOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
