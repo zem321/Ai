@@ -319,10 +319,9 @@ html,body{
 /* === MESSAGES === */
 .messages{
   flex:1;overflow-y:auto;
-  min-height:0;
-  -webkit-overflow-scrolling:touch;
   padding:64px 16px 112px;
   display:flex;flex-direction:column;gap:18px;
+  scroll-behavior:smooth;
 }
 .messages::-webkit-scrollbar{width:3px;}
 .messages::-webkit-scrollbar-thumb{background:rgba(128,128,128,.15);border-radius:99px;}
@@ -370,10 +369,12 @@ html,body{
 
 /* === INPUT AREA === */
 .input-area{
-  position:relative;
+  position:absolute;
+  left:0;right:0;bottom:0;
   z-index:20;
-  padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 14px);
+  padding:6px 12px max(env(safe-area-inset-bottom), 10px);
   background:transparent;
+  pointer-events:none;
   -webkit-tap-highlight-color:transparent;
 }
 .input-card{pointer-events:auto;}
@@ -724,12 +725,7 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
   text-transform:uppercase;letter-spacing:.08em;
   color:var(--sub);padding:4px 22px 10px;
 }
-.sb-list{
-  flex:1;overflow-y:auto;
-  min-height:0;
-  -webkit-overflow-scrolling:touch;
-  padding:0 10px;
-}
+.sb-list{flex:1;overflow-y:auto;padding:0 10px;}
 .sb-list::-webkit-scrollbar{width:0;}
 
 .sb-item{
@@ -822,7 +818,11 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
     transition-duration:0.01ms !important;
   }
 }
-
+@media (max-height: 600px){
+  .welcome h1{font-size:24px;}
+  .welcome-star{width:48px;height:48px;}
+  .input-card{padding:10px 10px 8px 14px;}
+}
 
 
 /* === Claude-like frosted glass tuning: warmer, whiter, barely see-through === */
@@ -1047,8 +1047,14 @@ html,body,.app{
 /* === Final UX tweaks === */
 :root{--bg:#F2EFE8;}
 html,body,.app{background:#F2EFE8 !important;}
-.messages{padding-bottom:24px !important;}
-
+.messages{padding-bottom:176px !important;}
+.attach-strip{
+  position:absolute;
+  left:0;right:0;
+  bottom:calc(env(safe-area-inset-bottom, 0px) + 78px);
+  z-index:19;
+  padding:0 16px 8px;
+}
 .sheet{height:228px !important;}
 @media(prefers-color-scheme:dark){
   :root{--bg:#111110;}
@@ -1170,11 +1176,7 @@ document.getElementById('greeting').textContent=gr;
 const ta=document.getElementById('ta');
 const appEl=document.querySelector('.app');
 function getViewportHeight(){
-  const textarea=document.getElementById('ta');
-  const isKeyboardOpen=textarea && document.activeElement===textarea;
-  if(!isKeyboardOpen && window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.viewportHeight){
-    return window.Telegram.WebApp.viewportHeight;
-  }
+  if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.viewportHeight){return window.Telegram.WebApp.viewportHeight;}
   if(window.visualViewport)return window.visualViewport.height;
   return window.innerHeight;
 }
@@ -1183,10 +1185,9 @@ lockViewportHeight();
 if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.onEvent){window.Telegram.WebApp.onEvent('viewportChanged',lockViewportHeight);}
 if(window.visualViewport){window.visualViewport.addEventListener('resize',lockViewportHeight);window.visualViewport.addEventListener('scroll',lockViewportHeight);}
 window.addEventListener('resize',lockViewportHeight);
-window.addEventListener('scroll',()=>{if(window.scrollY!==0||window.scrollX!==0)window.scrollTo(0,0);});
 if(ta){
-  ta.addEventListener('focus',()=>{[30,100,200,350,500].forEach(t=>setTimeout(()=>{lockViewportHeight();scrollB();window.scrollTo(0,0);},t));});
-  ta.addEventListener('blur',()=>{[30,100,200,350,500].forEach(t=>setTimeout(()=>{lockViewportHeight();window.scrollTo(0,0);},t));});
+  ta.addEventListener('focus',()=>{[30,100,200,350,500].forEach(t=>setTimeout(()=>{lockViewportHeight();scrollB();},t));});
+  ta.addEventListener('blur',()=>{[30,100,200,350,500].forEach(t=>setTimeout(lockViewportHeight,t));});
 }
 document.body.addEventListener('touchmove',e=>{if(e.target===document.body)e.preventDefault();},{passive:false});
 
@@ -1194,135 +1195,7 @@ const animStyle=document.createElement('style');
 animStyle.textContent='@keyframes oracleDot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}} .typing-dots{display:inline-flex;gap:5px;align-items:center}.typing-dots span{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.35;animation:oracleDot 1s infinite ease-in-out}.typing-dots span:nth-child(2){animation-delay:.15s}.typing-dots span:nth-child(3){animation-delay:.3s}';
 document.head.appendChild(animStyle);
 
-
-// === AGGRESSIVE ONE-TIME CLEANER (runs on every load) ===
-(function forceCleanAllBadHistory(){
-  try {
-    // 1. Clean current chatHistory
-    if (Array.isArray(chatHistory)) {
-      chatHistory = chatHistory.map(m => {
-        if (!m || !m.content) return m;
-        let c = String(m.content);
-        c = c.replace(/Вложения/gi, 'Изображение')
-             .replace(/вложение/gi, 'изображение')
-             .replace(/\[Вложение[^\]]*\]/gi, '[Изображение]')
-             .replace(/\[Вложения[^\]]*\]/gi, '[Изображение]')
-             .replace(/вложение\s*\d*/gi, 'изображение');
-        return {...m, content: c};
-      });
-    }
-
-    // 2. Clean all saved chats in localStorage
-    const chatsKey = 'oracle_chats_v1';
-    const raw = localStorage.getItem(chatsKey);
-    if (raw) {
-      let chats = JSON.parse(raw);
-      if (Array.isArray(chats)) {
-        let changed = false;
-        chats = chats.map(ch => {
-          if (!ch || !Array.isArray(ch.history)) return ch;
-          ch.history = ch.history.map(m => {
-            if (!m || !m.content) return m;
-            let c = String(m.content);
-            const before = c;
-            c = c.replace(/Вложения/gi, 'Изображение')
-                 .replace(/вложение/gi, 'изображение')
-                 .replace(/\[Вложение[^\]]*\]/gi, '[Изображение]')
-                 .replace(/\[Вложения[^\]]*\]/gi, '[Изображение]');
-            if (c !== before) changed = true;
-            return {...m, content: c};
-          });
-          return ch;
-        });
-        if (changed) localStorage.setItem(chatsKey, JSON.stringify(chats));
-      }
-    }
-
-    // 3. Also clean active chat if any
-    try {
-      const activeKey = 'oracle_active_chat_v1';
-      // no direct storage of history, it's in chats
-    } catch(e){}
-    
-    console.log('[miniapp] Force cleaned legacy "вложение 1" entries');
-  } catch(e) {}
-})();
-
 let model='GPT-5.5',msgs=[],chats=[],activeChatId=null,isInc=false,loaderToggle=0,chatHistory=[],accessGranted=false,pendingFiles=[];
-
-// === Хранилище чатов: всё локально в localStorage ===
-
-// === ONE-TIME MIGRATION: clean all old saved chats ===
-(function migrateOldChats(){
-  try {
-    const key = 'oracle_chats_v1';
-    const raw = localStorage.getItem(key);
-    if (!raw) return;
-    let chats = JSON.parse(raw);
-    if (!Array.isArray(chats)) return;
-    let changed = false;
-    chats = chats.map(ch => {
-      if (!ch || !Array.isArray(ch.history)) return ch;
-      ch.history = ch.history.map(m => {
-        if (!m || !m.content) return m;
-        let c = String(m.content);
-        const before = c;
-        c = c.replace(/Вложения/gi, 'Изображение')
-             .replace(/вложение/gi, 'изображение')
-             .replace(/\[Вложение[^\]]*\]/gi, '[Изображение]')
-             .replace(/\[Вложения[^\]]*\]/gi, '[Изображение]');
-        if (c !== before) changed = true;
-        return {...m, content: c};
-      });
-      return ch;
-    });
-    if (changed) {
-      localStorage.setItem(key, JSON.stringify(chats));
-      console.log('[migrate] Cleaned old chats from localStorage'); console.log('[miniapp] Using attachments payload for photos');
-    }
-  } catch(e){}
-})();
-
-const CHATS_KEY='oracle_chats_v1';
-const ACTIVE_KEY='oracle_active_chat_v1';
-const CHAT_TTL_MS=30*24*60*60*1000; // 30 дней
-function loadChats(){
-  try{const s=localStorage.getItem(CHATS_KEY);if(s){const arr=JSON.parse(s);if(Array.isArray(arr))return arr;}}catch(e){}
-  return [];
-}
-function saveChats(){
-  try{localStorage.setItem(CHATS_KEY,JSON.stringify(chats));}catch(e){}
-}
-function pruneOldChats(){
-  const now=Date.now();
-  const before=chats.length;
-  chats=chats.filter(c=>{
-    const t=c.updated||c.created||0;
-    return (now-t)<CHAT_TTL_MS;
-  });
-  if(chats.length!==before){
-    saveChats();
-    // если активный чат был удалён — сбросить
-    if(activeChatId && !chats.find(c=>c.id===activeChatId)){
-      activeChatId=null;
-      try{localStorage.removeItem(ACTIVE_KEY);}catch(e){}
-    }
-  }
-}
-function saveActiveChat(){
-  if(!activeChatId||isInc)return;
-  const ch=chats.find(c=>c.id===activeChatId);
-  if(!ch)return;
-  ch.history=chatHistory.slice(-60);
-  ch.updated=Date.now();
-  saveChats();
-}
-chats=loadChats();
-pruneOldChats();
-forceCleanAllBadHistory();
-sanitizeAllHistory();
-// плановая проверка каждый час, на случай если приложение открыто долго
-setInterval(pruneOldChats,60*60*1000);
 const modelGroups={
   chatgpt:[['GPT-5.5','Most capable model'],['GPT-5.4 Mini','Fastest for quick answers']],
   gemini:[['Gemini 3.1 Flash Lite','Lightweight and fast'],['Gemini 3.5 Flash','Balanced speed and quality'],['Gemini 3.1 Pro','Most capable Gemini model']],
@@ -1345,15 +1218,7 @@ const MODEL_NAME_TO_ID={
 function modelIdFor(name){return MODEL_NAME_TO_ID[name]||'freemodel/gpt-5.5';}
 
 (function initTelegramAccess(){
-  try{
-    if(window.Telegram&&window.Telegram.WebApp){
-      const tg=window.Telegram.WebApp;
-      tg.ready();
-      tg.expand();
-      // НЕ вызываем requestFullscreen / disableVerticalSwipes —
-      // иначе пользователь не сможет регулировать высоту Mini App свайпом.
-    }
-  }catch(e){}
+  try{if(window.Telegram&&window.Telegram.WebApp){window.Telegram.WebApp.ready();window.Telegram.WebApp.expand();}}catch(e){}
   const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
   fetch('/api/me',{headers:{'Authorization':'tma '+initData}})
     .then(r=>{if(!r.ok)return r.json().then(d=>{throw d;}).catch(()=>{throw {message:'Нет доступа.'};});return r.json();})
@@ -1422,63 +1287,10 @@ function closeSidebar(){document.getElementById('sidebar').classList.remove('ope
 function renderSb(){
   const el=document.getElementById('sb-list');
   if(!chats.length){el.innerHTML='<div class="sb-empty">Чатов пока нет</div>';return;}
-  el.innerHTML=[...chats].sort((a,b)=>(b.updated||0)-(a.updated||0)).map(c=>`<div class="sb-item" onclick="openChat('${c.id}')"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><span class="sb-item-txt">${x(c.title)}</span></div>`).join('');
-}
-function openChat(id){
-  const ch=chats.find(c=>c.id===id);
-  if(!ch)return;
-  isInc=false;
-  document.getElementById('inc-btn').classList.remove('inc-on');
-  document.getElementById('inc-screen').classList.remove('show');
-  activeChatId=ch.id;
-  chatHistory=(ch.history||[]).slice();
-  try{localStorage.setItem(ACTIVE_KEY,activeChatId);}catch(e){}
-  
-  // Clean legacy bad history entries on load
-  try {
-    let cleaned = false;
-    chatHistory = chatHistory.filter(m => {
-      if (!m || !m.content) return true;
-      const bad = /Вложения|вложение \d|Вложение/i;
-      if (bad.test(m.content) && !m.content.includes('Изображение')) {
-        cleaned = true;
-        return false;
-      }
-      return true;
-    });
-    if (cleaned) saveActiveChat();
-  } catch(e){}
-
-
-// === Полная очистка старой истории от "Вложения" при запуске ===
-(function cleanupLegacyHistory(){
-  try {
-    let changed = false;
-    chatHistory = (chatHistory || []).map(m => {
-      if (!m || !m.content) return m;
-      let c = m.content;
-      const wasBad = /вложени|Вложени/i.test(c);
-      c = c.replace(/Вложения/gi, 'Изображение')
-           .replace(/вложение/gi, 'изображение')
-           .replace(/\[Вложение.*?\]/gi, '[Изображение]');
-      if (wasBad && c !== m.content) changed = true;
-      return {...m, content: c};
-    }).filter(Boolean);
-    if (changed) saveActiveChat();
-  } catch(e){}
-})();
-rerenderActiveChat();
-sanitizeAllHistory();
-setTimeout(sanitizeAllHistory, 100);
-setTimeout(sanitizeAllHistory, 400);
-setTimeout(sanitizeAllHistory, 900);
-setTimeout(sanitizeAllHistory, 1800);
-
-  closeSidebar();
+  el.innerHTML=[...chats].reverse().map(c=>`<div class="sb-item" onclick="closeSidebar()"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><span class="sb-item-txt">${x(c.title)}</span></div>`).join('');
 }
 function newChat(){
   closeSidebar();isInc=false;activeChatId=null;chatHistory=[];msgs=[];
-  try{localStorage.removeItem(ACTIVE_KEY);}catch(e){}
   clearPendingFiles();
   if(ta){ta.value='';ta.style.height='auto';}
   document.getElementById('inc-btn').classList.remove('inc-on');
@@ -1547,9 +1359,6 @@ function userAttachmentsHtml(files){
 function send(){
   if(!accessGranted){showAccessDenied('Нет доступа. Откройте бота в Telegram и отправьте /start.');return;}
   const txt=ta.value.trim();
-  sanitizeHistory();
-  sanitizeAllHistory();
-  sanitizeAllHistory();
   const filesToSend=pendingFiles.slice();
   if(!txt&&!filesToSend.length)return;
   ta.value='';ta.style.height='auto';clearPendingFiles();document.getElementById('send-btn').disabled=true;
@@ -1559,20 +1368,11 @@ function send(){
     document.getElementById('inc-screen').classList.remove('show');
     msgEl.style.display='flex';
     activeChatId='c'+Date.now();
-    if(!isInc){
-      let t = (txt || (filesToSend.length ? 'Фото + задание' : 'Новый чат')).replace(/Вложения/gi,'Изображение'); const title = t.slice(0,44) + (t.length>44?'…':'');
-      chats.push({id:activeChatId,title:title,history:[],created:Date.now(),updated:Date.now()});
-      saveChats();
-      try{localStorage.setItem(ACTIVE_KEY,activeChatId);}catch(e){}
-    }
+    if(!isInc)chats.push({id:activeChatId,title:(txt||'Вложения').length>44?(txt||'Вложения').slice(0,44)+'…':(txt||'Вложения')});
   }
   const u=document.createElement('div');
   u.className='msg-row user';
-  let bubbleText = (txt || '').trim();
-  if (!bubbleText && filesToSend.length) bubbleText = 'Изображение с заданием';
-  // Nuclear clean
-  bubbleText = bubbleText.replace(/Вложения/gi,'Изображение').replace(/вложение/gi,'изображение');
-  u.innerHTML=`<div class="user-bubble">${userAttachmentsHtml(filesToSend)}${bubbleText ? x(bubbleText) : ''}</div>`;
+  u.innerHTML=`<div class="user-bubble">${userAttachmentsHtml(filesToSend)}${txt?x(txt):''}</div>`;
   msgEl.appendChild(u);scrollB();
 
   const t=document.createElement('div');
@@ -1598,37 +1398,8 @@ function appendBotText(msgEl,text){
   const b=document.createElement('div');
   b.className='msg-row bot';
   b.dataset.copyText=text;
-  b.innerHTML=`<div class="bot-msg"><div class="bot-text"></div><div class="msg-actions" style="display:none"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
-  msgEl.appendChild(b);
-  const textEl=b.querySelector('.bot-text');
-  const actionsEl=b.querySelector('.msg-actions');
-  const m=document.getElementById('messages');
-  let isTyping=true;
-  function smoothScrollLoop(){
-    if(!m)return;
-    const target=m.scrollHeight-m.clientHeight;
-    const diff=target-m.scrollTop;
-    if(diff>0.5){
-      m.scrollTop+=diff*0.12;
-    }
-    if(isTyping||diff>0.5){
-      requestAnimationFrame(smoothScrollLoop);
-    }
-  }
-  if(m)requestAnimationFrame(smoothScrollLoop);
-  let i=0;
-  function type(){
-    if(i<text.length){
-      textEl.innerHTML=x(text.slice(0,i+1));
-      i++;
-      setTimeout(type,12);
-    }else{
-      textEl.innerHTML=x(text);
-      isTyping=false;
-      if(actionsEl)actionsEl.style.display='flex';
-    }
-  }
-  type();
+  b.innerHTML=`<div class="bot-msg"><div class="bot-text">${x(text)}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
+  msgEl.appendChild(b);scrollB();
 }
 function appendBotImage(msgEl,base64,caption){
   document.getElementById('tr')?.remove();
@@ -1641,92 +1412,37 @@ function appendBotImage(msgEl,base64,caption){
 async function sendToBackend(txt,files,msgEl){
   const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
   try{
-    const attachments = (files && files.length) ? files.map(f => ({
-      kind: f.kind || 'file',
-      name: f.name || 'file',
-      type: f.type || '',
-      data: f.dataUrl || ''
-    })) : [];
-
-    // Build best possible message for backend
-    let userText = (txt || '').trim();
-    let displayMsg = userText;
-    if (attachments.length) {
-      displayMsg = userText 
-        ? '[Изображение] ' + userText 
-        : '[Изображение с заданием]';
-    }
-
-    const payload = {
-      model: modelIdFor(model),
-      history: chatHistory,
-      message: userText || displayMsg,
-      attachments: attachments,
-      // Extra compatibility fields
-      image: attachments.length ? attachments[0].data : undefined,
-      has_image: !!attachments.length
-    };
-
-    // ALWAYS push nice clean message for history
-    let finalUserContent = (userText || '').trim();
-    if (attachments.length) {
-      finalUserContent = finalUserContent || 'Изображение с заданием';
-    }
-    if (!finalUserContent) finalUserContent = 'Изображение с заданием';
-    finalUserContent = finalUserContent.replace(/Вложения/gi,'Изображение').replace(/вложение/gi,'изображение');
-    
-    chatHistory.push({role:'user', content: finalUserContent});
-    sanitizeAllHistory();
-    if (chatHistory.length > 60) chatHistory = chatHistory.slice(-60);
-    saveActiveChat();
-
-    sanitizeAllHistory();
-    const resp = await fetch('/api/chat', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json', 'Authorization': 'tma ' + initData},
-      body: JSON.stringify(payload)
+    const resp=await fetch('/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
+      body:JSON.stringify({model:modelIdFor(model),history:chatHistory,message:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')})
     });
-
-    if (resp.status === 401 || resp.status === 403) {
-      const data = await resp.json().catch(() => ({}));
-      appendBotError(msgEl, data.message || 'Нет доступа. Откройте бота и нажмите /start.');
+    if(resp.status===401||resp.status===403){
+      const data=await resp.json().catch(()=>({}));
+      appendBotError(msgEl,data.message||'Нет доступа. Откройте бота в Telegram и отправьте /start.');
       return;
     }
-
-    if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}));
-      let msg = data.message || data.error || ('Ошибка запроса (HTTP ' + resp.status + ')');
-      if (resp.status >= 500) msg = 'Сервер не смог обработать фото. Попробуйте ещё раз или используйте обычный чат.';
-      let niceErr = 'Ошибка при отправке фото + задания.\n\n' + (msg || 'Неизвестная ошибка');
-if (resp && resp.status) niceErr += ' (HTTP ' + resp.status + ')';
-niceErr += '\n\nВозможно, сервер ещё не обновлён для поддержки attachments из мини-приложения.\nПока фото с текстом работает в обычном чате бота.';
-appendBotError(msgEl, 'Не удалось обработать фото с заданием.\n\n' + (niceErr || 'Ошибка сервера') + 
-    '\n\nВозможно, бэкенд (/api/chat) ещё не обновлён для работы с мини-приложением. ' +
-    'Пока можно отправлять фото + текст через обычный чат бота в Telegram.');
-      return;   // keep user message
+    if(!resp.ok){
+      const data=await resp.json().catch(()=>({}));
+      appendBotError(msgEl,data.message||'Ошибка запроса.');
+      return;
     }
-
-    const data = await resp.json();
-
-    if (data.intent === 'image') {
-      appendBotImage(msgEl, data.image_base64, data.prompt);
-      chatHistory.push({role: 'assistant', content: '[изображение отправлено]'});
-    } else {
-      const reply = data.reply || data.text || '';
-      appendBotText(msgEl, reply);
-      chatHistory.push({role: 'assistant', content: reply});
-      sanitizeAllHistory();
+    const data=await resp.json();
+    if(data.intent==='image'){
+      appendBotImage(msgEl,data.image_base64,data.prompt);
+      chatHistory.push({role:'user',content:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')});
+      chatHistory.push({role:'assistant',content:'[изображение отправлено]'});
+    }else{
+      const reply=data.reply||'';
+      appendBotText(msgEl,reply);
+      chatHistory.push({role:'user',content:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')});
+      chatHistory.push({role:'assistant',content:reply});
     }
-
-    if (chatHistory.length > 60) chatHistory = chatHistory.slice(-60);
-    saveActiveChat();
-
-  } catch (e) {
-    appendBotError(msgEl, 'Не удалось связаться с сервером. Проверьте интернет.');
-    // do NOT remove the user message — user should see what they sent
+    if(chatHistory.length>40)chatHistory=chatHistory.slice(-40);
+  }catch(e){
+    appendBotError(msgEl,'Не удалось связаться с сервером. Проверь подключение.');
   }
 }
-
 
 function cp(btn){
   const msg=btn.closest('.msg-row');
@@ -1740,7 +1456,7 @@ function cp(btn){
     },2000);
   }).catch(()=>{});
 }
-function scrollB(){setTimeout(()=>{const m=document.getElementById('messages');if(m)m.scrollTop=m.scrollHeight;},30);}
+function scrollB(){setTimeout(()=>{const m=document.getElementById('messages');m.scrollTo({top:m.scrollHeight,behavior:'smooth'});},30);}
 function x(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');}
 
 (function(){
@@ -1767,135 +1483,7 @@ function x(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 })();
 
 renderSb();
-
-
-// === SUPER AGGRESSIVE CLEANUP of old "Вложения" garbage ===
-function sanitizeHistory() {
-  try {
-    let changed = false;
-    chatHistory = (chatHistory || []).map(m => {
-      if (!m || typeof m.content !== 'string') return m;
-      let c = m.content;
-      const original = c;
-      c = c.replace(/Вложения/gi, 'Изображение')
-           .replace(/вложение \d+/gi, 'изображение')
-           .replace(/\[Вложение[^\]]*\]/gi, '[Изображение]')
-           .replace(/\[Вложения[^\]]*\]/gi, '[Изображение]');
-      if (c !== original) changed = true;
-      return { ...m, content: c };
-    });
-    if (changed) {
-      saveActiveChat();
-      console.log('[sanitize] Cleaned legacy attachment placeholders');
-    }
-  } catch(e){}
-}
-
-// Run cleanup immediately
-sanitizeHistory();
-setTimeout(sanitizeHistory, 800);
-
-// === Восстановление активного чата на экране при загрузке ===
-function rerenderActiveChat(){
-  // Force clean every time we render history
-  sanitizeAllHistory();
-  chatHistory.forEach(m => { if(m && m.content) m.content = String(m.content).replace(/Вложения/gi,'Изображение').replace(/вложение/gi,'изображение'); });
-  sanitizeAllHistory();
-  if(!activeChatId)return;
-  const msgEl=document.getElementById('messages');
-  if(!msgEl)return;
-  document.getElementById('welcome').style.display='none';
-  document.getElementById('inc-screen').classList.remove('show');
-  msgEl.style.display='flex';
-  msgEl.innerHTML='';
-  sanitizeAllHistory();
-  sanitizeAllHistory();
-  for(const m of chatHistory){
-    const row=document.createElement('div');
-    if(m.role==='user'){
-      row.className='msg-row user';
-      row.innerHTML=`<div class="user-bubble">${x(m.content||'')}</div>`;
-    }else{
-      row.className='msg-row bot';
-      row.dataset.copyText=m.content||'';
-      row.innerHTML=`<div class="bot-msg"><div class="bot-text">${x(m.content||'')}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
-    }
-    msgEl.appendChild(row);
-  }
-  scrollB();
-}
-rerenderActiveChat();
-
-document.addEventListener('visibilitychange',()=>{if(document.hidden)saveActiveChat();});
-window.addEventListener('beforeunload',()=>{saveActiveChat();});
-
-// === Скрытие клавиатуры при тапе вне островка ввода ===
-function hideKeyboardOnOutsideTap(ev){
-  const textarea=document.getElementById('ta');
-  if(!textarea) return;
-  if(document.activeElement!==textarea) return;
-  const inputArea=document.querySelector('.input-area');
-  const sheet=document.getElementById('sheet');
-  const sidebar=document.getElementById('sidebar');
-  const attachStrip=document.getElementById('attach-strip');
-  const target=ev.target;
-  // не скрывать, если тап внутри инпута, шита, сайдбара или стрипа вложений
-  if(inputArea && inputArea.contains(target)) return;
-  if(attachStrip && attachStrip.contains(target)) return;
-  if(sheet && sheet.contains(target) && sheet.classList.contains('open')) return;
-  if(sidebar && sidebar.contains(target) && sidebar.classList.contains('open')) return;
-  textarea.blur();
-}
-document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
-document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();
 
-
-// === ULTIMATE BULLETPROOF CLEANER ===
-function sanitizeAllHistory() {
-  try {
-    if (!Array.isArray(chatHistory)) chatHistory = [];
-    let changed = false;
-    chatHistory = chatHistory.map(m => {
-      if (!m || typeof m.content !== 'string') return m;
-      let c = m.content;
-      const before = c;
-      c = c.replace(/Вложения/gi,'Изображение')
-           .replace(/вложение/gi,'изображение')
-           .replace(/\[Вложение[^\]]*\]/gi,'[Изображение]')
-           .replace(/\[Вложения[^\]]*\]/gi,'[Изображение]')
-           .replace(/вложение\s*\d*/gi,'изображение');
-      if (c !== before) changed = true;
-      return {...m, content: c};
-    });
-    if (changed) saveActiveChat();
-  } catch(e){}
-}
-;
-    });
-    if (changed) saveActiveChat();
-  } catch(e) {}
-}
-;
-    });
-    if (changed) {
-      saveActiveChat();
-    }
-  } catch(e){}
-}
-
-// Run immediately + after load
-sanitizeAllHistory();
-setTimeout(sanitizeAllHistory, 200);
-setTimeout(sanitizeAllHistory, 700);
-setTimeout(sanitizeAllHistory, 1500);
-
-// Hook into send
-const _origSend = window.send;
-if (typeof window.send === 'function') {
-  window.send = function() { sanitizeAllHistory(); return _origSend.apply(this, arguments); };
-}
-
-</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d996a1beb280d3',t:'MTc4MTc3ODMwOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d140ecdc48dc80',t:'MTc4MTY5MDkxMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
