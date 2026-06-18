@@ -1520,13 +1520,46 @@ function appendBotImage(msgEl,base64,caption){
   b.innerHTML=`<div class="bot-msg"><img src="data:image/png;base64,${base64}" style="max-width:100%;border-radius:14px;display:block;margin-bottom:6px;" alt=""><div class="bot-text">${x(caption||'')}</div></div>`;
   msgEl.appendChild(b);scrollB();
 }
+function serializeFilesForBackend(files){
+  return (files||[]).map(f=>({
+    name:f.name||'',
+    type:f.type||'',
+    size:f.size||0,
+    kind:f.kind||(((f.type||'').startsWith('image/'))?'image':'file'),
+    data_url:f.kind==='image'?String(f.dataUrl||''):''
+  }));
+}
+function buildMessageContent(txt,files){
+  const content=[];
+  const prompt=(txt||'').trim();
+  if(prompt)content.push({type:'text',text:prompt});
+  (files||[]).forEach(f=>{
+    if(f.kind==='image'&&f.data_url){
+      content.push({type:'image_url',image_url:{url:f.data_url}});
+    }
+  });
+  if(!content.length){
+    content.push({type:'text',text:'Проанализируй вложение и ответь на русском языке.'});
+  }
+  return content;
+}
 async function sendToBackend(txt,files,msgEl){
   const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+  const serializedFiles=serializeFilesForBackend(files);
+  const userMessage=([txt, serializedFiles.length ? `[Вложения: ${serializedFiles.length}]` : ''].filter(Boolean).join('\n') || 'Вложения');
+  const messageContent=buildMessageContent(txt,serializedFiles);
   try{
     const resp=await fetch('/api/chat',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
-      body:JSON.stringify({model:modelIdFor(model),history:chatHistory,message:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')})
+      body:JSON.stringify({
+        model:modelIdFor(model),
+        history:chatHistory,
+        message:userMessage,
+        files:serializedFiles,
+        message_content:messageContent,
+        has_vision_content:messageContent.some(i=>i.type==='image_url')
+      })
     });
     if(resp.status===401||resp.status===403){
       const data=await resp.json().catch(()=>({}));
