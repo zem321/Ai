@@ -16,7 +16,19 @@ rejected), которой пользуется бот, — то есть дос�
 только у тех, кому admin выдал доступ в самом боте.
 """
 
+import sys
 import os
+
+# Решение проблемы путей импорта в Python (sys.path)
+# Добавляем директорию файла и родительскую директорию в sys.path,
+# чтобы при импорте из папки handlers/ модули keyboards, states и database импортировались без ошибок.
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 import json
 import time
 import hmac
@@ -28,7 +40,7 @@ from aiohttp import web
 import database as db
 
 logger = logging.getLogger(__name__)
-logger.info("webapp_api module loaded: build=auth-enforced-v4")
+logger.info("webapp_api module loaded: build=auth-enforced-v5")
 
 # Динамический импорт с поддержкой различных версий и структур проекта (chat_handler, chat_handler_4 и т.д.)
 try:
