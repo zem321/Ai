@@ -343,23 +343,6 @@ html,body{
 .bot-msg{max-width:90%;padding-left:0;}
 .bot-text{font-size:16px;line-height:1.65;color:var(--text-2);word-break:break-word;}
 .bot-text b,.bot-text strong{font-weight:600;color:var(--text);}
-.bot-text p,.bot-text ul,.bot-text ol,.bot-text blockquote,.bot-text pre,.bot-text h1,.bot-text h2,.bot-text h3,.bot-text h4,.bot-text hr{margin:0 0 12px;}
-.bot-text>:last-child{margin-bottom:0;}
-.bot-text h1,.bot-text h2,.bot-text h3,.bot-text h4{color:var(--text);line-height:1.35;font-weight:600;letter-spacing:-.02em;}
-.bot-text h1{font-size:24px;}
-.bot-text h2{font-size:21px;}
-.bot-text h3{font-size:18px;}
-.bot-text h4{font-size:16px;}
-.bot-text ul,.bot-text ol{padding-left:22px;}
-.bot-text li+li{margin-top:6px;}
-.bot-text a{color:var(--accent);text-decoration:none;border-bottom:1px solid currentColor;}
-.bot-text em{font-style:italic;}
-.bot-text s{text-decoration:line-through;}
-.bot-text blockquote{padding:10px 12px;border-left:3px solid var(--accent);background:var(--surface-2);border-radius:12px;}
-.bot-text code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;font-size:.92em;background:var(--surface-2);padding:2px 6px;border-radius:7px;}
-.bot-text pre{background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:12px 14px;overflow:auto;-webkit-overflow-scrolling:touch;}
-.bot-text pre code{display:block;background:transparent;padding:0;border-radius:0;font-size:13px;line-height:1.6;white-space:pre;}
-.bot-text hr{border:none;height:1px;background:var(--border-2);}
 
 .msg-actions{margin-top:10px;display:flex;gap:6px;}
 
@@ -387,13 +370,11 @@ html,body{
 
 /* === INPUT AREA === */
 .input-area{
-  position:absolute;
-  left:0;right:0;bottom:0;
+  position:relative;
   z-index:20;
   padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 14px);
   background:transparent;
   -webkit-tap-highlight-color:transparent;
-  pointer-events:none;
 }
 .input-card{pointer-events:auto;}
 .input-card{
@@ -1066,7 +1047,7 @@ html,body,.app{
 /* === Final UX tweaks === */
 :root{--bg:#F2EFE8;}
 html,body,.app{background:#F2EFE8 !important;}
-.messages{padding-bottom:118px !important;}
+.messages{padding-bottom:24px !important;}
 
 .sheet{height:228px !important;}
 @media(prefers-color-scheme:dark){
@@ -1396,71 +1377,13 @@ function readFileAsDataURL(file){
     r.readAsDataURL(file);
   });
 }
-function dataUrlSizeBytes(dataUrl){
-  const base64=String(dataUrl||'').split(',')[1]||'';
-  return Math.floor(base64.length*3/4);
-}
-function loadImageElement(dataUrl){
-  return new Promise((resolve,reject)=>{
-    const img=new Image();
-    img.onload=()=>resolve(img);
-    img.onerror=reject;
-    img.src=dataUrl;
-  });
-}
-async function compressImageFile(file){
-  const originalDataUrl=await readFileAsDataURL(file);
-  let img;
-  try{img=await loadImageElement(originalDataUrl);}catch(_){return originalDataUrl;}
-  const MAX_DIM=1280;
-  const MAX_BYTES=700*1024;
-  let w=img.naturalWidth||img.width;
-  let h=img.naturalHeight||img.height;
-  if(!w||!h)return originalDataUrl;
-  const scale=Math.min(1,MAX_DIM/Math.max(w,h));
-  w=Math.max(1,Math.round(w*scale));
-  h=Math.max(1,Math.round(h*scale));
-  const canvas=document.createElement('canvas');
-  const ctx=canvas.getContext('2d',{alpha:false});
-  if(!ctx)return originalDataUrl;
-  let quality=0.92;
-  let attempts=0;
-  let out=originalDataUrl;
-  while(attempts<6){
-    canvas.width=w;
-    canvas.height=h;
-    ctx.fillStyle='#ffffff';
-    ctx.fillRect(0,0,w,h);
-    ctx.drawImage(img,0,0,w,h);
-    out=canvas.toDataURL('image/jpeg',quality);
-    if(dataUrlSizeBytes(out)<=MAX_BYTES)break;
-    if(quality>0.6){
-      quality-=0.08;
-    }else if(Math.max(w,h)>1000){
-      const nw=Math.round(w*0.85);
-      const nh=Math.round(h*0.85);
-      w=Math.max(900,nw);
-      h=Math.max(900,nh);
-    }else{
-      break;
-    }
-    attempts++;
-  }
-  return out;
-}
 async function handleFileSelection(e){
   const files=[...(e.target.files||[])];
   if(!files.length)return;
   for(const file of files){
     const item={name:file.name,type:file.type||'',size:file.size||0,kind:(file.type||'').startsWith('image/')?'image':'file',dataUrl:''};
     if(item.kind==='image'){
-      try{
-        item.dataUrl=await compressImageFile(file);
-        item.type='image/jpeg';
-        item.size=dataUrlSizeBytes(item.dataUrl);
-      }catch(_){
-        try{item.dataUrl=await readFileAsDataURL(file);}catch(__){}
-      }
+      try{item.dataUrl=await readFileAsDataURL(file);}catch(_){}
     }
     pendingFiles.push(item);
   }
@@ -1565,7 +1488,7 @@ function appendBotText(msgEl,text){
       i++;
       setTimeout(type,12);
     }else{
-      textEl.innerHTML=md(text);
+      textEl.innerHTML=x(text);
       isTyping=false;
       if(actionsEl)actionsEl.style.display='flex';
     }
@@ -1580,59 +1503,25 @@ function appendBotImage(msgEl,base64,caption){
   b.innerHTML=`<div class="bot-msg"><img src="data:image/png;base64,${base64}" style="max-width:100%;border-radius:14px;display:block;margin-bottom:6px;" alt=""><div class="bot-text">${x(caption||'')}</div></div>`;
   msgEl.appendChild(b);scrollB();
 }
-function serializeFilesForBackend(files){
-  return (files||[]).map(f=>({
-    name:f.name||'',
-    type:f.type||'',
-    size:f.size||0,
-    kind:f.kind||(((f.type||'').startsWith('image/'))?'image':'file')
-  }));
-}
-function buildMessageContent(txt,files){
-  const content=[];
-  const prompt=(txt||'').trim();
-  if(prompt)content.push({type:'text',text:prompt});
-  (files||[]).forEach(f=>{
-    if(f.kind==='image'&&f.dataUrl){
-      content.push({type:'image_url',image_url:{url:String(f.dataUrl)}});
-    }
-  });
-  if(!content.length){
-    content.push({type:'text',text:'Проанализируй вложение и ответь на русском языке.'});
-  }
-  return content;
-}
 async function sendToBackend(txt,files,msgEl){
   const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
-  const serializedFiles=serializeFilesForBackend(files);
-  const userMessage=([txt, serializedFiles.length ? `[Вложения: ${serializedFiles.length}]` : ''].filter(Boolean).join('\n') || 'Вложения');
-  const messageContent=buildMessageContent(txt,files||[]);
-  const payload={
-    model:modelIdFor(model),
-    history:chatHistory,
-    message:userMessage,
-    files:serializedFiles,
-    message_content:messageContent,
-    has_vision_content:messageContent.some(i=>i.type==='image_url')
-  };
   try{
     const resp=await fetch('/api/chat',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
-      body:JSON.stringify(payload)
+      body:JSON.stringify({model:modelIdFor(model),history:chatHistory,message:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')})
     });
-    const raw=await resp.text();
-    let data={};
-    try{data=raw?JSON.parse(raw):{};}catch(_){data={raw};}
     if(resp.status===401||resp.status===403){
-      appendBotError(msgEl,data.message||`Нет доступа (HTTP ${resp.status}). Откройте бота в Telegram и отправьте /start.`);
+      const data=await resp.json().catch(()=>({}));
+      appendBotError(msgEl,data.message||'Нет доступа. Откройте бота в Telegram и отправьте /start.');
       return;
     }
     if(!resp.ok){
-      const details=data.message||data.detail||data.error||data.raw||'Без деталей';
-      appendBotError(msgEl,`Ошибка запроса (HTTP ${resp.status}): ${details}`);
+      const data=await resp.json().catch(()=>({}));
+      appendBotError(msgEl,data.message||'Ошибка запроса.');
       return;
     }
+    const data=await resp.json();
     if(data.intent==='image'){
       appendBotImage(msgEl,data.image_base64,data.prompt);
       chatHistory.push({role:'user',content:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')});
@@ -1646,7 +1535,7 @@ async function sendToBackend(txt,files,msgEl){
     if(chatHistory.length>60)chatHistory=chatHistory.slice(-60);
     saveActiveChat();
   }catch(e){
-    appendBotError(msgEl,`Не удалось связаться с сервером: ${e?.message||'network error'}`);
+    appendBotError(msgEl,'Не удалось связаться с сервером. Проверь подключение.');
   }
 }
 
@@ -1663,50 +1552,7 @@ function cp(btn){
   }).catch(()=>{});
 }
 function scrollB(){setTimeout(()=>{const m=document.getElementById('messages');if(m)m.scrollTop=m.scrollHeight;},30);}
-function h(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-function renderInlineMd(text){
-  text=String(text??'');
-  const codeTokens=[];
-  text=text.replace(/`([^`\n]+)`/g,(_,code)=>`@@MD_CODE_${codeTokens.push(`<code>${h(code)}</code>`)-1}@@`);
-  text=h(text);
-  text=text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,(_,label,url)=>`<a href=\"${url}\" target=\"_blank\" rel=\"noopener noreferrer\">${label}</a>`);
-  text=text.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
-  text=text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,'$1<em>$2</em>');
-  text=text.replace(/~~([^~\n]+)~~/g,'<s>$1</s>');
-  return text.replace(/@@MD_CODE_(\d+)@@/g,(_,i)=>codeTokens[Number(i)]);
-}
-function md(text){
-  text=String(text??'').replace(/\r\n?/g,'\n');
-  const codeBlocks=[];
-  text=text.replace(/```([a-zA-Z0-9_-]+)?\n?([\s\S]*?)```/g,(_,lang='',code='')=>`\n\n@@MD_BLOCK_${codeBlocks.push({lang,code})-1}@@\n\n`);
-  return text.split(/\n{2,}/).map(block=>{
-    const trimmed=block.trim();
-    if(!trimmed)return '';
-    const blockMatch=trimmed.match(/^@@MD_BLOCK_(\d+)@@$/);
-    if(blockMatch){
-      const item=codeBlocks[Number(blockMatch[1])]||{lang:'',code:''};
-      const lang=item.lang?` class=\"language-${h(item.lang)}\"`:'';
-      return `<pre><code${lang}>${h(String(item.code||'').replace(/^\n+|\n+$/g,''))}</code></pre>`;
-    }
-    if(/^(-{3,}|\*{3,})$/.test(trimmed))return '<hr>';
-    if(/^#{1,6}\s/.test(trimmed)){
-      const level=Math.min(6,(trimmed.match(/^#+/)||[''])[0].length||1);
-      return `<h${level}>${renderInlineMd(trimmed.replace(/^#{1,6}\s*/,''))}</h${level}>`;
-    }
-    const lines=trimmed.split('\n');
-    if(lines.every(line=>/^\s*>\s?/.test(line))){
-      return `<blockquote>${lines.map(line=>renderInlineMd(line.replace(/^\s*>\s?/,''))).join('<br>')}</blockquote>`;
-    }
-    if(lines.every(line=>/^\s*[-*+]\s+/.test(line))){
-      return `<ul>${lines.map(line=>`<li>${renderInlineMd(line.replace(/^\s*[-*+]\s+/,''))}</li>`).join('')}</ul>`;
-    }
-    if(lines.every(line=>/^\s*\d+\.\s+/.test(line))){
-      return `<ol>${lines.map(line=>`<li>${renderInlineMd(line.replace(/^\s*\d+\.\s+/,''))}</li>`).join('')}</ol>`;
-    }
-    return `<p>${renderInlineMd(trimmed).replace(/\n/g,'<br>')}</p>`;
-  }).join('');
-}
-function x(s){return h(s).replace(/\n/g,'<br>');}
+function x(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');}
 
 (function(){
   const closed=document.getElementById('lime-closed');
@@ -1750,7 +1596,7 @@ function rerenderActiveChat(){
     }else{
       row.className='msg-row bot';
       row.dataset.copyText=m.content||'';
-      row.innerHTML=`<div class="bot-msg"><div class="bot-text">${md(m.content||'')}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
+      row.innerHTML=`<div class="bot-msg"><div class="bot-text">${x(m.content||'')}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
     }
     msgEl.appendChild(row);
   }
