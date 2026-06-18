@@ -377,19 +377,16 @@ html,body{
 }
 .bot-text .formula-block {
   text-align: center;
-  font-family: "Times New Roman", Times, serif;
-  font-style: italic;
-  font-size: 18px;
+  font-size: 17px;
   margin: 12px 0;
-  padding: 8px;
+  padding: 10px;
   background-color: rgba(0, 0, 0, 0.02);
-  border-radius: 6px;
+  border-radius: 8px;
+  line-height: 1.5;
 }
 .bot-text .formula-inline {
-  font-family: "Times New Roman", Times, serif;
-  font-style: italic;
-  font-size: 17px;
-  padding: 0 4px;
+  font-size: 16px;
+  padding: 0 2px;
 }
 .bot-text li {
   margin-left: 20px;
@@ -1563,6 +1560,97 @@ function appendBotError(msgEl,text){
   b.innerHTML=`<div class="bot-msg"><div class="bot-text">${x(text)}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
   msgEl.appendChild(b);scrollB();
 }
+function formatMathLaTeX(text) {
+  if (!text) return '';
+  let res = text;
+
+  // Matrix blocks: \begin{pmatrix} a & b \\ c & d \end{pmatrix}
+  res = res.replace(/\\begin\{pmatrix\}([\s\S]*?)\\end\{pmatrix\}/g, (match, contents) => {
+    const rows = contents.trim().split(/\\\\|\\/);
+    const tableRows = rows.map(row => {
+      if (!row.trim()) return '';
+      const cells = row.split('&');
+      const tableCells = cells.map(cell => `<td style="padding: 4px 12px; text-align: center;">${cell.trim()}</td>`).join('');
+      return `<tr>${tableCells}</tr>`;
+    }).join('');
+    return `<table style="border-left: 2px solid var(--text); border-right: 2px solid var(--text); border-radius: 6px; margin: 10px auto; font-family: inherit; font-size: 16px;">${tableRows}</table>`;
+  });
+
+  // Block formulas: $$ ... $$
+  res = res.replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, '<div class="formula-block">$1</div>');
+  // Block formulas: \[ ... \]
+  res = res.replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, '<div class="formula-block">$1</div>');
+
+  // Inline formulas: $ ... $
+  res = res.replace(/\$([^$]+)\$/g, '<span class="formula-inline">$1</span>');
+  // Inline formulas: \( ... \)
+  res = res.replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, '<span class="formula-inline">$1</span>');
+
+  // Fractions: \frac{num}{den}
+  while (res.includes('\\frac')) {
+    let nextFrac = res.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1/$2)');
+    if (nextFrac === res) break;
+    res = nextFrac;
+  }
+
+  // Integrals: \int
+  res = res.replace(/\\int/g, '∫');
+
+  // Subscripts & Superscripts limits:
+  res = res.replace(/_\{([^{}]+)\}\^\{([^{}]+)\}/g, '<sub>$1</sub><sup>$2</sup>');
+  res = res.replace(/\^\{([^{}]+)\}_\{([^{}]+)\}/g, '<sup>$1</sup><sub>$2</sub>');
+
+  // Subscripts: _{text} or _char
+  res = res.replace(/_\{([^{}]+)\}/g, '<sub>$1</sub>');
+  res = res.replace(/_([a-zA-Z0-9])/g, '<sub>$1</sub>');
+
+  // Superscripts: ^{text} or ^char
+  res = res.replace(/\^\{([^{}]+)\}/g, '<sup>$1</sup>');
+  res = res.replace(/\^([a-zA-Z0-9\+\-\=])/g, '<sup>$1</sup>');
+
+  // Infinite: \infty
+  res = res.replace(/\\infty/g, '∞');
+
+  // Sum: \sum
+  res = res.replace(/\\sum/g, '∑');
+
+  // Math symbols
+  res = res.replace(/\\pi/g, 'π');
+  res = res.replace(/\\alpha/g, 'α');
+  res = res.replace(/\\beta/g, 'β');
+  res = res.replace(/\\gamma/g, 'γ');
+  res = res.replace(/\\delta/g, 'δ');
+  res = res.replace(/\\theta/g, 'θ');
+  res = res.replace(/\\lambda/g, 'λ');
+  res = res.replace(/\\sigma/g, 'σ');
+  res = res.replace(/\\phi/g, 'φ');
+  res = res.replace(/\\psi/g, 'ψ');
+  res = res.replace(/\\omega/g, 'ω');
+  res = res.replace(/\\sqrt\s*\{([^{}]+)\}/g, '√$1');
+  res = res.replace(/\\sqrt/g, '√');
+  res = res.replace(/\\pm/g, '±');
+  res = res.replace(/\\mp/g, '∓');
+  res = res.replace(/\\cdot/g, '·');
+  res = res.replace(/\\times/g, '×');
+  res = res.replace(/\\div/g, '÷');
+  res = res.replace(/\\neq/g, '≠');
+  res = res.replace(/\\leq/g, '≤');
+  res = res.replace(/\\geq/g, '≥');
+  res = res.replace(/\\approx/g, '≈');
+  res = res.replace(/\\sin/g, 'sin');
+  res = res.replace(/\\cos/g, 'cos');
+  res = res.replace(/\\tan/g, 'sin/cos');
+  res = res.replace(/\\cot/g, 'cos/sin');
+  res = res.replace(/\\log/g, 'log');
+  res = res.replace(/\\ln/g, 'ln');
+  res = res.replace(/\\lim/g, 'lim');
+  
+  // Remove backslashes for general commands
+  res = res.replace(/\\([a-zA-Z]+)/g, '$1');
+
+  return res;
+}
+
 function md(str) {
   if (!str) return '';
   let html = str;
@@ -1594,13 +1682,8 @@ function md(str) {
     return id;
   });
 
-  // Block formulas: $$ ... $$ or \[ ... \]
-  html = html.replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, '<div class="formula-block">$1</div>');
-  html = html.replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, '<div class="formula-block">$1</div>');
-
-  // Inline formulas: $ ... $ or \( ... \)
-  html = html.replace(/\$([^$]+)\$/g, '<span class="formula-inline">$1</span>');
-  html = html.replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, '<span class="formula-inline">$1</span>');
+  // Format Math and LaTeX Formulas
+  html = formatMathLaTeX(html);
 
   // Match markdown links: [text](url)
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="markdown-link">$1</a>');
@@ -1829,5 +1912,5 @@ function hideKeyboardOnOutsideTap(ev){
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0dc6315cc2a51e0',t:'MTc4MTgwNzY1NQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
