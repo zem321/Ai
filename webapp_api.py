@@ -26,11 +26,41 @@ import inspect
 from urllib.parse import parse_qsl
 from aiohttp import web
 import database as db
-from handlers.chat_handler import call_ai, SYSTEM_PROMPT, trim_history, make_vision_content, MAX_HISTORY
-from handlers.image_handler import generate_image
 
 logger = logging.getLogger(__name__)
-logger.info("webapp_api module loaded: build=auth-enforced-v3")
+logger.info("webapp_api module loaded: build=auth-enforced-v4")
+
+# Динамический импорт с поддержкой различных версий и структур проекта (chat_handler, chat_handler_4 и т.д.)
+try:
+    from handlers.chat_handler import call_ai, SYSTEM_PROMPT, trim_history, make_vision_content, MAX_HISTORY
+    logger.info("Imported chat_handler functions from handlers.chat_handler")
+except ImportError:
+    try:
+        from handlers.chat_handler_4 import call_ai, SYSTEM_PROMPT, trim_history, make_vision_content, MAX_HISTORY
+        logger.info("Imported chat_handler functions from handlers.chat_handler_4")
+    except ImportError:
+        try:
+            from chat_handler import call_ai, SYSTEM_PROMPT, trim_history, make_vision_content, MAX_HISTORY
+            logger.info("Imported chat_handler functions from chat_handler")
+        except ImportError:
+            try:
+                from chat_handler_4 import call_ai, SYSTEM_PROMPT, trim_history, make_vision_content, MAX_HISTORY
+                logger.info("Imported chat_handler functions from chat_handler_4")
+            except ImportError as e:
+                logger.error("Could not import chat_handler functions from any known chat_handler module!")
+                raise e
+
+# Динамический импорт для генератора картинок
+try:
+    from handlers.image_handler import generate_image
+    logger.info("Imported generate_image from handlers.image_handler")
+except ImportError:
+    try:
+        from image_handler import generate_image
+        logger.info("Imported generate_image from image_handler")
+    except ImportError as e:
+        logger.error("Could not import generate_image from any known image_handler module!")
+        raise e
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
@@ -168,7 +198,7 @@ def build_vision_content(text: str, image_url: str):
         kwargs = {}
         # Пробуем связать аргументы по имени
         for p in params:
-            if p in ('image_url', 'url', 'img_url', 'img'):
+            if p in ('image_url', 'url', 'img_url', 'img', 'image_data_url', 'data_url', 'dataUrl'):
                 kwargs[p] = image_url
             elif p in ('text', 'caption', 'prompt', 'message', 'msg'):
                 kwargs[p] = text
@@ -192,7 +222,7 @@ def build_vision_content(text: str, image_url: str):
                 return [{"type": "text", "text": text}, {"type": "image_url", "image_url": {"url": image_url}}]
         elif len(params) >= 2:
             first_param = params[0]
-            if first_param in ('image_url', 'url', 'img_url', 'img'):
+            if first_param in ('image_url', 'url', 'img_url', 'img', 'image_data_url', 'data_url', 'dataUrl'):
                 return make_vision_content(image_url, text)
             else:
                 return make_vision_content(text, image_url)
