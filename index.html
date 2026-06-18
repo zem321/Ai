@@ -343,6 +343,23 @@ html,body{
 .bot-msg{max-width:90%;padding-left:0;}
 .bot-text{font-size:16px;line-height:1.65;color:var(--text-2);word-break:break-word;}
 .bot-text b,.bot-text strong{font-weight:600;color:var(--text);}
+.bot-text p,.bot-text ul,.bot-text ol,.bot-text blockquote,.bot-text pre,.bot-text h1,.bot-text h2,.bot-text h3,.bot-text h4,.bot-text hr{margin:0 0 12px;}
+.bot-text>:last-child{margin-bottom:0;}
+.bot-text h1,.bot-text h2,.bot-text h3,.bot-text h4{color:var(--text);line-height:1.35;font-weight:600;letter-spacing:-.02em;}
+.bot-text h1{font-size:24px;}
+.bot-text h2{font-size:21px;}
+.bot-text h3{font-size:18px;}
+.bot-text h4{font-size:16px;}
+.bot-text ul,.bot-text ol{padding-left:22px;}
+.bot-text li+li{margin-top:6px;}
+.bot-text a{color:var(--accent);text-decoration:none;border-bottom:1px solid currentColor;}
+.bot-text em{font-style:italic;}
+.bot-text s{text-decoration:line-through;}
+.bot-text blockquote{padding:10px 12px;border-left:3px solid var(--accent);background:var(--surface-2);border-radius:12px;}
+.bot-text code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;font-size:.92em;background:var(--surface-2);padding:2px 6px;border-radius:7px;}
+.bot-text pre{background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:12px 14px;overflow:auto;-webkit-overflow-scrolling:touch;}
+.bot-text pre code{display:block;background:transparent;padding:0;border-radius:0;font-size:13px;line-height:1.6;white-space:pre;}
+.bot-text hr{border:none;height:1px;background:var(--border-2);}
 
 .msg-actions{margin-top:10px;display:flex;gap:6px;}
 
@@ -1488,7 +1505,7 @@ function appendBotText(msgEl,text){
       i++;
       setTimeout(type,12);
     }else{
-      textEl.innerHTML=x(text);
+      textEl.innerHTML=md(text);
       isTyping=false;
       if(actionsEl)actionsEl.style.display='flex';
     }
@@ -1552,7 +1569,50 @@ function cp(btn){
   }).catch(()=>{});
 }
 function scrollB(){setTimeout(()=>{const m=document.getElementById('messages');if(m)m.scrollTop=m.scrollHeight;},30);}
-function x(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');}
+function h(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function renderInlineMd(text){
+  text=String(text??'');
+  const codeTokens=[];
+  text=text.replace(/`([^`\n]+)`/g,(_,code)=>`@@MD_CODE_${codeTokens.push(`<code>${h(code)}</code>`)-1}@@`);
+  text=h(text);
+  text=text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,(_,label,url)=>`<a href=\"${url}\" target=\"_blank\" rel=\"noopener noreferrer\">${label}</a>`);
+  text=text.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  text=text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,'$1<em>$2</em>');
+  text=text.replace(/~~([^~\n]+)~~/g,'<s>$1</s>');
+  return text.replace(/@@MD_CODE_(\d+)@@/g,(_,i)=>codeTokens[Number(i)]);
+}
+function md(text){
+  text=String(text??'').replace(/\r\n?/g,'\n');
+  const codeBlocks=[];
+  text=text.replace(/```([a-zA-Z0-9_-]+)?\n?([\s\S]*?)```/g,(_,lang='',code='')=>`\n\n@@MD_BLOCK_${codeBlocks.push({lang,code})-1}@@\n\n`);
+  return text.split(/\n{2,}/).map(block=>{
+    const trimmed=block.trim();
+    if(!trimmed)return '';
+    const blockMatch=trimmed.match(/^@@MD_BLOCK_(\d+)@@$/);
+    if(blockMatch){
+      const item=codeBlocks[Number(blockMatch[1])]||{lang:'',code:''};
+      const lang=item.lang?` class=\"language-${h(item.lang)}\"`:'';
+      return `<pre><code${lang}>${h(String(item.code||'').replace(/^\n+|\n+$/g,''))}</code></pre>`;
+    }
+    if(/^(-{3,}|\*{3,})$/.test(trimmed))return '<hr>';
+    if(/^#{1,6}\s/.test(trimmed)){
+      const level=Math.min(6,(trimmed.match(/^#+/)||[''])[0].length||1);
+      return `<h${level}>${renderInlineMd(trimmed.replace(/^#{1,6}\s*/,''))}</h${level}>`;
+    }
+    const lines=trimmed.split('\n');
+    if(lines.every(line=>/^\s*>\s?/.test(line))){
+      return `<blockquote>${lines.map(line=>renderInlineMd(line.replace(/^\s*>\s?/,''))).join('<br>')}</blockquote>`;
+    }
+    if(lines.every(line=>/^\s*[-*+]\s+/.test(line))){
+      return `<ul>${lines.map(line=>`<li>${renderInlineMd(line.replace(/^\s*[-*+]\s+/,''))}</li>`).join('')}</ul>`;
+    }
+    if(lines.every(line=>/^\s*\d+\.\s+/.test(line))){
+      return `<ol>${lines.map(line=>`<li>${renderInlineMd(line.replace(/^\s*\d+\.\s+/,''))}</li>`).join('')}</ol>`;
+    }
+    return `<p>${renderInlineMd(trimmed).replace(/\n/g,'<br>')}</p>`;
+  }).join('');
+}
+function x(s){return h(s).replace(/\n/g,'<br>');}
 
 (function(){
   const closed=document.getElementById('lime-closed');
@@ -1596,7 +1656,7 @@ function rerenderActiveChat(){
     }else{
       row.className='msg-row bot';
       row.dataset.copyText=m.content||'';
-      row.innerHTML=`<div class="bot-msg"><div class="bot-text">${x(m.content||'')}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
+      row.innerHTML=`<div class="bot-msg"><div class="bot-text">${md(m.content||'')}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
     }
     msgEl.appendChild(row);
   }
