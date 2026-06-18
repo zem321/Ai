@@ -1165,8 +1165,8 @@ document.getElementById('greeting').textContent=gr;
 const ta=document.getElementById('ta');
 const appEl=document.querySelector('.app');
 function getViewportHeight(){
-  if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.viewportHeight){return window.Telegram.WebApp.viewportHeight;}
   if(window.visualViewport)return window.visualViewport.height;
+  if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.viewportHeight){return window.Telegram.WebApp.viewportHeight;}
   return window.innerHeight;
 }
 function lockViewportHeight(){if(appEl)appEl.style.height=getViewportHeight()+'px';}
@@ -1222,7 +1222,6 @@ function saveActiveChat(){
   saveChats();
 }
 chats=loadChats();
-(function(){try{const id=localStorage.getItem(ACTIVE_KEY);if(id){const ch=chats.find(c=>c.id===id);if(ch){activeChatId=ch.id;chatHistory=(ch.history||[]).slice();}}}catch(e){}})();
 pruneOldChats();
 // плановая проверка каждый час, на случай если приложение открыто долго
 setInterval(pruneOldChats,60*60*1000);
