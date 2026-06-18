@@ -1394,13 +1394,71 @@ function readFileAsDataURL(file){
     r.readAsDataURL(file);
   });
 }
+function dataUrlSizeBytes(dataUrl){
+  const base64=String(dataUrl||'').split(',')[1]||'';
+  return Math.floor(base64.length*3/4);
+}
+function loadImageElement(dataUrl){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>resolve(img);
+    img.onerror=reject;
+    img.src=dataUrl;
+  });
+}
+async function compressImageFile(file){
+  const originalDataUrl=await readFileAsDataURL(file);
+  let img;
+  try{img=await loadImageElement(originalDataUrl);}catch(_){return originalDataUrl;}
+  const MAX_DIM=1800;
+  const MAX_BYTES=1.8*1024*1024;
+  let w=img.naturalWidth||img.width;
+  let h=img.naturalHeight||img.height;
+  if(!w||!h)return originalDataUrl;
+  const scale=Math.min(1,MAX_DIM/Math.max(w,h));
+  w=Math.max(1,Math.round(w*scale));
+  h=Math.max(1,Math.round(h*scale));
+  const canvas=document.createElement('canvas');
+  const ctx=canvas.getContext('2d',{alpha:false});
+  if(!ctx)return originalDataUrl;
+  let quality=0.92;
+  let attempts=0;
+  let out=originalDataUrl;
+  while(attempts<6){
+    canvas.width=w;
+    canvas.height=h;
+    ctx.fillStyle='#ffffff';
+    ctx.fillRect(0,0,w,h);
+    ctx.drawImage(img,0,0,w,h);
+    out=canvas.toDataURL('image/jpeg',quality);
+    if(dataUrlSizeBytes(out)<=MAX_BYTES)break;
+    if(quality>0.6){
+      quality-=0.08;
+    }else if(Math.max(w,h)>1000){
+      const nw=Math.round(w*0.85);
+      const nh=Math.round(h*0.85);
+      w=Math.max(900,nw);
+      h=Math.max(900,nh);
+    }else{
+      break;
+    }
+    attempts++;
+  }
+  return out;
+}
 async function handleFileSelection(e){
   const files=[...(e.target.files||[])];
   if(!files.length)return;
   for(const file of files){
     const item={name:file.name,type:file.type||'',size:file.size||0,kind:(file.type||'').startsWith('image/')?'image':'file',dataUrl:''};
     if(item.kind==='image'){
-      try{item.dataUrl=await readFileAsDataURL(file);}catch(_){}
+      try{
+        item.dataUrl=await compressImageFile(file);
+        item.type='image/jpeg';
+        item.size=dataUrlSizeBytes(item.dataUrl);
+      }catch(_){
+        try{item.dataUrl=await readFileAsDataURL(file);}catch(__){}
+      }
     }
     pendingFiles.push(item);
   }
