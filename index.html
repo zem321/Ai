@@ -1505,11 +1505,20 @@ function appendBotImage(msgEl,base64,caption){
 }
 async function sendToBackend(txt,files,msgEl){
   const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+  // Собираем реальные изображения (data:image/...;base64,...), чтобы отправить
+  // их на бэкенд — раньше отправлялся только текст "[Вложения: N]", из-за чего
+  // модель отвечала, что фото не получала.
+  const images=(files||[]).filter(f=>f && f.kind==='image' && f.dataUrl).map(f=>f.dataUrl);
+  // Текстовая часть сообщения. Если текста нет, но есть изображение —
+  // даём модели понятную инструкцию вместо заглушки "[Вложения: N]".
+  const messageText=(txt && txt.trim())
+    ? txt.trim()
+    : (images.length ? 'Проанализируй изображение и ответь, что на нём изображено.' : 'Вложения');
   try{
     const resp=await fetch('/api/chat',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
-      body:JSON.stringify({model:modelIdFor(model),history:chatHistory,message:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')})
+      body:JSON.stringify({model:modelIdFor(model),history:chatHistory,message:messageText,images:images})
     });
     if(resp.status===401||resp.status===403){
       const data=await resp.json().catch(()=>({}));
@@ -1522,14 +1531,15 @@ async function sendToBackend(txt,files,msgEl){
       return;
     }
     const data=await resp.json();
+    const historyUserContent=([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения');
     if(data.intent==='image'){
       appendBotImage(msgEl,data.image_base64,data.prompt);
-      chatHistory.push({role:'user',content:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')});
+      chatHistory.push({role:'user',content:historyUserContent});
       chatHistory.push({role:'assistant',content:'[изображение отправлено]'});
     }else{
       const reply=data.reply||'';
       appendBotText(msgEl,reply);
-      chatHistory.push({role:'user',content:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')});
+      chatHistory.push({role:'user',content:historyUserContent});
       chatHistory.push({role:'assistant',content:reply});
     }
     if(chatHistory.length>60)chatHistory=chatHistory.slice(-60);
