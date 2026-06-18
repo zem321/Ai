@@ -387,11 +387,13 @@ html,body{
 
 /* === INPUT AREA === */
 .input-area{
-  position:relative;
+  position:absolute;
+  left:0;right:0;bottom:0;
   z-index:20;
   padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 14px);
   background:transparent;
   -webkit-tap-highlight-color:transparent;
+  pointer-events:none;
 }
 .input-card{pointer-events:auto;}
 .input-card{
@@ -1064,7 +1066,7 @@ html,body,.app{
 /* === Final UX tweaks === */
 :root{--bg:#F2EFE8;}
 html,body,.app{background:#F2EFE8 !important;}
-.messages{padding-bottom:24px !important;}
+.messages{padding-bottom:118px !important;}
 
 .sheet{height:228px !important;}
 @media(prefers-color-scheme:dark){
@@ -1410,8 +1412,8 @@ async function compressImageFile(file){
   const originalDataUrl=await readFileAsDataURL(file);
   let img;
   try{img=await loadImageElement(originalDataUrl);}catch(_){return originalDataUrl;}
-  const MAX_DIM=1800;
-  const MAX_BYTES=1.8*1024*1024;
+  const MAX_DIM=1280;
+  const MAX_BYTES=700*1024;
   let w=img.naturalWidth||img.width;
   let h=img.naturalHeight||img.height;
   if(!w||!h)return originalDataUrl;
@@ -1583,8 +1585,7 @@ function serializeFilesForBackend(files){
     name:f.name||'',
     type:f.type||'',
     size:f.size||0,
-    kind:f.kind||(((f.type||'').startsWith('image/'))?'image':'file'),
-    data_url:f.kind==='image'?String(f.dataUrl||''):''
+    kind:f.kind||(((f.type||'').startsWith('image/'))?'image':'file')
   }));
 }
 function buildMessageContent(txt,files){
@@ -1592,8 +1593,8 @@ function buildMessageContent(txt,files){
   const prompt=(txt||'').trim();
   if(prompt)content.push({type:'text',text:prompt});
   (files||[]).forEach(f=>{
-    if(f.kind==='image'&&f.data_url){
-      content.push({type:'image_url',image_url:{url:f.data_url}});
+    if(f.kind==='image'&&f.dataUrl){
+      content.push({type:'image_url',image_url:{url:String(f.dataUrl)}});
     }
   });
   if(!content.length){
@@ -1605,7 +1606,7 @@ async function sendToBackend(txt,files,msgEl){
   const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
   const serializedFiles=serializeFilesForBackend(files);
   const userMessage=([txt, serializedFiles.length ? `[Вложения: ${serializedFiles.length}]` : ''].filter(Boolean).join('\n') || 'Вложения');
-  const messageContent=buildMessageContent(txt,serializedFiles);
+  const messageContent=buildMessageContent(txt,files||[]);
   const payload={
     model:modelIdFor(model),
     history:chatHistory,
