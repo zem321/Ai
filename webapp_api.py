@@ -369,6 +369,13 @@ async def api_image(request: web.Request) -> web.Response:
 
 def setup_webapp_routes(app: web.Application) -> None:
     """Регистрирует все API-роуты мини-аппа в существующем aiohttp Application."""
+    # Увеличиваем лимит размера входящих запросов до 30 МБ, чтобы поддерживать большие фото без ошибок 413
+    try:
+        app._client_max_size = 1024 * 1024 * 30
+        logger.info("webapp_api: aiohttp client_max_size increased to 30MB successfully")
+    except Exception as e:
+        logger.warning("webapp_api: failed to increase client_max_size: %r", e)
+
     app.router.add_get("/api/me", api_me)
     app.router.add_post("/api/chat", api_chat)
     app.router.add_post("/api/image", api_image)
