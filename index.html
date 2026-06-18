@@ -124,8 +124,8 @@ html,body{
 .liquid-glass-circle{
   position:relative;overflow:hidden;
   background:linear-gradient(160deg,rgba(255,255,255,.28) 0%,rgba(255,255,255,.10) 45%,rgba(255,255,255,.20) 100%);
-  backdrop-filter:blur(32px) saturate(220%) brightness(1.08);
-  -webkit-backdrop-filter:blur(32px) saturate(220%) brightness(1.08);
+  backdrop-filter:blur(2px) saturate(102%) brightness(.90);
+  -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90);
   border:1.2px solid rgba(255,255,255,.55);
   box-shadow:
     0 4px 16px rgba(0,0,0,.08),
@@ -179,8 +179,8 @@ html,body{
 .liquid-glass-pill{
   position:relative;overflow:hidden;
   background:linear-gradient(160deg,rgba(255,255,255,.25) 0%,rgba(255,255,255,.08) 45%,rgba(255,255,255,.18) 100%);
-  backdrop-filter:blur(26px) saturate(210%) brightness(1.06);
-  -webkit-backdrop-filter:blur(26px) saturate(210%) brightness(1.06);
+  backdrop-filter:blur(2px) saturate(102%) brightness(.90);
+  -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90);
   border:1.1px solid rgba(255,255,255,.50);
   box-shadow:
     0 3px 12px rgba(0,0,0,.07),
@@ -226,8 +226,8 @@ html,body{
 .liquid-glass-card{
   position:relative;overflow:hidden;
   background:linear-gradient(160deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,.06) 45%,rgba(255,255,255,.16) 100%);
-  backdrop-filter:blur(24px) saturate(200%) brightness(1.05);
-  -webkit-backdrop-filter:blur(24px) saturate(200%) brightness(1.05);
+  backdrop-filter:blur(2px) saturate(102%) brightness(.90);
+  -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90);
   border:1.1px solid rgba(255,255,255,.48);
   box-shadow:
     0 3px 14px rgba(0,0,0,.07),
@@ -1110,6 +1110,18 @@ html,body,.app{background:#F2EFE8 !important;}
 @media(prefers-color-scheme:dark){
   :root{--bg:#111110;}
   html,body,.app{background:#111110 !important;}
+  .top-btn,
+  .input-card,
+  .input-card:focus-within,
+  .pill-plus,
+  .pill-model,
+  .liquid-glass-circle,
+  .liquid-glass-pill,
+  .liquid-glass-card {
+    border: none !important;
+    border-color: transparent !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,.45) !important;
+  }
 }
 
 </style>
@@ -1910,5 +1922,5 @@ function hideKeyboardOnOutsideTap(ev){
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0dc901cdd527a81',t:'MTc4MTgwOTQ5OQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0dc9951ed22f5f7',t:'MTc4MTgwOTg3Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
