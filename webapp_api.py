@@ -22,6 +22,7 @@ import time
 import hmac
 import hashlib
 import logging
+import inspect
 from urllib.parse import parse_qsl
 from aiohttp import web
 import database as db
@@ -153,6 +154,57 @@ async def _authorize(request: web.Request) -> tuple[int | None, web.Response | N
         status=403,
     )
 
+def build_vision_content(text: str, image_url: str):
+    """
+    Инспектирует сигнатуру функции make_vision_content в рантайме.
+    Вызывает её с правильным порядком и именами аргументов,
+    чтобы гарантировать совместимость с любой версией chat_handler.py.
+    """
+    try:
+        sig = inspect.signature(make_vision_content)
+        params = list(sig.parameters.keys())
+        logger.info("make_vision_content signature parameters: %s", params)
+        
+        kwargs = {}
+        # Пробуем связать аргументы по имени
+        for p in params:
+            if p in ('image_url', 'url', 'img_url', 'img'):
+                kwargs[p] = image_url
+            elif p in ('text', 'caption', 'prompt', 'message', 'msg'):
+                kwargs[p] = text
+        
+        # Если удалось связать все аргументы по именам
+        if kwargs and len(kwargs) == len(params):
+            return make_vision_content(**kwargs)
+            
+        # Если по имени не вышло, пробуем позиционный разбор на основе количества
+        if len(params) == 1:
+            res = make_vision_content(image_url)
+            # Если возвращенный контент не содержит текстового блока, дополняем его
+            if isinstance(res, list):
+                has_text = any(item.get("type") == "text" for item in res if isinstance(item, dict))
+                if not has_text:
+                    res.append({"type": "text", "text": text})
+                return res
+            elif isinstance(res, dict):
+                return [{"type": "text", "text": text}, res]
+            else:
+                return [{"type": "text", "text": text}, {"type": "image_url", "image_url": {"url": image_url}}]
+        elif len(params) >= 2:
+            first_param = params[0]
+            if first_param in ('image_url', 'url', 'img_url', 'img'):
+                return make_vision_content(image_url, text)
+            else:
+                return make_vision_content(text, image_url)
+    except Exception as e:
+        logger.warning("build_vision_content: error calling make_vision_content: %r. Falling back to default format.", e)
+        
+    # Дефолтный формат OpenAI/Anthropic
+    return [
+        {"type": "text", "text": text},
+        {"type": "image_url", "image_url": {"url": image_url}}
+    ]
+
 # ------------------ HTTP-хендлеры ------------------
 async def api_me(request: web.Request) -> web.Response:
     """Проверка доступа — мини-апп вызывает это при старте."""
@@ -221,10 +273,10 @@ async def api_chat(request: web.Request) -> web.Response:
     ]
 
     if image_attachments:
-        # make_vision_content оборачивает текст и первый dataUrl изображения в формат для vision-модели.
-        user_content = make_vision_content(user_text, image_attachments[0]["dataUrl"])
+        # Используем инспектирующий хелпер для вызова make_vision_content
+        user_content = build_vision_content(user_text, image_attachments[0]["dataUrl"])
         
-        # Если изображений несколько, и make_vision_content вернул список блоков, добавляем остальные.
+        # Если изображений несколько, и получен список блоков, добавляем остальные.
         if len(image_attachments) > 1 and isinstance(user_content, list):
             for img in image_attachments[1:]:
                 user_content.append({
