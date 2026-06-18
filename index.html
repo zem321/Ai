@@ -367,6 +367,30 @@ html,body{
   border-radius: 0;
   color: var(--text-2);
 }
+.bot-text .markdown-link {
+  color: var(--accent);
+  text-decoration: underline;
+  font-weight: 500;
+}
+.bot-text .markdown-link:hover {
+  color: var(--accent-2);
+}
+.bot-text .formula-block {
+  text-align: center;
+  font-family: "Times New Roman", Times, serif;
+  font-style: italic;
+  font-size: 18px;
+  margin: 12px 0;
+  padding: 8px;
+  background-color: rgba(0, 0, 0, 0.02);
+  border-radius: 6px;
+}
+.bot-text .formula-inline {
+  font-family: "Times New Roman", Times, serif;
+  font-style: italic;
+  font-size: 17px;
+  padding: 0 4px;
+}
 .bot-text li {
   margin-left: 20px;
   margin-bottom: 4px;
@@ -404,11 +428,15 @@ html,body{
 
 /* === INPUT AREA === */
 .input-area{
-  position:relative;
+  position:absolute;
+  bottom:0;
+  left:0;
+  right:0;
   z-index:20;
-  padding:6px 12px 12px;
+  padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 14px);
   background:transparent;
   -webkit-tap-highlight-color:transparent;
+  pointer-events:none;
 }
 .input-card{pointer-events:auto;}
 .input-card{
@@ -1081,7 +1109,7 @@ html,body,.app{
 /* === Final UX tweaks === */
 :root{--bg:#F2EFE8;}
 html,body,.app{background:#F2EFE8 !important;}
-.messages{padding-bottom:24px !important;}
+.messages{padding-bottom:110px !important;}
 
 .sheet{height:228px !important;}
 @media(prefers-color-scheme:dark){
@@ -1545,18 +1573,39 @@ function md(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-  // Match block code with language: ```python ... ``` or ``` ... ```
+  // Extract block code: ``` ... ```
+  const codeBlocks = [];
   html = html.replace(/```(?:[a-zA-Z0-9\-]*)\n([\s\S]*?)```/g, (match, code) => {
-    return `<pre class="code-block"><code>${code.trim()}</code></pre>`;
+    const id = `##BLOCK_CODE_PLACEHOLDER_${codeBlocks.length}##`;
+    codeBlocks.push(`<pre class="code-block"><code>${code.trim()}</code></pre>`);
+    return id;
   });
   html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
-    return `<pre class="code-block"><code>${code.trim()}</code></pre>`;
+    const id = `##BLOCK_CODE_PLACEHOLDER_${codeBlocks.length}##`;
+    codeBlocks.push(`<pre class="code-block"><code>${code.trim()}</code></pre>`);
+    return id;
   });
 
-  // Inline code: `code`
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Extract inline code: `code`
+  const inlineCodes = [];
+  html = html.replace(/`([^`]+)`/g, (match, code) => {
+    const id = `##INLINE_CODE_PLACEHOLDER_${inlineCodes.length}##`;
+    inlineCodes.push(`<code>${code}</code>`);
+    return id;
+  });
 
-  // Bold-italic: ***text*** or ___text___
+  // Block formulas: $$ ... $$ or \[ ... \]
+  html = html.replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, '<div class="formula-block">$1</div>');
+  html = html.replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, '<div class="formula-block">$1</div>');
+
+  // Inline formulas: $ ... $ or \( ... \)
+  html = html.replace(/\$([^$]+)\$/g, '<span class="formula-inline">$1</span>');
+  html = html.replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, '<span class="formula-inline">$1</span>');
+
+  // Match markdown links: [text](url)
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="markdown-link">$1</a>');
+
+  // Bold-italic: ***text***
   html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
 
   // Bold: **text**
@@ -1573,14 +1622,18 @@ function md(str) {
   // Lists: lines starting with optional space and * or -
   html = html.replace(/^\s*[\*\-]\s+(.*$)/gim, '<li>$1</li>');
 
-  // Handle newlines: replace \n with <br>, except inside <pre> blocks
-  let parts = html.split(/(<pre[\s\S]*?<\/pre>)/);
-  for (let idx = 0; idx < parts.length; idx++) {
-    if (!parts[idx].startsWith('<pre')) {
-      parts[idx] = parts[idx].replace(/\n/g, '<br>');
-    }
+  // Handle newlines: replace \n with <br>
+  html = html.replace(/\n/g, '<br>');
+
+  // Restore inline codes
+  for (let idx = 0; idx < inlineCodes.length; idx++) {
+    html = html.replace(`##INLINE_CODE_PLACEHOLDER_${idx}##`, inlineCodes[idx]);
   }
-  html = parts.join('');
+
+  // Restore block codes
+  for (let idx = 0; idx < codeBlocks.length; idx++) {
+    html = html.replace(`##BLOCK_CODE_PLACEHOLDER_${idx}##`, codeBlocks[idx]);
+  }
 
   return html;
 }
@@ -1776,5 +1829,5 @@ function hideKeyboardOnOutsideTap(ev){
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0dc6315cc2a51e0',t:'MTc4MTgwNzY1NQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
