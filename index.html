@@ -1509,7 +1509,12 @@ async function sendToBackend(txt,files,msgEl){
     const resp=await fetch('/api/chat',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
-      body:JSON.stringify({model:modelIdFor(model),history:chatHistory,message:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')})
+      body:JSON.stringify({
+        model:modelIdFor(model),
+        history:chatHistory,
+        message:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения'),
+        attachments: files.map(f => ({name:f.name, type:f.type, dataUrl:f.dataUrl}))
+      })
     });
     if(resp.status===401||resp.status===403){
       const data=await resp.json().catch(()=>({}));
