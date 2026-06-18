@@ -1548,30 +1548,32 @@ async function sendToBackend(txt,files,msgEl){
   const serializedFiles=serializeFilesForBackend(files);
   const userMessage=([txt, serializedFiles.length ? `[Вложения: ${serializedFiles.length}]` : ''].filter(Boolean).join('\n') || 'Вложения');
   const messageContent=buildMessageContent(txt,serializedFiles);
+  const payload={
+    model:modelIdFor(model),
+    history:chatHistory,
+    message:userMessage,
+    files:serializedFiles,
+    message_content:messageContent,
+    has_vision_content:messageContent.some(i=>i.type==='image_url')
+  };
   try{
     const resp=await fetch('/api/chat',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
-      body:JSON.stringify({
-        model:modelIdFor(model),
-        history:chatHistory,
-        message:userMessage,
-        files:serializedFiles,
-        message_content:messageContent,
-        has_vision_content:messageContent.some(i=>i.type==='image_url')
-      })
+      body:JSON.stringify(payload)
     });
+    const raw=await resp.text();
+    let data={};
+    try{data=raw?JSON.parse(raw):{};}catch(_){data={raw};}
     if(resp.status===401||resp.status===403){
-      const data=await resp.json().catch(()=>({}));
-      appendBotError(msgEl,data.message||'Нет доступа. Откройте бота в Telegram и отправьте /start.');
+      appendBotError(msgEl,data.message||`Нет доступа (HTTP ${resp.status}). Откройте бота в Telegram и отправьте /start.`);
       return;
     }
     if(!resp.ok){
-      const data=await resp.json().catch(()=>({}));
-      appendBotError(msgEl,data.message||'Ошибка запроса.');
+      const details=data.message||data.detail||data.error||data.raw||'Без деталей';
+      appendBotError(msgEl,`Ошибка запроса (HTTP ${resp.status}): ${details}`);
       return;
     }
-    const data=await resp.json();
     if(data.intent==='image'){
       appendBotImage(msgEl,data.image_base64,data.prompt);
       chatHistory.push({role:'user',content:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')});
@@ -1585,7 +1587,7 @@ async function sendToBackend(txt,files,msgEl){
     if(chatHistory.length>60)chatHistory=chatHistory.slice(-60);
     saveActiveChat();
   }catch(e){
-    appendBotError(msgEl,'Не удалось связаться с сервером. Проверь подключение.');
+    appendBotError(msgEl,`Не удалось связаться с сервером: ${e?.message||'network error'}`);
   }
 }
 
