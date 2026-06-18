@@ -370,12 +370,10 @@ html,body{
 
 /* === INPUT AREA === */
 .input-area{
-  position:absolute;
-  left:0;right:0;bottom:0;
+  position:relative;
   z-index:20;
   padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 14px);
   background:transparent;
-  pointer-events:none;
   -webkit-tap-highlight-color:transparent;
 }
 .input-card{pointer-events:auto;}
@@ -1049,7 +1047,7 @@ html,body,.app{
 /* === Final UX tweaks === */
 :root{--bg:#F2EFE8;}
 html,body,.app{background:#F2EFE8 !important;}
-.messages{padding-bottom:240px !important;}
+.messages{padding-bottom:24px !important;}
 
 .sheet{height:228px !important;}
 @media(prefers-color-scheme:dark){
@@ -1465,8 +1463,26 @@ function appendBotText(msgEl,text){
   const b=document.createElement('div');
   b.className='msg-row bot';
   b.dataset.copyText=text;
-  b.innerHTML=`<div class="bot-msg"><div class="bot-text">${x(text)}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
-  msgEl.appendChild(b);scrollB();
+  b.innerHTML=`<div class="bot-msg"><div class="bot-text"></div><div class="msg-actions" style="display:none"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
+  msgEl.appendChild(b);
+  const textEl=b.querySelector('.bot-text');
+  const actionsEl=b.querySelector('.msg-actions');
+  let i=0;
+  function type(){
+    if(i<text.length){
+      textEl.innerHTML=x(text.slice(0,i+1));
+      i++;
+      const m=document.getElementById('messages');
+      if(m)m.scrollTop=m.scrollHeight;
+      setTimeout(type,12);
+    }else{
+      textEl.innerHTML=x(text);
+      if(actionsEl)actionsEl.style.display='flex';
+      const m=document.getElementById('messages');
+      if(m)m.scrollTop=m.scrollHeight;
+    }
+  }
+  type();
 }
 function appendBotImage(msgEl,base64,caption){
   document.getElementById('tr')?.remove();
@@ -1600,5 +1616,5 @@ function hideKeyboardOnOutsideTap(ev){
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8881e6b22134a',t:'MTc4MTc2NzIyOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8914e3a650cba',t:'MTc4MTc2NzYwNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
