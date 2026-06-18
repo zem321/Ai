@@ -343,6 +343,40 @@ html,body{
 .bot-msg{max-width:90%;padding-left:0;}
 .bot-text{font-size:16px;line-height:1.65;color:var(--text-2);word-break:break-word;}
 .bot-text b,.bot-text strong{font-weight:600;color:var(--text);}
+.bot-text code {
+  font-family: 'Courier New', Courier, monospace;
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 14px;
+  color: var(--accent);
+}
+.bot-text pre.code-block {
+  font-family: 'Courier New', Courier, monospace;
+  background-color: rgba(0, 0, 0, 0.04);
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  overflow-x: auto;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+}
+.bot-text pre.code-block code {
+  background-color: transparent;
+  padding: 0;
+  border-radius: 0;
+  color: var(--text-2);
+}
+.bot-text li {
+  margin-left: 20px;
+  margin-bottom: 4px;
+}
+.bot-text h1, .bot-text h2, .bot-text h3 {
+  margin-top: 12px;
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: var(--text);
+}
 
 .msg-actions{margin-top:10px;display:flex;gap:6px;}
 
@@ -372,7 +406,7 @@ html,body{
 .input-area{
   position:relative;
   z-index:20;
-  padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 14px);
+  padding:6px 12px 12px;
   background:transparent;
   -webkit-tap-highlight-color:transparent;
 }
@@ -1501,6 +1535,56 @@ function appendBotError(msgEl,text){
   b.innerHTML=`<div class="bot-msg"><div class="bot-text">${x(text)}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
   msgEl.appendChild(b);scrollB();
 }
+function md(str) {
+  if (!str) return '';
+  let html = str;
+
+  // Escape HTML characters to prevent XSS
+  html = html
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Match block code with language: ```python ... ``` or ``` ... ```
+  html = html.replace(/```(?:[a-zA-Z0-9\-]*)\n([\s\S]*?)```/g, (match, code) => {
+    return `<pre class="code-block"><code>${code.trim()}</code></pre>`;
+  });
+  html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
+    return `<pre class="code-block"><code>${code.trim()}</code></pre>`;
+  });
+
+  // Inline code: `code`
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Bold-italic: ***text*** or ___text___
+  html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+
+  // Bold: **text**
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+  // Italics: *text*
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+  // Headers: ###, ##, #
+  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+  html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+  html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+
+  // Lists: lines starting with optional space and * or -
+  html = html.replace(/^\s*[\*\-]\s+(.*$)/gim, '<li>$1</li>');
+
+  // Handle newlines: replace \n with <br>, except inside <pre> blocks
+  let parts = html.split(/(<pre[\s\S]*?<\/pre>)/);
+  for (let idx = 0; idx < parts.length; idx++) {
+    if (!parts[idx].startsWith('<pre')) {
+      parts[idx] = parts[idx].replace(/\n/g, '<br>');
+    }
+  }
+  html = parts.join('');
+
+  return html;
+}
+
 function appendBotText(msgEl,text){
   document.getElementById('tr')?.remove();
   const b=document.createElement('div');
@@ -1512,14 +1596,30 @@ function appendBotText(msgEl,text){
   const actionsEl=b.querySelector('.msg-actions');
   const m=document.getElementById('messages');
   let isTyping=true;
+  let userHasScrolledUp=false;
+
+  const onScrollHandler = () => {
+    if (isTyping) {
+      const isAtBottom = (m.scrollHeight - m.clientHeight - m.scrollTop) < 60;
+      if (!isAtBottom) {
+        userHasScrolledUp = true;
+      } else {
+        userHasScrolledUp = false;
+      }
+    }
+  };
+  if (m) m.addEventListener('scroll', onScrollHandler);
+
   function smoothScrollLoop(){
     if(!m)return;
-    const target=m.scrollHeight-m.clientHeight;
-    const diff=target-m.scrollTop;
-    if(diff>0.5){
-      m.scrollTop+=diff*0.12;
+    if (!userHasScrolledUp) {
+      const target=m.scrollHeight-m.clientHeight;
+      const diff=target-m.scrollTop;
+      if(diff>0.5){
+        m.scrollTop+=diff*0.12;
+      }
     }
-    if(isTyping||diff>0.5){
+    if(isTyping){
       requestAnimationFrame(smoothScrollLoop);
     }
   }
@@ -1527,12 +1627,13 @@ function appendBotText(msgEl,text){
   let i=0;
   function type(){
     if(i<text.length){
-      textEl.innerHTML=x(text.slice(0,i+1));
+      textEl.innerHTML=md(text.slice(0,i+1));
       i++;
       setTimeout(type,12);
     }else{
-      textEl.innerHTML=x(text);
+      textEl.innerHTML=md(text);
       isTyping=false;
+      if (m) m.removeEventListener('scroll', onScrollHandler);
       if(actionsEl)actionsEl.style.display='flex';
     }
   }
@@ -1644,7 +1745,7 @@ function rerenderActiveChat(){
     }else{
       row.className='msg-row bot';
       row.dataset.copyText=m.content||'';
-      row.innerHTML=`<div class="bot-msg"><div class="bot-text">${x(m.content||'')}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
+      row.innerHTML=`<div class="bot-msg"><div class="bot-text">${md(m.content||'')}</div><div class="msg-actions"><button class="copy-btn" onclick="cp(this)"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button></div></div>`;
     }
     msgEl.appendChild(row);
   }
@@ -1675,5 +1776,5 @@ function hideKeyboardOnOutsideTap(ev){
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0dbe448edf3958c',t:'MTc4MTgwMjQ2MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
