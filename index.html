@@ -338,7 +338,10 @@ html,body{
   font-size:16px;line-height:1.5;
   color:var(--text);word-break:break-word;
 }
-.bot-msg{max-width:90%;padding-left:0;}
+.bot-msg{
+  max-width:90%;padding-left:0;
+  transition:max-height 0.25s cubic-bezier(0.1, 0.76, 0.55, 0.94);
+}
 .bot-text{font-size:16px;line-height:1.65;color:var(--text-2);word-break:break-word;}
 .bot-text b,.bot-text strong{font-weight:600;color:var(--text);}
 .bot-text code {
@@ -728,7 +731,7 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
   .ms-item:active{background:rgba(255,255,255,.09);}
   .ms-name{color:var(--text);}
   .ms-desc{color:var(--sub);}
-  .ms-sep{background:rgba(255,255,255,.065);}
+  .ms-sep{background:rgba(0,0,0,.35) !important;}
 }
 
 /* Legacy sheet styles — kept for compatibility but unused */
@@ -1745,6 +1748,19 @@ function appendBotText(msgEl,text){
   let isTyping=true;
   let userHasScrolledUp=false;
 
+  // Move or create the scroll spacer at the very bottom
+  let spacer = document.getElementById('scroll-spacer');
+  if (!spacer) {
+    spacer = document.createElement('div');
+    spacer.id = 'scroll-spacer';
+    spacer.style.height = '110px';
+    spacer.style.flexShrink = '0';
+    msgEl.appendChild(spacer);
+  } else {
+    spacer.style.height = '110px';
+    msgEl.appendChild(spacer);
+  }
+
   const onScrollHandler = () => {
     if (isTyping) {
       const isAtBottom = (m.scrollHeight - m.clientHeight - m.scrollTop) < 60;
@@ -1767,7 +1783,17 @@ function appendBotText(msgEl,text){
       const currentBottom = bRect.bottom - mRect.top;
       if (currentBottom > targetBottom) {
         const scrollDiff = currentBottom - targetBottom;
+        const oldScroll = m.scrollTop;
         m.scrollTop += scrollDiff;
+        
+        // If we hit the scrollbar limit (e.g. at the beginning of the chat), expand the bottom spacer
+        const scrolled = m.scrollTop - oldScroll;
+        if (scrolled < scrollDiff) {
+          const remaining = scrollDiff - scrolled;
+          const currentSpacerHeight = parseFloat(spacer.style.height) || 110;
+          spacer.style.height = (currentSpacerHeight + remaining) + 'px';
+          m.scrollTop += remaining;
+        }
       }
     }
     if(isTyping){
@@ -1779,10 +1805,23 @@ function appendBotText(msgEl,text){
   function type(){
     if(i<text.length){
       textEl.innerHTML=md(text.slice(0,i+1));
+      
+      // Smooth typing transition: dynamically expand max-height
+      const botMsg = b.querySelector('.bot-msg');
+      if (botMsg) {
+        botMsg.style.overflow = 'hidden';
+        botMsg.style.maxHeight = botMsg.scrollHeight + 'px';
+      }
+      
       i++;
       setTimeout(type,12);
     }else{
       textEl.innerHTML=md(text);
+      const botMsg = b.querySelector('.bot-msg');
+      if (botMsg) {
+        botMsg.style.maxHeight = 'none';
+        botMsg.style.overflow = 'visible';
+      }
       isTyping=false;
       if (m) m.removeEventListener('scroll', onScrollHandler);
       if(actionsEl)actionsEl.style.display='flex';
