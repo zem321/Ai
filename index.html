@@ -1755,8 +1755,10 @@ function appendBotText(msgEl,text){
     spacer.id = 'scroll-spacer';
     spacer.style.height = '110px';
     spacer.style.flexShrink = '0';
+    spacer.style.transition = 'none';
     msgEl.appendChild(spacer);
   } else {
+    spacer.style.transition = 'none';
     spacer.style.height = '110px';
     msgEl.appendChild(spacer);
   }
@@ -1831,6 +1833,10 @@ function appendBotText(msgEl,text){
         botMsg.style.overflow = 'visible';
       }
       isTyping=false;
+      if (spacer) {
+        spacer.style.transition = 'height 0.3s ease-out';
+        spacer.style.height = '0px';
+      }
       if (m) {
         m.removeEventListener('touchstart', onUserScrollAction);
         m.removeEventListener('touchmove', onUserScrollAction);
