@@ -108,7 +108,6 @@ html,body{
   max-width:430px;margin:0 auto;
   position:relative;
   overflow:hidden;
-  transition:height 0.3s cubic-bezier(0.1, 0.76, 0.55, 0.94);
 }
 
 /* === LIQUID GLASS SYSTEM === */
@@ -124,8 +123,8 @@ html,body{
 .liquid-glass-circle{
   position:relative;overflow:hidden;
   background:linear-gradient(160deg,rgba(255,255,255,.28) 0%,rgba(255,255,255,.10) 45%,rgba(255,255,255,.20) 100%);
-  backdrop-filter:blur(2px) saturate(102%) brightness(.90);
-  -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90);
+  backdrop-filter:blur(32px) saturate(220%) brightness(1.08);
+  -webkit-backdrop-filter:blur(32px) saturate(220%) brightness(1.08);
   border:1.2px solid rgba(255,255,255,.55);
   box-shadow:
     0 4px 16px rgba(0,0,0,.08),
@@ -157,13 +156,14 @@ html,body{
 @media(prefers-color-scheme:dark){
   .liquid-glass-circle{
     background:linear-gradient(160deg,rgba(255,255,255,.10) 0%,rgba(255,255,255,.03) 45%,rgba(255,255,255,.08) 100%);
-    border-color:transparent;
+    border-color:rgba(255,255,255,.14);
     box-shadow:
       0 4px 20px rgba(0,0,0,.45),
       0 1px 3px rgba(0,0,0,.30),
+      inset 0 1px 0 rgba(255,255,255,.08),
       inset 0 -0.5px 0 rgba(0,0,0,.40);
-    backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
-    -webkit-backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
+    backdrop-filter:blur(32px) saturate(200%) brightness(1.05);
+    -webkit-backdrop-filter:blur(32px) saturate(200%) brightness(1.05);
   }
   .liquid-glass-circle::before{background:linear-gradient(180deg,rgba(255,255,255,.06) 0%,transparent 100%);}
   .liquid-glass-circle::after{background:radial-gradient(ellipse at 30% 20%,rgba(255,255,255,.05) 0%,transparent 60%);}
@@ -179,8 +179,8 @@ html,body{
 .liquid-glass-pill{
   position:relative;overflow:hidden;
   background:linear-gradient(160deg,rgba(255,255,255,.25) 0%,rgba(255,255,255,.08) 45%,rgba(255,255,255,.18) 100%);
-  backdrop-filter:blur(2px) saturate(102%) brightness(.90);
-  -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90);
+  backdrop-filter:blur(26px) saturate(210%) brightness(1.06);
+  -webkit-backdrop-filter:blur(26px) saturate(210%) brightness(1.06);
   border:1.1px solid rgba(255,255,255,.50);
   box-shadow:
     0 3px 12px rgba(0,0,0,.07),
@@ -210,13 +210,14 @@ html,body{
 @media(prefers-color-scheme:dark){
   .liquid-glass-pill{
     background:linear-gradient(160deg,rgba(255,255,255,.08) 0%,rgba(255,255,255,.02) 45%,rgba(255,255,255,.06) 100%);
-    border-color:transparent;
+    border-color:rgba(255,255,255,.12);
     box-shadow:
       0 3px 14px rgba(0,0,0,.42),
       0 1px 2px rgba(0,0,0,.28),
+      inset 0 1px 0 rgba(255,255,255,.06),
       inset 0 -0.5px 0 rgba(0,0,0,.38);
-    backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
-    -webkit-backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
+    backdrop-filter:blur(26px) saturate(195%) brightness(1.04);
+    -webkit-backdrop-filter:blur(26px) saturate(195%) brightness(1.04);
   }
   .liquid-glass-pill::before{background:linear-gradient(180deg,rgba(255,255,255,.04) 0%,transparent 100%);}
   .liquid-glass-pill::after{background:radial-gradient(ellipse at 30% 18%,rgba(255,255,255,.04) 0%,transparent 55%);}
@@ -226,8 +227,8 @@ html,body{
 .liquid-glass-card{
   position:relative;overflow:hidden;
   background:linear-gradient(160deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,.06) 45%,rgba(255,255,255,.16) 100%);
-  backdrop-filter:blur(2px) saturate(102%) brightness(.90);
-  -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90);
+  backdrop-filter:blur(24px) saturate(200%) brightness(1.05);
+  -webkit-backdrop-filter:blur(24px) saturate(200%) brightness(1.05);
   border:1.1px solid rgba(255,255,255,.48);
   box-shadow:
     0 3px 14px rgba(0,0,0,.07),
@@ -256,13 +257,14 @@ html,body{
 @media(prefers-color-scheme:dark){
   .liquid-glass-card{
     background:linear-gradient(160deg,rgba(255,255,255,.07) 0%,rgba(255,255,255,.02) 45%,rgba(255,255,255,.05) 100%);
-    border-color:transparent;
+    border-color:rgba(255,255,255,.11);
     box-shadow:
       0 3px 16px rgba(0,0,0,.40),
       0 1px 2px rgba(0,0,0,.25),
+      inset 0 1px 0 rgba(255,255,255,.05),
       inset 0 -0.5px 0 rgba(0,0,0,.35);
-    backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
-    -webkit-backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
+    backdrop-filter:blur(24px) saturate(190%) brightness(1.03);
+    -webkit-backdrop-filter:blur(24px) saturate(190%) brightness(1.03);
   }
   .liquid-glass-card::before{background:linear-gradient(180deg,rgba(255,255,255,.04) 0%,transparent 100%);}
   .liquid-glass-card::after{background:radial-gradient(ellipse at 25% 16%,rgba(255,255,255,.03) 0%,transparent 55%);}
@@ -338,10 +340,7 @@ html,body{
   font-size:16px;line-height:1.5;
   color:var(--text);word-break:break-word;
 }
-.bot-msg{
-  max-width:90%;padding-left:0;
-  transition:max-height 0.25s cubic-bezier(0.1, 0.76, 0.55, 0.94);
-}
+.bot-msg{max-width:90%;padding-left:0;}
 .bot-text{font-size:16px;line-height:1.65;color:var(--text-2);word-break:break-word;}
 .bot-text b,.bot-text strong{font-weight:600;color:var(--text);}
 .bot-text code {
@@ -400,7 +399,7 @@ html,body{
   color: var(--text);
 }
 
-.msg-actions{margin-top:10px;margin-bottom:14px;display:flex;gap:6px;}
+.msg-actions{margin-top:10px;display:flex;gap:6px;}
 
 .copy-btn{
   display:inline-flex;align-items:center;justify-content:center;
@@ -431,7 +430,7 @@ html,body{
   left:0;
   right:0;
   z-index:20;
-  padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 6px);
+  padding:6px 12px calc(max(env(safe-area-inset-bottom), 10px) + 14px);
   background:transparent;
   -webkit-tap-highlight-color:transparent;
   pointer-events:none;
@@ -685,25 +684,25 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
 @media(prefers-color-scheme:dark){
   .input-card{
     background:linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,.09) 45%,rgba(255,255,255,.13) 100%);
-    border: none !important;
     box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.075),
       inset 0 -0.5px 0 rgba(0,0,0,.34);
-    backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
-    -webkit-backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
+    backdrop-filter:blur(5px) saturate(125%) brightness(.90);
+    -webkit-backdrop-filter:blur(5px) saturate(125%) brightness(.90);
   }
   .input-card:focus-within{
-    border: none !important;
     box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.075),
       inset 0 -0.5px 0 rgba(0,0,0,.34);
   }
   .top-btn,
   .pill-plus,
   .pill-model{
     background:linear-gradient(160deg,rgba(255,255,255,.18) 0%,rgba(255,255,255,.09) 45%,rgba(255,255,255,.13) 100%);
-    border: none !important;
-    backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
-    -webkit-backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
+    backdrop-filter:blur(5px) saturate(125%) brightness(.90);
+    -webkit-backdrop-filter:blur(5px) saturate(125%) brightness(.90);
     box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.075),
       inset 0 -0.5px 0 rgba(0,0,0,.34);
   }
 }
@@ -731,7 +730,7 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
   .ms-item:active{background:rgba(255,255,255,.09);}
   .ms-name{color:var(--text);}
   .ms-desc{color:var(--sub);}
-  .ms-sep{background:rgba(0,0,0,.35) !important;}
+  .ms-sep{background:rgba(255,255,255,.065);}
 }
 
 /* Legacy sheet styles — kept for compatibility but unused */
@@ -922,9 +921,9 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
     background:linear-gradient(160deg,rgba(42,42,39,.92) 0%,rgba(34,34,32,.84) 48%,rgba(42,42,39,.88) 100%) !important;
     backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
     -webkit-backdrop-filter:blur(2px) saturate(105%) brightness(.72) !important;
-    border: none !important;
     box-shadow:
       0 1px 2px rgba(0,0,0,.16),
+      inset 0 1px 0 rgba(255,255,255,.05),
       inset 0 -0.5px 0 rgba(0,0,0,.38) !important;
   }
   .input-card:focus-within{
@@ -1113,19 +1112,6 @@ html,body,.app{background:#F2EFE8 !important;}
 @media(prefers-color-scheme:dark){
   :root{--bg:#111110;}
   html,body,.app{background:#111110 !important;}
-  .top-btn,
-  .input-card,
-  .input-card:focus-within,
-  .pill-plus,
-  .pill-model,
-  .liquid-glass-circle,
-  .liquid-glass-pill,
-  .liquid-glass-card,
-  .sheet {
-    border: none !important;
-    border-color: transparent !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,.45) !important;
-  }
 }
 
 </style>
@@ -1748,19 +1734,6 @@ function appendBotText(msgEl,text){
   let isTyping=true;
   let userHasScrolledUp=false;
 
-  // Move or create the scroll spacer at the very bottom
-  let spacer = document.getElementById('scroll-spacer');
-  if (!spacer) {
-    spacer = document.createElement('div');
-    spacer.id = 'scroll-spacer';
-    spacer.style.height = '110px';
-    spacer.style.flexShrink = '0';
-    msgEl.appendChild(spacer);
-  } else {
-    spacer.style.height = '110px';
-    msgEl.appendChild(spacer);
-  }
-
   const onScrollHandler = () => {
     if (isTyping) {
       const isAtBottom = (m.scrollHeight - m.clientHeight - m.scrollTop) < 60;
@@ -1776,24 +1749,10 @@ function appendBotText(msgEl,text){
   function smoothScrollLoop(){
     if(!m)return;
     if (!userHasScrolledUp) {
-      const bRect = b.getBoundingClientRect();
-      const mRect = m.getBoundingClientRect();
-      const inputAreaHeight = document.querySelector('.input-area')?.offsetHeight || 120;
-      const targetBottom = mRect.height - inputAreaHeight - 45;
-      const currentBottom = bRect.bottom - mRect.top;
-      if (currentBottom > targetBottom) {
-        const scrollDiff = currentBottom - targetBottom;
-        const oldScroll = m.scrollTop;
-        m.scrollTop += scrollDiff;
-        
-        // If we hit the scrollbar limit (e.g. at the beginning of the chat), expand the bottom spacer
-        const scrolled = m.scrollTop - oldScroll;
-        if (scrolled < scrollDiff) {
-          const remaining = scrollDiff - scrolled;
-          const currentSpacerHeight = parseFloat(spacer.style.height) || 110;
-          spacer.style.height = (currentSpacerHeight + remaining) + 'px';
-          m.scrollTop += remaining;
-        }
+      const target=m.scrollHeight-m.clientHeight;
+      const diff=target-m.scrollTop;
+      if(diff>0.5){
+        m.scrollTop+=diff*0.12;
       }
     }
     if(isTyping){
@@ -1805,23 +1764,10 @@ function appendBotText(msgEl,text){
   function type(){
     if(i<text.length){
       textEl.innerHTML=md(text.slice(0,i+1));
-      
-      // Smooth typing transition: dynamically expand max-height
-      const botMsg = b.querySelector('.bot-msg');
-      if (botMsg) {
-        botMsg.style.overflow = 'hidden';
-        botMsg.style.maxHeight = botMsg.scrollHeight + 'px';
-      }
-      
       i++;
       setTimeout(type,12);
     }else{
       textEl.innerHTML=md(text);
-      const botMsg = b.querySelector('.bot-msg');
-      if (botMsg) {
-        botMsg.style.maxHeight = 'none';
-        botMsg.style.overflow = 'visible';
-      }
       isTyping=false;
       if (m) m.removeEventListener('scroll', onScrollHandler);
       if(actionsEl)actionsEl.style.display='flex';
