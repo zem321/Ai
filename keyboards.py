@@ -18,11 +18,14 @@ OTHER_MODELS = {
     "meta/llama-4-maverick-17b-128e-instruct": "Llama 4 Maverick 17B",
     "z-ai/glm-5.1": "GLM-5.1",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
-    "ashibalt/sonnet-4.6": "Claude Sonnet 4.6",
-    "ashibalt/opus-4.7": "Claude Opus 4.7",
-    "ashibalt/opus-4.8": "Claude Opus 4.8",
-    "ashibalt/kimi-k2.7": "Kimi K2.7",
+    "ashibalt/kimi-k2.6": "Kimi K2.6",
     "ashibalt/kimi-k2.7-code": "Kimi K2.7 Code",
+    "ashibalt/claude-haiku-4.5": "Claude Haiku 4.5",
+    "ashibalt/claude-opus-4.6": "Claude Opus 4.6",
+    "ashibalt/claude-opus-4.7": "Claude Opus 4.7",
+    "ashibalt/claude-opus-4.8": "Claude Opus 4.8",
+    "ashibalt/claude-sonnet-4.5": "Claude Sonnet 4.5",
+    "ashibalt/claude-sonnet-4.6": "Claude Sonnet 4.6",
 }
 
 # Совет ИИ-моделей: запрос параллельно уходит трём моделям-участникам
