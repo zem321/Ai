@@ -59,6 +59,22 @@ FREEMODEL_CLAUDE_API_KEY = os.getenv("FREEMODEL_CLAUDE_API_KEY", "")
 ASHIBALT_API_KEY = os.getenv("ASHIBALT_API_KEY") or FREEMODEL_API_KEY
 ASHIBALT_API_BASE = os.getenv("ASHIBALT_API_BASE", "https://api.ashibalt.ru/v1")
 
+# Ashibalt принимает короткие id моделей из своего каталога.
+# Дополнительно оставляем старые id как алиасы, чтобы выбранные ранее модели
+# в FSM-состоянии пользователя не сломались после обновления клавиатуры.
+ASHIBALT_MODEL_ALIASES = {
+    "sonnet-4.6": ["sonnet-4.6", "claude-sonnet-4-6"],
+    "claude-sonnet-4-6": ["sonnet-4.6", "claude-sonnet-4-6"],
+    "opus-4.7": ["opus-4.7", "claude-opus-4-7"],
+    "claude-opus-4-7": ["opus-4.7", "claude-opus-4-7"],
+    "opus-4.8": ["opus-4.8", "claude-opus-4-8"],
+    "claude-opus-4-8": ["opus-4.8", "claude-opus-4-8"],
+    "kimi-k2.7": ["kimi-k2.7", "kimi-2.7"],
+    "kimi-2.7": ["kimi-k2.7", "kimi-2.7"],
+    "kimi-k2.7-code": ["kimi-k2.7-code", "kimi-2.7-code"],
+    "kimi-2.7-code": ["kimi-k2.7-code", "kimi-2.7-code"],
+}
+
 # Маппинг из внутренних ID бота -> точные имена моделей на OpenRouter
 FREEMODEL_CLAUDE_MODEL_MAP = {
     "claude-sonnet-4-6":          "anthropic/claude-sonnet-4-6",
@@ -421,55 +437,89 @@ async def call_ashibalt(model_id: str, messages: list) -> tuple[str, dict]:
     if not ASHIBALT_API_KEY:
         raise Exception("ASHIBALT_API_KEY не задан.")
 
-    raw_model = model_id.replace("ashibalt/", "", 1)
+    requested_raw_model = model_id.replace("ashibalt/", "", 1)
+    candidate_models = ASHIBALT_MODEL_ALIASES.get(requested_raw_model, [requested_raw_model])
 
     headers = {
         "Authorization": f"Bearer {ASHIBALT_API_KEY}",
         "Content-Type": "application/json",
     }
 
-    payload = {
-        "model": raw_model,
-        "messages": messages,
-        "max_tokens": 2048,
-        "temperature": 0.7,
-    }
-
     url = f"{ASHIBALT_API_BASE.rstrip('/')}/chat/completions"
 
-    logger.info("call_ashibalt -> url=%s model=%s", url, raw_model)
+    async def request_model(raw_model: str) -> tuple[str, dict]:
+        payload = {
+            "model": raw_model,
+            "messages": messages,
+            "max_tokens": 2048,
+        }
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
-            url,
-            json=payload,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=60),
-        ) as resp:
-            text = await resp.text()
+        logger.info("call_ashibalt -> url=%s model=%s", url, raw_model)
 
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(
-                    f"Ashibalt вернул неожиданный ответ (HTTP {resp.status}, url={url}): {text[:500]}"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                text = await resp.text()
+
+                try:
+                    data = json.loads(text)
+                except Exception:
+                    raise Exception(
+                        f"Ashibalt вернул неожиданный ответ (HTTP {resp.status}, url={url}): {text[:500]}"
+                    )
+
+                if resp.status != 200:
+                    raise Exception(extract_api_error(data))
+
+                logger.info("call_ashibalt <- responded model=%s", data.get("model"))
+
+                debug = {
+                    "url": url,
+                    "sent_model": raw_model,
+                    "provider_model": data.get("model"),
+                }
+
+                try:
+                    return data["choices"][0]["message"]["content"], debug
+                except Exception:
+                    raise Exception(f"Неверный формат ответа Ashibalt: {json.dumps(data, ensure_ascii=False)[:500]}")
+
+    last_error = None
+
+    for index, raw_model in enumerate(candidate_models):
+        try:
+            return await request_model(raw_model)
+        except Exception as e:
+            last_error = e
+            error_text = str(e)
+
+            # Если Ashibalt не нашёл id модели, пробуем следующий алиас.
+            # Остальные ошибки (ключ, баланс, формат запроса и т.п.) не маскируем.
+            lower_error = error_text.lower()
+            model_not_found = (
+                "not available" in lower_error
+                or "not found" in lower_error
+                or "unknown model" in lower_error
+            )
+
+            if model_not_found and index < len(candidate_models) - 1:
+                logger.warning(
+                    "call_ashibalt: model=%s недоступна, пробую алиас %s",
+                    raw_model,
+                    candidate_models[index + 1],
                 )
+                continue
 
-            if resp.status != 200:
-                raise Exception(extract_api_error(data))
+            raise
 
-            logger.info("call_ashibalt <- responded model=%s", data.get("model"))
-
-            debug = {
-                "url": url,
-                "sent_model": raw_model,
-                "provider_model": data.get("model"),
-            }
-
-            try:
-                return data["choices"][0]["message"]["content"], debug
-            except Exception:
-                raise Exception(f"Неверный формат ответа Ashibalt: {json.dumps(data, ensure_ascii=False)[:500]}")
+    raise Exception(
+        f"Ashibalt не принял model id. Пробовал: {', '.join(candidate_models)}. "
+        f"Последняя ошибка: {last_error}"
+    )
 
 
 async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
