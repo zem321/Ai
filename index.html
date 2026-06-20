@@ -1865,21 +1865,31 @@ function appendBotText(msgEl,text){
 }
 function appendBotImage(msgEl,base64,caption){
   document.getElementById('tr')?.remove();
-  
-  // 1. Small photo standalone (like in the screenshot)
+
+  // Фото маленькое (по центру)
   const imgRow = document.createElement('div');
   imgRow.className = 'msg-row bot';
-  imgRow.innerHTML = `<div style="max-width:60px;border-radius:8px;overflow:hidden;"><img src="data:image/png;base64,${base64}" style="width:100%;display:block;" alt=""></div>`;
+  imgRow.style.justifyContent = 'flex-start';
+  imgRow.innerHTML = `
+    <div style="max-width:68px;border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.1);">
+      <img src="data:image/png;base64,${base64}" style="width:100%;display:block;" alt="">
+    </div>
+  `;
   msgEl.appendChild(imgRow);
-  
-  // 2. Caption in a normal bot bubble (separate)
+
+  // Подпись сразу под фото (внизу)
   if (caption) {
-    const bubbleRow = document.createElement('div');
-    bubbleRow.className = 'msg-row bot';
-    bubbleRow.innerHTML = `<div class="bot-msg"><div class="bot-text">${x(caption)}</div></div>`;
-    msgEl.appendChild(bubbleRow);
+    const txtRow = document.createElement('div');
+    txtRow.className = 'msg-row bot';
+    txtRow.style.justifyContent = 'flex-start';
+    txtRow.innerHTML = `
+      <div style="font-size:14px;color:#666;margin-top:4px;">
+        ${x(caption)}
+      </div>
+    `;
+    msgEl.appendChild(txtRow);
   }
-  
+
   scrollB();
 }
 async function sendToBackend(txt,files,msgEl){
@@ -2011,5 +2021,5 @@ function hideKeyboardOnOutsideTap(ev){
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0ebe9c2dff3de4e',t:'MTc4MTk3MDQ1OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0ebf3925b45de4e',t:'MTc4MTk3MDg1OQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
