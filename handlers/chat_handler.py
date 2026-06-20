@@ -59,20 +59,31 @@ FREEMODEL_CLAUDE_API_KEY = os.getenv("FREEMODEL_CLAUDE_API_KEY", "")
 ASHIBALT_API_KEY = os.getenv("ASHIBALT_API_KEY") or FREEMODEL_API_KEY
 ASHIBALT_API_BASE = os.getenv("ASHIBALT_API_BASE", "https://api.ashibalt.ru/v1")
 
-# Ashibalt принимает короткие id моделей из своего каталога.
+# Ashibalt принимает точные id моделей из своего каталога.
 # Дополнительно оставляем старые id как алиасы, чтобы выбранные ранее модели
 # в FSM-состоянии пользователя не сломались после обновления клавиатуры.
 ASHIBALT_MODEL_ALIASES = {
-    "sonnet-4.6": ["sonnet-4.6", "claude-sonnet-4-6"],
-    "claude-sonnet-4-6": ["sonnet-4.6", "claude-sonnet-4-6"],
-    "opus-4.7": ["opus-4.7", "claude-opus-4-7"],
-    "claude-opus-4-7": ["opus-4.7", "claude-opus-4-7"],
-    "opus-4.8": ["opus-4.8", "claude-opus-4-8"],
-    "claude-opus-4-8": ["opus-4.8", "claude-opus-4-8"],
-    "kimi-k2.7": ["kimi-k2.7", "kimi-2.7"],
-    "kimi-2.7": ["kimi-k2.7", "kimi-2.7"],
+    "kimi-k2.6": ["kimi-k2.6"],
     "kimi-k2.7-code": ["kimi-k2.7-code", "kimi-2.7-code"],
     "kimi-2.7-code": ["kimi-k2.7-code", "kimi-2.7-code"],
+    "kimi-k2.7": ["kimi-k2.7-code", "kimi-k2.7", "kimi-2.7"],
+    "kimi-2.7": ["kimi-k2.7-code", "kimi-k2.7", "kimi-2.7"],
+    "claude-haiku-4.5": ["claude-haiku-4.5", "claude-haiku-4-5"],
+    "claude-haiku-4-5": ["claude-haiku-4.5", "claude-haiku-4-5"],
+    "claude-opus-4.6": ["claude-opus-4.6", "opus-4.6", "claude-opus-4-6"],
+    "opus-4.6": ["claude-opus-4.6", "opus-4.6", "claude-opus-4-6"],
+    "claude-opus-4-6": ["claude-opus-4.6", "opus-4.6", "claude-opus-4-6"],
+    "claude-opus-4.7": ["claude-opus-4.7", "opus-4.7", "claude-opus-4-7"],
+    "opus-4.7": ["claude-opus-4.7", "opus-4.7", "claude-opus-4-7"],
+    "claude-opus-4-7": ["claude-opus-4.7", "opus-4.7", "claude-opus-4-7"],
+    "claude-opus-4.8": ["claude-opus-4.8", "opus-4.8", "claude-opus-4-8"],
+    "opus-4.8": ["claude-opus-4.8", "opus-4.8", "claude-opus-4-8"],
+    "claude-opus-4-8": ["claude-opus-4.8", "opus-4.8", "claude-opus-4-8"],
+    "claude-sonnet-4.5": ["claude-sonnet-4.5", "claude-sonnet-4-5"],
+    "claude-sonnet-4-5": ["claude-sonnet-4.5", "claude-sonnet-4-5"],
+    "claude-sonnet-4.6": ["claude-sonnet-4.6", "sonnet-4.6", "claude-sonnet-4-6"],
+    "sonnet-4.6": ["claude-sonnet-4.6", "sonnet-4.6", "claude-sonnet-4-6"],
+    "claude-sonnet-4-6": ["claude-sonnet-4.6", "sonnet-4.6", "claude-sonnet-4-6"],
 }
 
 # Маппинг из внутренних ID бота -> точные имена моделей на OpenRouter
