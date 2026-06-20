@@ -1,135 +1,1028 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import asyncio
+import os
+import json
+import base64
+import logging
+from io import BytesIO
+from html import escape
 
-# ChatGPT модели
-CHATGPT_MODELS = {
-    "freemodel/gpt-5.4-nano": "GPT 5.4 Nano",
-    "freemodel/gpt-5.5": "GPT 5.5",
+import aiohttp
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
+
+from keyboards import (
+    cancel_keyboard,
+    model_group_keyboard,
+    models_keyboard,
+    CHATGPT_MODELS,
+    GEMINI_MODELS,
+    OTHER_MODELS,
+    COUNCIL_MODELS,
+    GROUP_TITLES,
+    MODELS,
+)
+from states import BotStates
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+router = Router()
+
+SYSTEM_PROMPT = (
+    "Ты полезный ИИ-ассистент. "
+    "Отвечай на русском языке если вопрос на русском. "
+    "Будь точным и лаконичным."
+)
+
+MAX_HISTORY = 20
+MAX_IMAGE_BYTES = 15 * 1024 * 1024
+
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+
+FREEMODEL_API_KEY = os.getenv("FREEMODEL_API_KEY") or os.getenv("API_KEY", "")
+
+# Базовый адрес для большинства моделей freemodel/* (OpenAI-совместимый формат,
+# например freemodel/gpt-*). Эндпоинт: {base}/v1/chat/completions
+FREEMODEL_API_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.dev")
+
+# Базовый адрес для моделей freemodel/claude-* — OpenRouter.
+# Эндпоинт: {base}/v1/chat/completions
+FREEMODEL_CLAUDE_BASE = os.getenv("FREEMODEL_CLAUDE_BASE", "https://openrouter.ai/api")
+
+# Отдельный ключ для OpenRouter. Если не задан — используется FREEMODEL_API_KEY.
+FREEMODEL_CLAUDE_API_KEY = os.getenv("FREEMODEL_CLAUDE_API_KEY", "")
+
+# Ashibalt API: OpenAI-совместимый эндпоинт.
+# Базовый URL уже включает /v1. Эндпоинт: {base}/chat/completions
+ASHIBALT_API_KEY = os.getenv("ASHIBALT_API_KEY") or FREEMODEL_API_KEY
+ASHIBALT_API_BASE = os.getenv("ASHIBALT_API_BASE", "https://api.ashibalt.ru/v1")
+
+# Ashibalt принимает короткие id моделей из своего каталога.
+# Дополнительно оставляем старые id как алиасы, чтобы выбранные ранее модели
+# в FSM-состоянии пользователя не сломались после обновления клавиатуры.
+ASHIBALT_MODEL_ALIASES = {
+    "sonnet-4.6": ["sonnet-4.6", "claude-sonnet-4-6"],
+    "claude-sonnet-4-6": ["sonnet-4.6", "claude-sonnet-4-6"],
+    "opus-4.7": ["opus-4.7", "claude-opus-4-7"],
+    "claude-opus-4-7": ["opus-4.7", "claude-opus-4-7"],
+    "opus-4.8": ["opus-4.8", "claude-opus-4-8"],
+    "claude-opus-4-8": ["opus-4.8", "claude-opus-4-8"],
+    "kimi-k2.7": ["kimi-k2.7", "kimi-2.7"],
+    "kimi-2.7": ["kimi-k2.7", "kimi-2.7"],
+    "kimi-k2.7-code": ["kimi-k2.7-code", "kimi-2.7-code"],
+    "kimi-2.7-code": ["kimi-k2.7-code", "kimi-2.7-code"],
 }
 
-# Gemini модели
-GEMINI_MODELS = {
-    "gemini/gemini-3.1-flash-lite": "Gemini 3.1 Flash Lite",
-    "gemini/gemini-3.5-flash": "Gemini 3.5 Flash",
-    "gemini/gemini-3.1-pro": "Gemini 3.1 Pro",
+# Маппинг из внутренних ID бота -> точные имена моделей на OpenRouter
+FREEMODEL_CLAUDE_MODEL_MAP = {
+    "claude-sonnet-4-6":          "anthropic/claude-sonnet-4-6",
+    "claude-opus-4-6":            "anthropic/claude-opus-4-6",
+    "claude-opus-4-7":            "anthropic/claude-opus-4-7",
+    "claude-opus-4-8":            "anthropic/claude-opus-4-8",
+    "claude-haiku-4-5":           "anthropic/claude-haiku-4-5",
+    "claude-haiku-4-5-20251001":  "anthropic/claude-haiku-4-5-20251001",
+    "claude-sonnet-4-5":          "anthropic/claude-sonnet-4-5",
+    "claude-sonnet-4-5-20250929": "anthropic/claude-sonnet-4-5-20250929",
 }
 
-# Остальные модели (Other)
-OTHER_MODELS = {
-    "meta/llama-4-maverick-17b-128e-instruct": "Llama 4 Maverick 17B",
-    "z-ai/glm-5.1": "GLM-5.1",
-    "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
-    "ashibalt/claude-sonnet-4-6": "Claude Sonnet 4.6",
-    "ashibalt/claude-opus-4-7": "Claude Opus 4.7",
-    "ashibalt/claude-opus-4-8": "Claude Opus 4.8",
-    "ashibalt/kimi-2.7": "Kimi 2.7",
-    "ashibalt/kimi-2.7-code": "Kimi 2.7 Code",
-}
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
 
-# Совет ИИ-моделей: запрос параллельно уходит трём моделям-участникам
-# (см. handlers.COUNCIL_MEMBER_MODELS), их ответы анонимизируются как
-# A/B/C, и модель-судья (handlers.COUNCIL_JUDGE_MODEL) выбирает лучший
-# ответ/делает синтез и кратко объясняет выбор.
+# Если включено (по умолчанию да), бот после каждого ответа отправляет
+# отдельное сообщение с диагностикой: какая модель запрошена, какой URL
+# использован, и что вернул провайдер в поле "model".
+# Отключить можно переменной окружения DEBUG_MODE=0.
+DEBUG_MODE = os.getenv("DEBUG_MODE", "1") not in ("0", "false", "False", "")
+
+# ------------------ Диагностика конфигурации при импорте ------------------
+
+logger.info("NVIDIA_CHAT_URL = %s", NVIDIA_CHAT_URL)
+logger.info("FREEMODEL_API_BASE (для freemodel/gpt-* и др.) = %s", FREEMODEL_API_BASE)
+logger.info("FREEMODEL_CLAUDE_BASE (для freemodel/claude-*, OpenRouter) = %s", FREEMODEL_CLAUDE_BASE)
+logger.info("FREEMODEL_CLAUDE_API_KEY задан = %s", bool(FREEMODEL_CLAUDE_API_KEY))
+logger.info("GEMINI_API_BASE = %s", GEMINI_API_BASE)
+logger.info("ASHIBALT_API_BASE = %s", ASHIBALT_API_BASE)
+logger.info("ASHIBALT_API_KEY задан = %s", bool(ASHIBALT_API_KEY))
+logger.info("DEBUG_MODE = %s", DEBUG_MODE)
+
+if not FREEMODEL_API_KEY:
+    logger.warning(
+        "FREEMODEL_API_KEY не задан. Запросы к freemodel/gpt-* будут падать с ошибкой."
+    )
+
+if not FREEMODEL_CLAUDE_API_KEY and not FREEMODEL_API_KEY:
+    logger.warning(
+        "Ни FREEMODEL_CLAUDE_API_KEY, ни FREEMODEL_API_KEY не заданы. "
+        "Запросы к Claude через OpenRouter будут падать с ошибкой."
+    )
+
+if not ASHIBALT_API_KEY:
+    logger.warning(
+        "ASHIBALT_API_KEY не задан. Запросы к Ashibalt будут падать с ошибкой."
+    )
+
+# ------------------ Вспомогательные функции ------------------
+
+
+def get_history(data):
+    return data.get("chat_history", [])
+
+
+def get_model(data):
+    return data.get("selected_model", list(CHATGPT_MODELS.keys())[0])
+
+
+def strip_provider_prefix(model_id: str) -> str:
+    return model_id.replace("freemodel/", "", 1)
+
+
+def trim_history(history: list) -> list:
+    return history[-MAX_HISTORY:]
+
+
+def guess_mime_type(file_path: str | None) -> str:
+    if not file_path:
+        return "image/jpeg"
+
+    path = file_path.lower()
+
+    if path.endswith(".png"):
+        return "image/png"
+    if path.endswith(".webp"):
+        return "image/webp"
+    if path.endswith(".gif"):
+        return "image/gif"
+
+    return "image/jpeg"
+
+
+def extract_api_error(data) -> str:
+    if not isinstance(data, dict):
+        return str(data)
+
+    error = data.get("error")
+
+    if isinstance(error, dict):
+        return error.get("message") or json.dumps(error, ensure_ascii=False)[:500]
+    if isinstance(error, str):
+        return error
+    if "detail" in data:
+        return str(data["detail"])
+
+    return json.dumps(data, ensure_ascii=False)[:500]
+
+
+async def edit_error(status_msg: Message, title: str, error: Exception):
+    logger.exception(title)
+
+    await status_msg.edit_text(
+        f"<b>{escape(title)}:</b> {escape(str(error))}",
+        parse_mode="HTML",
+        reply_markup=cancel_keyboard(),
+    )
+
+
+async def send_ai_reply(status_msg: Message, reply: str):
+    """
+    Отправляет ответ модели.
+    parse_mode специально не используем, потому что модель может вернуть Markdown/HTML,
+    из-за чего Telegram иногда падает с ошибкой парсинга.
+    """
+    if not reply:
+        reply = "Пустой ответ от модели."
+
+    chunks = [reply[i:i + 3900] for i in range(0, len(reply), 3900)]
+
+    if len(chunks) == 1:
+        await status_msg.edit_text(chunks[0], reply_markup=cancel_keyboard())
+        return
+
+    await status_msg.edit_text(chunks[0])
+
+    for index, chunk in enumerate(chunks[1:], start=1):
+        is_last = index == len(chunks) - 1
+        await status_msg.answer(
+            chunk,
+            reply_markup=cancel_keyboard() if is_last else None,
+        )
+
+
+async def send_debug_info(status_msg: Message, debug: dict):
+    """
+    Отправляет отдельным сообщением диагностику: какая модель была
+    запрошена, на какой URL ушёл запрос, и что провайдер вернул
+    в поле "model" своего ответа.
+
+    Для "Совета ИИ-моделей" дополнительно показывается статус каждой
+    модели-участника (A/B/C) и параметры запроса к модели-судье.
+    """
+    if not DEBUG_MODE or not debug:
+        return
+
+    lines = ["🔧 <b>Debug info</b>"]
+    lines.append(f"Выбрана в боте: <code>{escape(str(debug.get('requested_model', '?')))}</code>")
+    lines.append(f"Endpoint: <code>{escape(str(debug.get('url', '?')))}</code>")
+    lines.append(f"Отправлено в payload.model: <code>{escape(str(debug.get('sent_model', '?')))}</code>")
+
+    provider_model = debug.get("provider_model")
+    if provider_model:
+        lines.append(f"Ответ provider.model: <code>{escape(str(provider_model))}</code>")
+    else:
+        lines.append("Ответ provider.model: <i>провайдер не вернул это поле</i>")
+
+    council_members = debug.get("council_members")
+    if council_members:
+        lines.append("")
+        lines.append("<b>Совет — участники:</b>")
+        for member in council_members:
+            label = member.get("label", "?")
+            model = member.get("model", "?")
+            member_debug = member.get("debug") or {}
+            if "error" in member_debug:
+                status = f"ошибка: {member_debug['error']}"
+            else:
+                status = (
+                    f"url={member_debug.get('url', '?')}, "
+                    f"provider.model={member_debug.get('provider_model', '?')}"
+                )
+            lines.append(f"{label}: <code>{escape(str(model))}</code> — {escape(str(status))}")
+
+        judge_debug = debug.get("judge_debug") or {}
+        lines.append("")
+        lines.append("<b>Совет — судья:</b>")
+        lines.append(f"Endpoint: <code>{escape(str(judge_debug.get('url', '?')))}</code>")
+        lines.append(f"Отправлено в payload.model: <code>{escape(str(judge_debug.get('sent_model', '?')))}</code>")
+
+    try:
+        await status_msg.answer("\n".join(lines), parse_mode="HTML")
+    except Exception:
+        logger.exception("Не удалось отправить debug info")
+
+
+async def telegram_file_to_data_url(message: Message, file_id: str, mime_type: str | None = None) -> str:
+    """
+    Скачивает файл из Telegram и превращает его в data:image/...;base64,...
+    Это лучше, чем передавать внешнюю ссылку Telegram в модель.
+    """
+    tg_file = await message.bot.get_file(file_id)
+
+    if not tg_file.file_path:
+        raise Exception("Telegram не вернул путь к файлу.")
+
+    buffer = BytesIO()
+    await message.bot.download_file(tg_file.file_path, destination=buffer)
+    image_bytes = buffer.getvalue()
+
+    if not image_bytes:
+        raise Exception("Не удалось скачать изображение из Telegram.")
+
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise Exception("Изображение слишком большое. Отправьте фото меньшего размера.")
+
+    final_mime_type = mime_type or guess_mime_type(tg_file.file_path)
+    if not final_mime_type.startswith("image/"):
+        final_mime_type = guess_mime_type(tg_file.file_path)
+
+    encoded = base64.b64encode(image_bytes).decode("utf-8")
+    return f"data:{final_mime_type};base64,{encoded}"
+
+
+def make_vision_content(prompt: str, image_data_url: str) -> list:
+    prompt = (prompt or "").strip()
+
+    if not prompt:
+        prompt = "Проанализируй изображение и ответь, что на нём изображено."
+
+    return [
+        {
+            "type": "text",
+            "text": prompt,
+        },
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": image_data_url,
+            },
+        },
+    ]
+
+
+# ------------------ Вызов моделей ------------------
 #
-# Это "виртуальный" model_id — никакого отдельного провайдера для него
-# нет, вся логика обрабатывается функцией call_ai_council() в handlers.py,
-# которая просто несколько раз использует уже существующие call_ai().
-COUNCIL_MODELS = {
-    "council/ai-council": "Совет ИИ-моделей",
-}
+# Каждая call_* функция возвращает (content, debug), где debug — словарь
+# с ключами "url", "sent_model", "provider_model" для диагностики.
 
-MODELS = {**CHATGPT_MODELS, **GEMINI_MODELS, **OTHER_MODELS, **COUNCIL_MODELS}
+async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
+    if not NVIDIA_API_KEY:
+        raise Exception("NVIDIA_API_KEY не задан.")
 
-# Человекочитаемые названия групп моделей (для заголовков экрана выбора модели)
-GROUP_TITLES = {
-    "chatgpt": "ChatGPT",
-    "gemini": "Gemini",
-    "other": "Other",
-    "council": "Совет ИИ-моделей",
-}
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
-# -------------------- Клавиатуры --------------------
+    payload = {
+        "model": model_id,
+        "messages": messages,
+        "max_tokens": 2048,
+        "temperature": 0.7,
+    }
+
+    logger.info("call_nvidia -> url=%s model=%s", NVIDIA_CHAT_URL, model_id)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            NVIDIA_CHAT_URL,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=60),
+        ) as resp:
+            text = await resp.text()
+
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"NVIDIA вернул неожиданный ответ: {text[:500]}")
+
+            if resp.status != 200:
+                raise Exception(extract_api_error(data))
+
+            logger.info("call_nvidia <- responded model=%s", data.get("model"))
+
+            debug = {
+                "url": NVIDIA_CHAT_URL,
+                "sent_model": model_id,
+                "provider_model": data.get("model"),
+            }
+
+            try:
+                return data["choices"][0]["message"]["content"], debug
+            except Exception:
+                raise Exception(f"Неверный формат ответа NVIDIA: {json.dumps(data, ensure_ascii=False)[:500]}")
 
 
-def main_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Чат с ИИ", callback_data="mode_chat"),
-            InlineKeyboardButton(text="Генерация фото", callback_data="mode_image_gen"),
-        ],
-        [
-            InlineKeyboardButton(text="Выбрать модель", callback_data="select_model"),
-            InlineKeyboardButton(text="Очистить историю", callback_data="clear_history"),
-        ],
-        [
-            InlineKeyboardButton(text="Помощь", callback_data="help"),
+async def call_freemodel_openai(
+    raw_model: str,
+    messages: list,
+    base_url: str,
+    api_key: str | None = None,
+    extra_headers: dict | None = None,
+) -> tuple[str, dict]:
+    """
+    Вызов через OpenAI-совместимый эндпоинт /v1/chat/completions.
+    Используется для всех freemodel/* моделей, включая Claude — через OpenRouter.
+    Параметр api_key позволяет передать отдельный ключ для конкретного роутера.
+    extra_headers — дополнительные заголовки (например, для OpenRouter).
+    """
+    key = api_key or FREEMODEL_API_KEY
+    if not key:
+        raise Exception("API ключ не задан (FREEMODEL_API_KEY или FREEMODEL_CLAUDE_API_KEY).")
+
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; freemodel-bot/1.0)",
+    }
+
+    if extra_headers:
+        headers.update(extra_headers)
+
+    payload = {
+        "model": raw_model,
+        "messages": messages,
+        "max_tokens": 2048,
+        "temperature": 0.7,
+    }
+
+    url = f"{base_url.rstrip('/')}/v1/chat/completions"
+
+    logger.info("call_freemodel_openai -> url=%s model=%s", url, raw_model)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=60),
+        ) as resp:
+            text = await resp.text()
+
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(
+                    f"FreeModel вернул неожиданный ответ (HTTP {resp.status}, url={url}): {text[:500]}"
+                )
+
+            if resp.status != 200:
+                raise Exception(extract_api_error(data))
+
+            logger.info("call_freemodel_openai <- responded model=%s", data.get("model"))
+
+            debug = {
+                "url": url,
+                "sent_model": raw_model,
+                "provider_model": data.get("model"),
+            }
+
+            try:
+                return data["choices"][0]["message"]["content"], debug
+            except Exception:
+                raise Exception(f"Неверный формат ответа FreeModel: {json.dumps(data, ensure_ascii=False)[:500]}")
+
+
+async def call_ashibalt(model_id: str, messages: list) -> tuple[str, dict]:
+    if not ASHIBALT_API_KEY:
+        raise Exception("ASHIBALT_API_KEY не задан.")
+
+    requested_raw_model = model_id.replace("ashibalt/", "", 1)
+    candidate_models = ASHIBALT_MODEL_ALIASES.get(requested_raw_model, [requested_raw_model])
+
+    headers = {
+        "Authorization": f"Bearer {ASHIBALT_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    url = f"{ASHIBALT_API_BASE.rstrip('/')}/chat/completions"
+
+    async def request_model(raw_model: str) -> tuple[str, dict]:
+        payload = {
+            "model": raw_model,
+            "messages": messages,
+            "max_tokens": 2048,
+        }
+
+        logger.info("call_ashibalt -> url=%s model=%s", url, raw_model)
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                text = await resp.text()
+
+                try:
+                    data = json.loads(text)
+                except Exception:
+                    raise Exception(
+                        f"Ashibalt вернул неожиданный ответ (HTTP {resp.status}, url={url}): {text[:500]}"
+                    )
+
+                if resp.status != 200:
+                    raise Exception(extract_api_error(data))
+
+                logger.info("call_ashibalt <- responded model=%s", data.get("model"))
+
+                debug = {
+                    "url": url,
+                    "sent_model": raw_model,
+                    "provider_model": data.get("model"),
+                }
+
+                try:
+                    return data["choices"][0]["message"]["content"], debug
+                except Exception:
+                    raise Exception(f"Неверный формат ответа Ashibalt: {json.dumps(data, ensure_ascii=False)[:500]}")
+
+    last_error = None
+
+    for index, raw_model in enumerate(candidate_models):
+        try:
+            return await request_model(raw_model)
+        except Exception as e:
+            last_error = e
+            error_text = str(e)
+
+            # Если Ashibalt не нашёл id модели, пробуем следующий алиас.
+            # Остальные ошибки (ключ, баланс, формат запроса и т.п.) не маскируем.
+            lower_error = error_text.lower()
+            model_not_found = (
+                "not available" in lower_error
+                or "not found" in lower_error
+                or "unknown model" in lower_error
+            )
+
+            if model_not_found and index < len(candidate_models) - 1:
+                logger.warning(
+                    "call_ashibalt: model=%s недоступна, пробую алиас %s",
+                    raw_model,
+                    candidate_models[index + 1],
+                )
+                continue
+
+            raise
+
+    raise Exception(
+        f"Ashibalt не принял model id. Пробовал: {', '.join(candidate_models)}. "
+        f"Последняя ошибка: {last_error}"
+    )
+
+
+async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
+    if not GEMINI_API_KEY:
+        raise Exception("GEMINI_API_KEY не задан.")
+
+    # Убираем префикс "gemini/" для запроса
+    raw_model = model_id.replace("gemini/", "", 1)
+
+    headers = {
+        "Authorization": f"Bearer {GEMINI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "model": raw_model,
+        "messages": messages,
+        "max_tokens": 2048,
+        "temperature": 0.7,
+    }
+
+    url = f"{GEMINI_API_BASE.rstrip('/')}/chat/completions"
+
+    logger.info("call_gemini -> url=%s model=%s", url, raw_model)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=60),
+        ) as resp:
+            text = await resp.text()
+
+            try:
+                data = json.loads(text)
+            except Exception:
+                raise Exception(f"Gemini вернул неожиданный ответ: {text[:500]}")
+
+            if resp.status != 200:
+                raise Exception(extract_api_error(data))
+
+            logger.info("call_gemini <- responded model=%s", data.get("model"))
+
+            debug = {
+                "url": url,
+                "sent_model": raw_model,
+                "provider_model": data.get("model"),
+            }
+
+            try:
+                return data["choices"][0]["message"]["content"], debug
+            except Exception:
+                raise Exception(f"Неверный формат ответа Gemini: {json.dumps(data, ensure_ascii=False)[:500]}")
+
+
+# ------------------ Совет ИИ-моделей ------------------
+#
+# "Совет ИИ-моделей" — виртуальная модель (model_id = COUNCIL_MODEL_ID).
+# Никакого отдельного провайдера для неё нет: запрос параллельно уходит
+# трём моделям-участникам (COUNCIL_MEMBER_MODELS) через уже существующий
+# call_ai(), их ответы анонимизируются как A/B/C и передаются
+# модели-судье (COUNCIL_JUDGE_MODEL), которая выбирает лучший ответ или
+# делает синтез и кратко объясняет выбор.
+#
+# call_nvidia / call_freemodel_openai / call_gemini при этом не меняются —
+# совет лишь несколько раз переиспользует их через call_ai().
+
+COUNCIL_MODEL_ID = list(COUNCIL_MODELS.keys())[0]
+
+# Модели-участники совета (отвечают параллельно, анонимно как A, B, C)
+COUNCIL_MEMBER_MODELS = [
+    "meta/llama-4-maverick-17b-128e-instruct",   # A — Llama 4 Maverick
+    "z-ai/glm-5.1",                              # B — GLM-5.1
+    "nvidia/nemotron-3-super-120b-a12b",         # C — Nemotron 3 Super 120B-A12B
+]
+COUNCIL_LABELS = ["A", "B", "C"]
+
+# Модель-судья
+COUNCIL_JUDGE_MODEL = "freemodel/gpt-5.5"
+
+COUNCIL_JUDGE_SYSTEM_PROMPT = (
+    "Ты выступаешь в роли судьи в \"Совете ИИ-моделей\". Пользователь задал "
+    "вопрос, и несколько разных ИИ-моделей дали на него ответы. Их ответы "
+    "анонимно обозначены буквами (A, B, C...) — названия моделей тебе не "
+    "сообщаются, не пытайся их угадывать и не упоминай в ответе.\n\n"
+    "Твоя задача:\n"
+    "1. Внимательно изучи исходный вопрос пользователя (и контекст переписки, "
+    "если он есть) и все варианты ответов.\n"
+    "2. Выбери наиболее точный, полезный и полный вариант, либо составь синтез "
+    "лучших частей нескольких вариантов.\n"
+    "3. Дай пользователю единый финальный ответ на исходный вопрос.\n"
+    "4. После финального ответа кратко (1-3 предложения) поясни свой выбор: "
+    "что было сильнее или слабее в разных вариантах (точность, полнота, "
+    "структура, ошибки и т.п.), без упоминания букв-обозначений или названий "
+    "моделей.\n\n"
+    "Отвечай на том языке, на котором задан исходный вопрос пользователя."
+)
+
+
+async def call_council_member(model_id: str, messages: list) -> tuple[str, dict]:
+    """
+    Вызывает одну модель-участника совета. Ошибки не прерывают весь
+    процесс — вместо ответа подставляется текст с пояснением ошибки,
+    чтобы судья мог продолжить работу с оставшимися вариантами.
+    """
+    try:
+        return await call_ai(model_id, messages)
+    except Exception as e:
+        logger.warning("call_council_member: модель %s не ответила: %s", model_id, e)
+        return (
+            f"[Эта модель не смогла ответить: {e}]",
+            {"requested_model": model_id, "error": str(e)},
+        )
+
+
+def build_council_judge_messages(original_messages: list, labeled_answers: list) -> list:
+    """
+    Собирает список сообщений для модели-судьи:
+    - системный промпт судьи (вместо обычного SYSTEM_PROMPT);
+    - исходная переписка пользователя (без системного сообщения бота);
+    - анонимизированные варианты ответов A/B/C с просьбой выбрать лучший
+      или сделать синтез.
+    """
+    judge_messages = [
+        {
+            "role": "system",
+            "content": COUNCIL_JUDGE_SYSTEM_PROMPT,
+        }
+    ]
+
+    for msg in original_messages:
+        if msg.get("role") == "system":
+            continue
+        judge_messages.append(msg)
+
+    answers_text = "\n\n".join(
+        f"Вариант ответа {label}:\n{content}"
+        for label, content in labeled_answers
+    )
+
+    judge_messages.append({
+        "role": "user",
+        "content": (
+            "Вот варианты ответов разных ИИ-моделей на вопрос выше "
+            "(анонимно, без названий моделей):\n\n"
+            f"{answers_text}\n\n"
+            "Выбери лучший вариант или составь синтез лучших частей, дай "
+            "финальный ответ пользователю и кратко поясни свой выбор."
+        ),
+    })
+
+    return judge_messages
+
+
+async def call_ai_council(messages: list) -> tuple[str, dict]:
+    """
+    Реализация "Совета ИИ-моделей":
+    1. Параллельно опрашивает COUNCIL_MEMBER_MODELS.
+    2. Анонимизирует их ответы как A, B, C.
+    3. Передаёт их вместе с исходным вопросом модели COUNCIL_JUDGE_MODEL.
+    4. Возвращает финальный ответ судьи + диагностику по всем вызовам.
+    """
+    tasks = [call_council_member(model_id, messages) for model_id in COUNCIL_MEMBER_MODELS]
+    results = await asyncio.gather(*tasks)
+
+    labeled_answers = []
+    members_debug = []
+
+    for label, model_id, (content, member_debug) in zip(COUNCIL_LABELS, COUNCIL_MEMBER_MODELS, results):
+        labeled_answers.append((label, content))
+        members_debug.append({
+            "label": label,
+            "model": model_id,
+            "debug": member_debug,
+        })
+
+    judge_messages = build_council_judge_messages(messages, labeled_answers)
+
+    logger.info("call_ai_council: отправляю ответы A/B/C судье %s", COUNCIL_JUDGE_MODEL)
+
+    final_content, judge_debug = await call_ai(COUNCIL_JUDGE_MODEL, judge_messages)
+
+    debug = {
+        "url": "Совет ИИ-моделей (3 модели + судья)",
+        "sent_model": judge_debug.get("sent_model"),
+        "provider_model": judge_debug.get("provider_model"),
+        "council_members": members_debug,
+        "judge_debug": judge_debug,
+    }
+
+    return final_content, debug
+
+
+async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
+    logger.info("call_ai: selected_model=%s", model_id)
+
+    if model_id == COUNCIL_MODEL_ID:
+        content, debug = await call_ai_council(messages)
+    elif model_id.startswith("freemodel/"):
+        raw_model = strip_provider_prefix(model_id)
+
+        if raw_model.startswith("claude-"):
+            # Claude идёт через OpenRouter (/api/v1/chat/completions)
+            # с подменой имени модели через FREEMODEL_CLAUDE_MODEL_MAP
+            # и отдельным ключом FREEMODEL_CLAUDE_API_KEY (если задан)
+            mapped_model = FREEMODEL_CLAUDE_MODEL_MAP.get(raw_model, f"anthropic/{raw_model}")
+            claude_key = FREEMODEL_CLAUDE_API_KEY or FREEMODEL_API_KEY
+
+            # OpenRouter рекомендует передавать HTTP-Referer и X-Title
+            openrouter_headers = {
+                "HTTP-Referer": "https://t.me/",
+                "X-Title": "Telegram AI Bot",
+            }
+
+            logger.info(
+                "call_ai: claude маппинг %s -> %s, base=%s",
+                raw_model, mapped_model, FREEMODEL_CLAUDE_BASE,
+            )
+
+            content, debug = await call_freemodel_openai(
+                mapped_model,
+                messages,
+                FREEMODEL_CLAUDE_BASE,
+                api_key=claude_key,
+                extra_headers=openrouter_headers,
+            )
+        else:
+            content, debug = await call_freemodel_openai(raw_model, messages, FREEMODEL_API_BASE)
+    elif model_id.startswith("ashibalt/"):
+        content, debug = await call_ashibalt(model_id, messages)
+    elif model_id.startswith("gemini/"):
+        content, debug = await call_gemini(model_id, messages)
+    else:
+        content, debug = await call_nvidia(model_id, messages)
+
+    debug["requested_model"] = model_id
+    return content, debug
+
+
+# ------------------ Обработчики выбора моделей ------------------
+
+@router.callback_query(F.data == "select_model")
+async def select_model_group(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "<b>Выберите группу моделей</b>",
+        reply_markup=model_group_keyboard(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("model_group_"))
+async def show_models_group(callback: CallbackQuery, state: FSMContext):
+    group = callback.data.replace("model_group_", "")
+
+    # "Совет ИИ-моделей" — это единственный режим в своей группе, поэтому
+    # выбираем его сразу одним кликом, без промежуточного подменю.
+    if group == "council":
+        model_id = list(COUNCIL_MODELS.keys())[0]
+        await activate_model(callback, state, model_id)
+        return
+
+    data = await state.get_data()
+    current = data.get("selected_model", "")
+    title = GROUP_TITLES.get(group, group.capitalize())
+
+    await callback.message.edit_text(
+        f"<b>Модели группы {escape(title)}</b>",
+        reply_markup=models_keyboard(group, current),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+async def activate_model(callback: CallbackQuery, state: FSMContext, model_id: str):
+    """Сохраняет выбранную модель, переключает в режим чата и показывает
+    подтверждение с человекочитаемым названием модели."""
+    logger.info("activate_model: пользователь выбрал model_id=%s", model_id)
+
+    await state.update_data(selected_model=model_id)
+    await state.set_state(BotStates.chat_mode)
+
+    model_name = MODELS.get(model_id, model_id)
+
+    await callback.message.edit_text(
+        f"<b>Модель выбрана:</b> {escape(model_name)}\n\nПиши сообщения.",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("model_"))
+async def set_model(callback: CallbackQuery, state: FSMContext):
+    model_id = callback.data.replace("model_", "")
+    await activate_model(callback, state, model_id)
+
+
+# ------------------ Обработчик кнопки "Чат с ИИ" ------------------
+
+@router.callback_query(F.data == "mode_chat")
+async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    model_id = data.get("selected_model") or list(CHATGPT_MODELS.keys())[0]
+
+    await state.update_data(selected_model=model_id)
+    await state.set_state(BotStates.chat_mode)
+
+    await callback.message.edit_text(
+        "<b>Режим чата активирован</b>\n\n"
+        "Пиши свои сообщения.\n"
+        "Для анализа фото выбери модель с поддержкой Vision.\n\n"
+        "/clear — очистить историю",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+# ------------------ Очистка истории ------------------
+
+@router.callback_query(F.data == "clear_history")
+async def cb_clear_history(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(chat_history=[])
+    await callback.answer("История очищена ✅", show_alert=True)
+
+
+# ------------------ Обработчики чата ------------------
+
+@router.message(BotStates.chat_mode, F.text)
+async def handle_text(message: Message, state: FSMContext):
+    data = await state.get_data()
+    model_id = get_model(data)
+
+    status_msg = await message.answer("<i>Думаю...</i>", parse_mode="HTML")
+
+    try:
+        history = list(get_history(data))
+        history.append({
+            "role": "user",
+            "content": message.text,
+        })
+
+        messages = [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT,
+            }
+        ] + trim_history(history)
+
+        reply, debug = await call_ai(model_id, messages)
+
+        history.append({
+            "role": "assistant",
+            "content": reply,
+        })
+
+        await state.update_data(chat_history=trim_history(history))
+        await send_ai_reply(status_msg, reply)
+        await send_debug_info(status_msg, debug)
+    except Exception as e:
+        await edit_error(status_msg, "Ошибка", e)
+
+
+@router.message(BotStates.chat_mode, F.photo)
+async def handle_photo(message: Message, state: FSMContext):
+    data = await state.get_data()
+    model_id = get_model(data)
+
+    status_msg = await message.answer("<i>Обрабатываю фото...</i>", parse_mode="HTML")
+
+    try:
+        history = list(get_history(data))
+        photo = message.photo[-1]
+        caption = message.caption or ""
+
+        image_data_url = await telegram_file_to_data_url(
+            message=message,
+            file_id=photo.file_id,
+            mime_type="image/jpeg",
+        )
+
+        user_content = make_vision_content(
+            prompt=caption,
+            image_data_url=image_data_url,
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT,
+            }
+        ] + trim_history(history) + [
+            {
+                "role": "user",
+                "content": user_content,
+            }
         ]
-    ])
+
+        reply, debug = await call_ai(model_id, messages)
+
+        history.append({
+            "role": "user",
+            "content": f"[Фото] {caption}".strip(),
+        })
+        history.append({
+            "role": "assistant",
+            "content": reply,
+        })
+
+        await state.update_data(chat_history=trim_history(history))
+        await send_ai_reply(status_msg, reply)
+        await send_debug_info(status_msg, debug)
+    except Exception as e:
+        await edit_error(
+            status_msg,
+            "Ошибка при обработке фото. Проверьте, что выбрана модель с поддержкой Vision",
+            e,
+        )
 
 
-def model_group_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="ChatGPT", callback_data="model_group_chatgpt")],
-        [InlineKeyboardButton(text="Gemini", callback_data="model_group_gemini")],
-        [InlineKeyboardButton(text="Other", callback_data="model_group_other")],
-        [InlineKeyboardButton(text="Совет ИИ-моделей", callback_data="model_group_council")],
-        [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
-    ])
+@router.message(BotStates.chat_mode, F.document)
+async def handle_image_document(message: Message, state: FSMContext):
+    """
+    Дополнительно: если пользователь отправил картинку не как фото,
+    а как файл, бот тоже попробует её обработать.
+    """
+    document = message.document
 
+    if not document:
+        await message.answer(
+            "Я могу обработать текст или изображение.",
+            reply_markup=cancel_keyboard(),
+        )
+        return
 
-def models_keyboard(group: str, current: str = "") -> InlineKeyboardMarkup:
-    buttons = []
+    mime_type = document.mime_type or ""
+    if not mime_type.startswith("image/"):
+        await message.answer(
+            "Этот файл не похож на изображение. Отправьте фото или картинку.",
+            reply_markup=cancel_keyboard(),
+        )
+        return
 
-    if group == "chatgpt":
-        for model_id, model_name in CHATGPT_MODELS.items():
-            label = f"[x] {model_name}" if model_id == current else model_name
-            buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
-    elif group == "gemini":
-        for model_id, model_name in GEMINI_MODELS.items():
-            label = f"[x] {model_name}" if model_id == current else model_name
-            buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
-    elif group == "other":
-        for model_id, model_name in OTHER_MODELS.items():
-            label = f"[x] {model_name}" if model_id == current else model_name
-            buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
-    elif group == "council":
-        for model_id, model_name in COUNCIL_MODELS.items():
-            label = f"[x] {model_name}" if model_id == current else model_name
-            buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
+    data = await state.get_data()
+    model_id = get_model(data)
 
-    buttons.append([InlineKeyboardButton(text="Назад", callback_data="select_model")])
+    status_msg = await message.answer("<i>Обрабатываю изображение...</i>", parse_mode="HTML")
 
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    try:
+        history = list(get_history(data))
+        caption = message.caption or ""
 
+        image_data_url = await telegram_file_to_data_url(
+            message=message,
+            file_id=document.file_id,
+            mime_type=mime_type,
+        )
 
-def cancel_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Сменить модель", callback_data="select_model"),
-            InlineKeyboardButton(text="Меню", callback_data="main_menu"),
+        user_content = make_vision_content(
+            prompt=caption,
+            image_data_url=image_data_url,
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT,
+            }
+        ] + trim_history(history) + [
+            {
+                "role": "user",
+                "content": user_content,
+            }
         ]
-    ])
+
+        reply, debug = await call_ai(model_id, messages)
+
+        history.append({
+            "role": "user",
+            "content": f"[Изображение-файл] {caption}".strip(),
+        })
+        history.append({
+            "role": "assistant",
+            "content": reply,
+        })
+
+        await state.update_data(chat_history=trim_history(history))
+        await send_ai_reply(status_msg, reply)
+        await send_debug_info(status_msg, debug)
+    except Exception as e:
+        await edit_error(
+            status_msg,
+            "Ошибка при обработке изображения. Проверьте, что выбрана модель с поддержкой Vision",
+            e,
+        )
 
 
-def edit_model_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Flux 2 Klein", callback_data="editmodel_flux.2-klein-4b")],
-        [InlineKeyboardButton(text="Назад", callback_data="main_menu")],
-    ])
-
-
-def admin_notify_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Одобрить", callback_data=f"approve_{user_id}"),
-            InlineKeyboardButton(text="Отклонить", callback_data=f"reject_{user_id}"),
-        ]
-    ])
-
-
-def admin_panel_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Одобренные", callback_data="admin_list_approved")],
-        [InlineKeyboardButton(text="Ожидают", callback_data="admin_list_pending")],
-        [InlineKeyboardButton(text="Отклонённые", callback_data="admin_list_rejected")],
-        [InlineKeyboardButton(text="Статистика", callback_data="admin_stats")],
-    ])
+@router.message(BotStates.chat_mode)
+async def handle_unsupported_message(message: Message):
+    await message.answer(
+        "Я могу обработать текст, фото или изображение-файл. "
+        "Если отправляете фото с заданием, напишите задание в подписи к фото.",
+        reply_markup=cancel_keyboard(),
+    )
