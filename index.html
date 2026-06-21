@@ -451,15 +451,7 @@ html,body{
   position: relative;
 }
 .bot-text pre.code-block[data-lang]::before {
-  content: attr(data-lang);
-  position: absolute;
-  top: 6px;
-  right: 10px;
-  font-size: 10px;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--sub);
-  opacity: .75;
+  display: none;
 }
 .bot-text .code-token.comment { color: #7A7A72; font-style: italic; }
 .bot-text .code-token.keyword { color: #B85A2E; font-weight: 600; }
@@ -1802,12 +1794,13 @@ function mdEscapeRegExp(value) {
 }
 function normalizeCodeLang(lang) {
   const value = String(lang || '').trim().toLowerCase();
-  const aliases = {js:'javascript',jsx:'javascript',ts:'typescript',tsx:'typescript',py:'python',sh:'bash',shell:'bash',zsh:'bash',html:'html',xml:'html',svg:'html'};
+  const aliases = {js:'javascript',jsx:'javascript',ts:'typescript',tsx:'typescript',py:'python',sh:'bash',shell:'bash',zsh:'bash',html:'html',xml:'html',svg:'html',md:'markdown'};
   return (aliases[value] || value).replace(/[^a-z0-9_+\-.]/g, '');
 }
 function highlightCode(code, lang) {
   const l = normalizeCodeLang(lang);
   if (!l) return code;
+  if (l === 'markdown') return code;
   const token = (cls, value) => `<span class="code-token ${cls}">${value}</span>`;
 
   if (l === 'json') {
@@ -2088,7 +2081,6 @@ function renderMarkdownBlocks(text) {
 
     if (!trimmed) {
       flushParagraph();
-      out.push('<br>');
       continue;
     }
 
