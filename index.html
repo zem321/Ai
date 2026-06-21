@@ -389,10 +389,87 @@ html,body{
   font-size: 16px;
   padding: 0 2px;
 }
-.bot-text li {
-  margin-left: 20px;
+.bot-text ul, .bot-text ol {
+  margin: 6px 0 6px 20px;
+  padding-left: 18px;
+}
+.bot-text ul ul, .bot-text ol ol, .bot-text ul ol, .bot-text ol ul {
+  margin-top: 4px;
   margin-bottom: 4px;
 }
+.bot-text li {
+  margin-bottom: 4px;
+}
+.bot-text .task-list-item {
+  list-style: none;
+  margin-left: -18px;
+}
+.bot-text .task-list-item input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0 7px 0 0;
+  vertical-align: -2px;
+  accent-color: var(--accent);
+}
+.bot-text blockquote {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  background: rgba(0, 0, 0, 0.025);
+  border-radius: 0 8px 8px 0;
+  color: var(--text-2);
+}
+.bot-text blockquote pre.code-block {
+  margin: 6px 0;
+}
+.bot-text table.markdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 14px;
+  overflow: hidden;
+  border-radius: 8px;
+}
+.bot-text table.markdown-table th, .bot-text table.markdown-table td {
+  border: 1px solid var(--border-2);
+  padding: 7px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+.bot-text table.markdown-table th {
+  background: rgba(0, 0, 0, 0.035);
+  font-weight: 600;
+  color: var(--text);
+}
+.bot-text table.markdown-table tr:nth-child(even) td {
+  background: rgba(0, 0, 0, 0.015);
+}
+.bot-text del {
+  color: var(--sub);
+}
+.bot-text pre.code-block {
+  position: relative;
+}
+.bot-text pre.code-block[data-lang]::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--sub);
+  opacity: .75;
+}
+.bot-text .code-token.comment { color: #7A7A72; font-style: italic; }
+.bot-text .code-token.keyword { color: #B85A2E; font-weight: 600; }
+.bot-text .code-token.string { color: #2F7D52; }
+.bot-text .code-token.number { color: #3478F6; }
+.bot-text .code-token.function { color: #8A63D2; }
+.bot-text .code-token.operator, .bot-text .code-token.punctuation { color: var(--sub); }
+.bot-text .code-token.tag { color: #B85A2E; }
+.bot-text .code-token.attr { color: #8A63D2; }
+.bot-text .code-token.value { color: #2F7D52; }
 .bot-text h1, .bot-text h2, .bot-text h3 {
   margin-top: 12px;
   margin-bottom: 6px;
@@ -1707,71 +1784,400 @@ function formatMathLaTeX(text) {
   return res;
 }
 
-function md(str) {
-  if (!str) return '';
-  let html = str;
-
-  // Escape HTML characters to prevent XSS
-  html = html
+function mdEscapeHtml(value) {
+  return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+function mdEscapeAttr(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+function mdEscapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function normalizeCodeLang(lang) {
+  const value = String(lang || '').trim().toLowerCase();
+  const aliases = {js:'javascript',jsx:'javascript',ts:'typescript',tsx:'typescript',py:'python',sh:'bash',shell:'bash',zsh:'bash',html:'html',xml:'html',svg:'html'};
+  return (aliases[value] || value).replace(/[^a-z0-9_+\-.]/g, '');
+}
+function highlightCode(code, lang) {
+  const l = normalizeCodeLang(lang);
+  if (!l) return code;
+  const token = (cls, value) => `<span class="code-token ${cls}">${value}</span>`;
 
-  // Extract block code: ``` ... ```
+  if (l === 'json') {
+    return code.replace(/("(?:\\.|[^"\\])*"(?=\s*:))|("(?:\\.|[^"\\])*")|\b(true|false|null)\b|(-?\b\d+(?:\.\d+)?(?:e[+\-]?\d+)?\b)|([{}\[\],:])/gi, (m, key, str, kw, num, punc) => {
+      if (key) return token('attr', key);
+      if (str) return token('string', str);
+      if (kw) return token('keyword', kw);
+      if (num) return token('number', num);
+      return token('punctuation', punc);
+    });
+  }
+
+  if (l === 'html') {
+    return code.replace(/(&lt;!--[\s\S]*?--&gt;)|(&lt;\/?[a-zA-Z][\w:-]*)([\s\S]*?)(&gt;)/g, (m, comment, tag, attrs, close) => {
+      if (comment) return token('comment', comment);
+      const safeAttrs = attrs.replace(/([\w:-]+)(=)"([^"]*)"/g, (_, name, eq, value) => `${token('attr', name)}${token('operator', eq)}${token('value', '"' + value + '"')}`)
+        .replace(/([\w:-]+)(=)'([^']*)'/g, (_, name, eq, value) => `${token('attr', name)}${token('operator', eq)}${token('value', "'" + value + "'")}`);
+      return `${token('tag', tag)}${safeAttrs}${token('tag', close)}`;
+    });
+  }
+
+  if (l === 'css') {
+    return code.replace(/(\/\*[\s\S]*?\*\/)|([.#]?-?[a-zA-Z_][\w-]*(?=\s*\{))|(-?[a-zA-Z_][\w-]*(?=\s*:))|(#[0-9a-fA-F]{3,8}\b)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(\b\d+(?:\.\d+)?(?:px|rem|em|%|vh|vw|s|ms)?\b)|([{}:;,])/g, (m, comment, selector, prop, color, str, num, punc) => {
+      if (comment) return token('comment', comment);
+      if (selector) return token('function', selector);
+      if (prop) return token('attr', prop);
+      if (color || num) return token('number', color || num);
+      if (str) return token('string', str);
+      return token('punctuation', punc);
+    });
+  }
+
+  const keywords = l === 'python'
+    ? 'and|as|assert|async|await|break|class|continue|def|del|elif|else|except|False|finally|for|from|global|if|import|in|is|lambda|None|nonlocal|not|or|pass|raise|return|True|try|while|with|yield|print|self'
+    : l === 'bash'
+      ? 'if|then|else|elif|fi|for|while|do|done|case|esac|function|in|echo|exit|export|local|read|return|sudo|apt|npm|pnpm|yarn|git|cd|ls|cat|grep'
+      : 'break|case|catch|class|const|continue|debugger|default|delete|do|else|export|extends|finally|for|from|function|if|import|in|instanceof|let|new|null|return|super|switch|this|throw|try|typeof|undefined|var|void|while|with|yield|async|await|true|false|interface|type|implements|public|private|protected|readonly';
+  const genericPattern = '(\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*|#[^\\n]*)|("(?:\\\\.|[^"\\\\])*"|\'(?:\\\\.|[^\'\\\\])*\'|`(?:\\\\.|[^`\\\\])*`)|(\\b(?:' + keywords + ')\\b)|(\\b\\d+(?:\\.\\d+)?\\b)|([a-zA-Z_$][\\w$]*(?=\\s*\\())|([+\\-*/%=!<>|&^~?:;,.()[\\]{}])';
+  const re = new RegExp(genericPattern, 'g');
+  return code.replace(re, (m, comment, str, kw, num, fn, op) => {
+    if (comment) return token('comment', comment);
+    if (str) return token('string', str);
+    if (kw) return token('keyword', kw);
+    if (num) return token('number', num);
+    if (fn) return token('function', fn);
+    return token('operator', op);
+  });
+}
+function createCodeBlock(code, lang) {
+  const safeLang = normalizeCodeLang(lang);
+  const label = safeLang ? ` data-lang="${mdEscapeAttr(safeLang)}"` : '';
+  const cls = safeLang ? ` class="language-${mdEscapeAttr(safeLang)}"` : '';
+  return `<pre class="code-block"${label}><code${cls}>${highlightCode(code.trim(), safeLang)}</code></pre>`;
+}
+function extractFencedCodeBlocks(text, codeBlocks) {
+  const lines = text.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const start = lines[i].match(/^(\s*(?:&gt;\s*)*)```([a-zA-Z0-9_+\-.]*)[^`]*$/);
+    if (!start) {
+      out.push(lines[i]);
+      continue;
+    }
+    const quotePrefix = start[1] || '';
+    const lang = start[2] || '';
+    const original = [lines[i]];
+    const code = [];
+    let closed = false;
+    let j = i + 1;
+    for (; j < lines.length; j++) {
+      original.push(lines[j]);
+      let line = lines[j];
+      if (quotePrefix && line.startsWith(quotePrefix)) line = line.slice(quotePrefix.length);
+      if (/^```\s*$/.test(line.trim())) {
+        closed = true;
+        break;
+      }
+      code.push(line);
+    }
+    if (!closed) {
+      out.push(...original);
+      i = j - 1;
+      continue;
+    }
+    const id = `@@BLOCKCODE${codeBlocks.length}@@`;
+    codeBlocks.push(createCodeBlock(code.join('\n'), lang));
+    out.push(quotePrefix + id);
+    i = j;
+  }
+  return out.join('\n');
+}
+function restoreSafeTableHtml(html) {
+  return html.replace(/&lt;(\/?)(table|thead|tbody|tfoot|tr|th|td|caption)([^&]*)&gt;/gi, (match, closing, tag, attrs) => {
+    tag = tag.toLowerCase();
+    if (closing) return `</${tag}>`;
+    let safeAttrs = tag === 'table' ? ' class="markdown-table"' : '';
+    String(attrs || '').replace(/\s(colspan|rowspan|align)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"']+))/gi, (_, name, dValue, sValue, bareValue) => {
+      const raw = dValue || sValue || bareValue || '';
+      if (/^(colspan|rowspan)$/i.test(name)) {
+        const n = Math.max(1, Math.min(20, parseInt(raw, 10) || 1));
+        safeAttrs += ` ${name.toLowerCase()}="${n}"`;
+      } else {
+        const align = String(raw).toLowerCase();
+        if (/^(left|center|right)$/.test(align)) safeAttrs += ` align="${align}"`;
+      }
+      return '';
+    });
+    return `<${tag}${safeAttrs}>`;
+  });
+}
+function replaceEmoji(text) {
+  const map = {
+    smile:'😄', grin:'😁', joy:'😂', laughing:'😆', wink:'😉', blush:'😊', relaxed:'☺️', heart_eyes:'😍', kiss:'😘', thinking:'🤔', neutral_face:'😐', expressionless:'😑', smirk:'😏', unamused:'😒', sweat_smile:'😅', cry:'😢', sob:'😭', angry:'😠', rage:'😡', thumbs_up:'👍', '+1':'👍', thumbs_down:'👎', '-1':'👎', ok_hand:'👌', clap:'👏', pray:'🙏', muscle:'💪', fire:'🔥', star:'⭐', sparkles:'✨', warning:'⚠️', check:'✅', x:'❌', heart:'❤️', broken_heart:'💔', rocket:'🚀', tada:'🎉', white_check_mark:'✅', heavy_check_mark:'✔️'
+  };
+  text = text.replace(/:([a-zA-Z0-9_+\-]+):/g, (m, name) => map[name] || m);
+  const emoticons = {
+    ':-)':'🙂', ':)':'🙂', '=)':'🙂', ';-)':'😉', ';)':'😉', ':-D':'😄', ':D':'😄', ':-(':'☹️', ':(':'☹️', ":'(":'😢', ':-P':'😛', ':P':'😛', '<3':'❤️'
+  };
+  return text.replace(/(^|[\s(])(:-\)|:\)|=\)|;-\)|;\)|:-D|:D|:-\(|:\(|:'\(|:-P|:P|<3)(?=$|[\s).,!?:;])/g, (m, prefix, face) => prefix + (emoticons[face] || face));
+}
+function sanitizeMarkdownUrl(url) {
+  const raw = String(url || '').trim().replace(/&amp;/g, '&');
+  if (/^(https?:\/\/|mailto:|tg:\/\/|\/|#)/i.test(raw)) return mdEscapeAttr(raw);
+  return '#';
+}
+function formatInlineMarkdown(text) {
+  let html = replaceEmoji(String(text || ''));
+
+  html = html.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, label, url) => `<a href="${sanitizeMarkdownUrl(url)}" target="_blank" class="markdown-link">${label}</a>`);
+
+  html = html.replace(/~~([\s\S]+?)~~/g, '<del>$1</del>');
+  html = html.replace(/\*\*\*([\s\S]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/___([\s\S]+?)___/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__([\s\S]+?)__/g, '<strong>$1</strong>');
+  html = html.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  html = html.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
+
+  return html;
+}
+function splitMarkdownTableRow(line) {
+  let value = String(line || '').trim();
+  if (value.startsWith('|')) value = value.slice(1);
+  if (value.endsWith('|')) value = value.slice(0, -1);
+  const cells = [];
+  let cur = '';
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === '\\' && value[i + 1] === '|') {
+      cur += '|';
+      i++;
+    } else if (value[i] === '|') {
+      cells.push(cur.trim());
+      cur = '';
+    } else {
+      cur += value[i];
+    }
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+function isMarkdownTableSeparator(line) {
+  const cells = splitMarkdownTableRow(line);
+  return cells.length > 1 && cells.every(cell => /^:?-{3,}:?$/.test(cell.trim()));
+}
+function tableAlignFromSeparator(cell) {
+  const value = String(cell || '').trim();
+  if (value.startsWith(':') && value.endsWith(':')) return 'center';
+  if (value.endsWith(':')) return 'right';
+  if (value.startsWith(':')) return 'left';
+  return '';
+}
+function tableCellAttrs(content, align) {
+  let text = String(content || '').trim();
+  let attrs = '';
+  const spec = text.match(/\s*\{:?\s*([^}]*(?:colspan|rowspan|align)[^}]*)\}\s*$/i);
+  if (spec) {
+    text = text.slice(0, spec.index).trim();
+    spec[1].replace(/(colspan|rowspan|align)\s*=\s*["']?([^"'\s]+)["']?/gi, (_, name, raw) => {
+      if (/^(colspan|rowspan)$/i.test(name)) {
+        const n = Math.max(1, Math.min(20, parseInt(raw, 10) || 1));
+        attrs += ` ${name.toLowerCase()}="${n}"`;
+      } else {
+        const a = String(raw).toLowerCase();
+        if (/^(left|center|right)$/.test(a)) align = a;
+      }
+      return '';
+    });
+  }
+  if (align) attrs += ` style="text-align:${align}"`;
+  return { text, attrs };
+}
+function renderMarkdownTable(lines) {
+  const header = splitMarkdownTableRow(lines[0]);
+  const aligns = splitMarkdownTableRow(lines[1]).map(tableAlignFromSeparator);
+  const body = lines.slice(2).map(splitMarkdownTableRow);
+  const headHtml = header.map((cell, idx) => {
+    const data = tableCellAttrs(cell, aligns[idx] || '');
+    return `<th${data.attrs}>${formatInlineMarkdown(data.text)}</th>`;
+  }).join('');
+  const bodyHtml = body.map(row => `<tr>${row.map((cell, idx) => {
+    const data = tableCellAttrs(cell, aligns[idx] || '');
+    return `<td${data.attrs}>${formatInlineMarkdown(data.text)}</td>`;
+  }).join('')}</tr>`).join('');
+  return `<table class="markdown-table"><thead><tr>${headHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`;
+}
+function isListLine(line) {
+  return /^(\s*)([-*+]|\d+[.)])\s+/.test(line || '');
+}
+function renderListBlock(lines) {
+  let out = '';
+  const stack = [];
+  const closeList = () => {
+    const top = stack.pop();
+    if (!top) return;
+    if (top.liOpen) out += '</li>';
+    out += `</${top.type}>`;
+  };
+
+  for (const line of lines) {
+    const m = String(line).match(/^(\s*)([-*+]|\d+[.)])\s+([\s\S]*)$/);
+    if (!m) continue;
+    const indent = m[1].replace(/\t/g, '    ').length;
+    const type = /^\d/.test(m[2]) ? 'ol' : 'ul';
+    let content = m[3] || '';
+    const task = content.match(/^\[([ xX])\]\s+([\s\S]*)$/);
+    let liClass = '';
+    let checkbox = '';
+    if (task) {
+      const checked = task[1].toLowerCase() === 'x';
+      content = task[2];
+      liClass = ' class="task-list-item"';
+      checkbox = `<input type="checkbox" disabled${checked ? ' checked' : ''}>`;
+    }
+
+    while (stack.length && indent < stack[stack.length - 1].indent) closeList();
+
+    if (!stack.length || indent > stack[stack.length - 1].indent) {
+      out += `<${type}>`;
+      stack.push({ indent, type, liOpen: false });
+    } else if (indent === stack[stack.length - 1].indent && type !== stack[stack.length - 1].type) {
+      closeList();
+      out += `<${type}>`;
+      stack.push({ indent, type, liOpen: false });
+    }
+
+    const top = stack[stack.length - 1];
+    if (top.liOpen) out += '</li>';
+    out += `<li${liClass}>${checkbox}${formatInlineMarkdown(content)}`;
+    top.liOpen = true;
+  }
+
+  while (stack.length) closeList();
+  return out;
+}
+function isBlockquoteLine(line) {
+  return /^\s*&gt;\s?/.test(line || '');
+}
+function stripBlockquoteMarker(line) {
+  return String(line || '').replace(/^\s*&gt;\s?/, '');
+}
+function isRawHtmlBlockLine(line) {
+  const t = String(line || '').trim();
+  return /^<(table|thead|tbody|tfoot|tr|td|th|caption)(\s|>|$)/i.test(t) || /^<div class="formula-block"/i.test(t);
+}
+function renderMarkdownBlocks(text) {
+  const lines = String(text || '').split('\n');
+  const out = [];
+  let paragraph = [];
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    out.push(paragraph.map(formatInlineMarkdown).join('<br>'));
+    paragraph = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushParagraph();
+      out.push('<br>');
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,3})\s+([\s\S]+)$/);
+    if (heading) {
+      flushParagraph();
+      const level = heading[1].length;
+      out.push(`<h${level}>${formatInlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    if (isRawHtmlBlockLine(line)) {
+      flushParagraph();
+      const block = [line];
+      if (/^<table/i.test(trimmed)) {
+        while (i + 1 < lines.length && !/<\/table>/i.test(lines[i])) block.push(lines[++i]);
+      }
+      out.push(block.join(''));
+      continue;
+    }
+
+    if (i + 1 < lines.length && /\|/.test(line) && isMarkdownTableSeparator(lines[i + 1])) {
+      flushParagraph();
+      const tableLines = [line, lines[i + 1]];
+      i += 2;
+      while (i < lines.length && /\|/.test(lines[i]) && lines[i].trim()) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      i--;
+      out.push(renderMarkdownTable(tableLines));
+      continue;
+    }
+
+    if (isBlockquoteLine(line)) {
+      flushParagraph();
+      const quoteLines = [];
+      while (i < lines.length && isBlockquoteLine(lines[i])) {
+        quoteLines.push(stripBlockquoteMarker(lines[i]));
+        i++;
+      }
+      i--;
+      out.push(`<blockquote>${renderMarkdownBlocks(quoteLines.join('\n'))}</blockquote>`);
+      continue;
+    }
+
+    if (isListLine(line)) {
+      flushParagraph();
+      const listLines = [];
+      while (i < lines.length && isListLine(lines[i])) {
+        listLines.push(lines[i]);
+        i++;
+      }
+      i--;
+      out.push(renderListBlock(listLines));
+      continue;
+    }
+
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  return out.join('<br>');
+}
+
+function md(str) {
+  if (!str) return '';
+  let html = mdEscapeHtml(str);
+
   const codeBlocks = [];
-  html = html.replace(/```(?:[a-zA-Z0-9\-]*)\n([\s\S]*?)```/g, (match, code) => {
-    const id = `##BLOCK_CODE_PLACEHOLDER_${codeBlocks.length}##`;
-    codeBlocks.push(`<pre class="code-block"><code>${code.trim()}</code></pre>`);
-    return id;
-  });
-  html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
-    const id = `##BLOCK_CODE_PLACEHOLDER_${codeBlocks.length}##`;
-    codeBlocks.push(`<pre class="code-block"><code>${code.trim()}</code></pre>`);
-    return id;
-  });
+  html = extractFencedCodeBlocks(html, codeBlocks);
 
-  // Extract inline code: `code`
   const inlineCodes = [];
-  html = html.replace(/`([^`]+)`/g, (match, code) => {
-    const id = `##INLINE_CODE_PLACEHOLDER_${inlineCodes.length}##`;
+  html = html.replace(/`([^`\n]+)`/g, (match, code) => {
+    const id = `@@INLINECODE${inlineCodes.length}@@`;
     inlineCodes.push(`<code>${code}</code>`);
     return id;
   });
 
-  // Format Math and LaTeX Formulas
+  html = restoreSafeTableHtml(html);
   html = formatMathLaTeX(html);
+  html = renderMarkdownBlocks(html);
 
-  // Match markdown links: [text](url)
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="markdown-link">$1</a>');
-
-  // Bold-italic: ***text***
-  html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
-
-  // Bold: **text**
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-
-  // Italics: *text*
-  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-  // Headers: ###, ##, #
-  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
-  html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
-  html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
-
-  // Lists: lines starting with optional space and * or -
-  html = html.replace(/^\s*[\*\-]\s+(.*$)/gim, '<li>$1</li>');
-
-  // Handle newlines: replace \n with <br>
-  html = html.replace(/\n/g, '<br>');
-
-  // Restore inline codes
   for (let idx = 0; idx < inlineCodes.length; idx++) {
-    html = html.replace(`##INLINE_CODE_PLACEHOLDER_${idx}##`, inlineCodes[idx]);
+    html = html.replaceAll(`@@INLINECODE${idx}@@`, inlineCodes[idx]);
   }
 
-  // Restore block codes
   for (let idx = 0; idx < codeBlocks.length; idx++) {
-    html = html.replace(`##BLOCK_CODE_PLACEHOLDER_${idx}##`, codeBlocks[idx]);
+    html = html.replaceAll(`@@BLOCKCODE${idx}@@`, codeBlocks[idx]);
   }
 
   return html;
