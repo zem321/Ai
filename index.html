@@ -447,6 +447,17 @@ html,body{
 .bot-text del {
   color: var(--sub);
 }
+.bot-text .markdown-image {
+  max-width: 100%;
+  border-radius: 10px;
+  display: block;
+  margin: 8px 0;
+}
+.bot-text hr {
+  border: none;
+  border-top: 1px solid var(--border-2);
+  margin: 12px 0;
+}
 .bot-text pre.code-block {
   position: relative;
 }
@@ -1885,6 +1896,17 @@ function extractFencedCodeBlocks(text, codeBlocks) {
       i = j - 1;
       continue;
     }
+    if (normalizeCodeLang(lang) === 'markdown') {
+      let markdownLines = code.slice();
+      while (markdownLines.length && !markdownLines[0].trim()) markdownLines.shift();
+      while (markdownLines.length && !markdownLines[markdownLines.length - 1].trim()) markdownLines.pop();
+      // В markdown-примерах лишние пустые строки часто появляются только из-за форматирования ответа.
+      markdownLines = markdownLines.filter(line => line.trim());
+      if (quotePrefix) out.push(...markdownLines.map(line => quotePrefix + line));
+      else out.push(...markdownLines);
+      i = j;
+      continue;
+    }
     const id = `@@BLOCKCODE${codeBlocks.length}@@`;
     codeBlocks.push(createCodeBlock(code.join('\n'), lang));
     out.push(quotePrefix + id);
@@ -1929,6 +1951,7 @@ function sanitizeMarkdownUrl(url) {
 function formatInlineMarkdown(text) {
   let html = replaceEmoji(String(text || ''));
 
+  html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, alt, url) => `<img src="${sanitizeMarkdownUrl(url)}" alt="${mdEscapeAttr(alt)}" class="markdown-image">`);
   html = html.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, label, url) => `<a href="${sanitizeMarkdownUrl(url)}" target="_blank" class="markdown-link">${label}</a>`);
 
   html = html.replace(/~~([\s\S]+?)~~/g, '<del>$1</del>');
@@ -2092,6 +2115,12 @@ function renderMarkdownBlocks(text) {
       continue;
     }
 
+    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      flushParagraph();
+      out.push('<hr>');
+      continue;
+    }
+
     if (isRawHtmlBlockLine(line)) {
       flushParagraph();
       const block = [line];
@@ -2130,9 +2159,21 @@ function renderMarkdownBlocks(text) {
     if (isListLine(line)) {
       flushParagraph();
       const listLines = [];
-      while (i < lines.length && isListLine(lines[i])) {
-        listLines.push(lines[i]);
-        i++;
+      while (i < lines.length) {
+        if (isListLine(lines[i])) {
+          listLines.push(lines[i]);
+          i++;
+          continue;
+        }
+        if (!String(lines[i] || '').trim()) {
+          let next = i + 1;
+          while (next < lines.length && !String(lines[next] || '').trim()) next++;
+          if (next < lines.length && isListLine(lines[next])) {
+            i = next;
+            continue;
+          }
+        }
+        break;
       }
       i--;
       out.push(renderListBlock(listLines));
@@ -2143,7 +2184,7 @@ function renderMarkdownBlocks(text) {
   }
 
   flushParagraph();
-  return out.join('<br>');
+  return out.join('');
 }
 
 function md(str) {
@@ -2151,7 +2192,11 @@ function md(str) {
   let html = mdEscapeHtml(str);
 
   const codeBlocks = [];
-  html = extractFencedCodeBlocks(html, codeBlocks);
+  for (let pass = 0; pass < 3; pass++) {
+    const next = extractFencedCodeBlocks(html, codeBlocks);
+    if (next === html) break;
+    html = next;
+  }
 
   const inlineCodes = [];
   html = html.replace(/`([^`\n]+)`/g, (match, code) => {
