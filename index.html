@@ -2236,17 +2236,23 @@ function appendBotText(msgEl,text){
   let isTyping=true;
   let userHasScrolledUp=false;
 
-  // Реагируем только на физический скролл пользователя: программный скролл
-  // во время печати не должен «залипать» и не должен создавать пустой хвост.
+  // Отслеживаем скролл пользователя для остановки автоскролла при чтении
   const onUserScrollAction=()=>{
     if(!isTyping||!m)return;
     const isAtBottom=(m.scrollHeight-m.clientHeight-m.scrollTop)<140;
-    userHasScrolledUp=!isAtBottom;
+    
+    let expected = parseFloat(m.dataset.expectedScrollTop);
+    if (!isNaN(expected) && m.scrollTop < expected - 2 && !isAtBottom) {
+      userHasScrolledUp = true;
+    }
+    if (isAtBottom) {
+      userHasScrolledUp = false;
+    }
+    m.dataset.expectedScrollTop = m.scrollTop;
   };
   if(m){
-    m.addEventListener('touchstart',onUserScrollAction,{passive:true});
-    m.addEventListener('touchmove',onUserScrollAction,{passive:true});
-    m.addEventListener('wheel',onUserScrollAction,{passive:true});
+    m.dataset.expectedScrollTop = m.scrollTop;
+    m.addEventListener('scroll',onUserScrollAction,{passive:true});
   }
 
   function smoothScrollLoop(){
@@ -2278,9 +2284,7 @@ function appendBotText(msgEl,text){
       isTyping=false;
       document.getElementById('scroll-spacer')?.remove();
       if(m){
-        m.removeEventListener('touchstart',onUserScrollAction);
-        m.removeEventListener('touchmove',onUserScrollAction);
-        m.removeEventListener('wheel',onUserScrollAction);
+        m.removeEventListener('scroll',onUserScrollAction);
       }
       if(actionsEl)actionsEl.style.display='flex';
       scrollElementAboveInput(b,18,60);
@@ -2452,7 +2456,10 @@ function scrollElementAboveInputNow(el,gap=18){
   const eRect=el.getBoundingClientRect();
   const targetBottom=mRect.bottom-inputH-gap;
   const diff=eRect.bottom-targetBottom;
-  if(diff>0)m.scrollTop=Math.min(maxScrollTop(m),m.scrollTop+diff);
+  if(diff>0){
+    m.scrollTop=Math.min(maxScrollTop(m),m.scrollTop+diff);
+    m.dataset.expectedScrollTop = m.scrollTop;
+  }
 }
 function scrollElementAboveInput(el,gap=18,delay=30){
   setTimeout(()=>scrollElementAboveInputNow(el,gap),delay);
