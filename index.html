@@ -2278,14 +2278,7 @@ function appendBotText(msgEl,text){
   }
 
   function smoothScrollLoop(){
-    if(m&&!userHasScrolledUp) {
-       // Ограничиваем частоту прокрутки, чтобы избежать дребезжания при рендеринге Markdown
-       const now = performance.now();
-       if (!m._lastScrollTime || now - m._lastScrollTime > 32) {
-         scrollElementAboveInputNow(b,18);
-         m._lastScrollTime = now;
-       }
-    }
+    if(m&&!userHasScrolledUp)scrollElementAboveInputNow(b,18);
     if(isTyping)requestAnimationFrame(smoothScrollLoop);
   }
   if(m)requestAnimationFrame(smoothScrollLoop);
@@ -2294,10 +2287,22 @@ function appendBotText(msgEl,text){
   function type(){
     if(i<text.length){
       textEl.innerHTML=md(text.slice(0,i+1));
+
+      const botMsg=b.querySelector('.bot-msg');
+      if(botMsg){
+        botMsg.style.overflow='hidden';
+        botMsg.style.maxHeight=botMsg.scrollHeight+'px';
+      }
+
       i++;
       setTimeout(type,12);
     }else{
       textEl.innerHTML=md(text);
+      const botMsg=b.querySelector('.bot-msg');
+      if(botMsg){
+        botMsg.style.maxHeight='none';
+        botMsg.style.overflow='visible';
+      }
       isTyping=false;
       if(m){
         m.removeEventListener('wheel',onWheel);
@@ -2479,6 +2484,7 @@ function lastMessageRow(){
 function scrollElementAboveInputNow(el,gap=18){
   const m=document.getElementById('messages');
   if(!m||!el)return;
+  syncMessagesBottomInset();
   const input=document.querySelector('.input-area');
   const inputH=input?.offsetHeight||110;
   const mRect=m.getBoundingClientRect();
