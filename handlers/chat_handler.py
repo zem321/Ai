@@ -55,9 +55,15 @@ TEXT_EXTENSIONS = {
     ".vue", ".svelte", ".r", ".pl", ".lua"
 }
 FILE_SEND_KEYWORDS = [
+    "файл", "txt", ".txt", "скачать", "сохрани", "скинь",
     "отправь файлом", "пришли файлом", "в файл", "сохрани в файл",
     "сделай файл", "дай файл", "скачать файл", "дай txt", "в txt",
     "send as file", "as a file", "в виде файла", "файлом"
+]
+# Короткая команда "перешли последний ответ файлом" - только точные короткие фразы
+FILE_RESEND_COMMANDS = [
+    "файлом", "в файл", "txt", "в txt", "файл", 
+    "отправь файлом", "пришли файлом", "дай файл", "скачать", "сохрани"
 ]
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
@@ -875,10 +881,14 @@ async def handle_text(message: Message, state: FSMContext):
     text = (message.text or "").strip()
     low = text.lower()
 
-    # Команда "отправь файлом" - прислать последний ответ как файл
-    file_request_only = any(k in low for k in FILE_SEND_KEYWORDS) and len(text) < 150
-    # эвристика: если в сообщении есть вопросительные слова / длинный текст - это не команда, а обычный запрос
-    if file_request_only and not any(x in low for x in ["?", "сделай", "напиши", "сгенери", "создай", "почему", "как", "что", "когда"]):
+    want_file = any(k in low for k in FILE_SEND_KEYWORDS)
+
+    # Короткая команда "перешли последний ответ файлом" - только для совсем коротких сообщений
+    # вроде "файлом", "в файл", "txt" и т.п.
+    is_resend_command = low.strip() in FILE_RESEND_COMMANDS
+    file_request_only = want_file and is_resend_command
+
+    if file_request_only:
         history = get_history(data)
         last_assistant = None
         for msg in reversed(history):
@@ -893,7 +903,6 @@ async def handle_text(message: Message, state: FSMContext):
         return
 
     model_id = get_model(data)
-    want_file = any(k in low for k in FILE_SEND_KEYWORDS)
 
     # Если пользователь просит файл - добавляем явную инструкцию к промпту,
     # чтобы модель не отказывалась
@@ -924,6 +933,8 @@ async def handle_text(message: Message, state: FSMContext):
             "content": reply,
         })
         await state.update_data(chat_history=trim_history(history))
+
+        # Сначала ответ в чат, затем файл - сразу, без второго запроса
         await send_ai_reply(status_msg, reply)
         if want_file:
             filename = guess_filename_from_prompt(text, reply)
