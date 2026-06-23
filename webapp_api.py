@@ -14,17 +14,17 @@ handlers.chat_handler / handlers.image_handler, чтобы бот и мини-а
 Проверенный user_id сверяется с той же таблицей users (approved/pending/
 rejected), которой пользуется бот, — то есть доступ к мини-аппу есть
 только у тех, кому admin выдал доступ в самом боте.
+
 """
 
 import sys
 import os
 
 # Решение проблемы путей импорта в Python (sys.path)
-# Добавляем директорию файла и родительскую директорию в sys.path,
-# чтобы при импорте из папки handlers/ модули keyboards, states и database импортировались без ошибок.
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
+
 parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
@@ -35,14 +35,16 @@ import hmac
 import hashlib
 import logging
 import inspect
+import re
 from urllib.parse import parse_qsl
 from aiohttp import web
+
 import database as db
 
 logger = logging.getLogger(__name__)
-logger.info("webapp_api module loaded: build=auth-enforced-v5")
+logger.info("webapp_api module loaded: build=auth-enforced-v5 + file-support")
 
-# Динамический импорт с поддержкой различных версий и структур проекта (chat_handler, chat_handler_4 и т.д.)
+# Динамический импорт с поддержкой различных версий и структур проекта
 try:
     from handlers.chat_handler import call_ai, SYSTEM_PROMPT, trim_history, make_vision_content, MAX_HISTORY
     logger.info("Imported chat_handler functions from handlers.chat_handler")
@@ -78,14 +80,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 # Сколько секунд считаем initData валидной (защита от replay).
-INIT_DATA_MAX_AGE = 24  * 60 *  60  # 24 часа
+INIT_DATA_MAX_AGE = 24 * 60 * 60  # 24 часа
 
-# ------------------ Автоопределение режима (чат / картинка) ------------------
-#
-# Эвристика на ключевых словах: если сообщение явно похоже на просьбу
-# нарисовать/сгенерировать изображение — уходим в генерацию картинки,
-# иначе — в обычный чат. Без отдельного LLM-вызова, чтобы не тратить
-# лишнее время и токены на классификацию каждого сообщения.
+# ------------------ Автоопределение режима (чат / картинка / файл) ------------------
+
 IMAGE_KEYWORDS = (
     "нарису", "нарисуй", "нарисовать", "сгенерируй", "сгенерировать",
     "генерац", "сделай картинк", "сделай фото", "сделай изображен",
@@ -97,38 +95,122 @@ IMAGE_KEYWORDS = (
     "картинку с", "картинка с", "изображение с", "фото с",
 )
 
+FILE_KEYWORDS = [
+    "файл", "txt", ".txt", "скачать", "сохрани", "скинь",
+    "отправь файлом", "пришли файлом", "в файл", "сохрани в файл",
+    "сделай файл", "дай файл", "скачать файл", "дай txt", "в txt",
+    "send as file", "as a file", "в виде файла", "файлом",
+    "html", "python", "js", "json", "css", "markdown", "md"
+]
+
 def detect_intent(text: str) -> str:
-    """Возвращает 'image' или 'chat' на основе текста запроса."""
+    """Возвращает 'image', 'file' или 'chat'."""
     t = (text or "").strip().lower()
     if not t:
         return "chat"
+
     for kw in IMAGE_KEYWORDS:
         if kw in t:
             return "image"
+
+    for kw in FILE_KEYWORDS:
+        if kw in t:
+            return "file"
+
     return "chat"
 
+def is_file_request(text: str) -> bool:
+    """Проверяет, просит ли пользователь отправить ответ файлом."""
+    low = (text or "").lower().strip()
+    file_commands = [
+        "файлом", "в файл", "txt", "в txt", "файл",
+        "отправь файлом", "пришли файлом", "дай файл", "скачать", "сохрани"
+    ]
+    return any(cmd in low for cmd in file_commands) or any(kw in low for kw in FILE_KEYWORDS)
+
+def guess_filename_from_prompt(user_prompt: str, ai_reply: str) -> str:
+    """Пытается угадать имя файла."""
+    ext_map = {
+        "python": "py", "py": "py",
+        "javascript": "js", "js": "js",
+        "typescript": "ts", "ts": "ts",
+        "json": "json", "html": "html",
+        "css": "css", "java": "java",
+        "c": "c", "cpp": "cpp",
+        "go": "go", "rust": "rs", "rs": "rs",
+        "php": "php", "ruby": "rb",
+        "bash": "sh", "sh": "sh",
+        "sql": "sql", "yaml": "yml", "yml": "yml",
+        "xml": "xml", "markdown": "md", "md": "md",
+        "txt": "txt", "csv": "csv",
+    }
+
+    # 1. Явное имя файла в промпте
+    m = re.search(
+        r'([a-zA-Z0-9_.-]+\.(?:py|js|ts|json|csv|md|txt|html|css|java|c|cpp|go|rs|php|rb|sh|yaml|yml|sql|xml|toml|ini|env))\b',
+        user_prompt, re.I
+    )
+    if m:
+        return m.group(1)
+
+    # 2. Расширение в промпте
+    m = re.search(
+        r'(?:^|\s|в\s+|как?\s+|файл\s+|\.)'
+        r'(py|js|ts|json|csv|md|txt|html|css|java|cpp|go|rs|php|rb|sh|yaml|yml|sql|xml|toml|ini|env|'
+        r'python|javascript|typescript|markdown|bash|shell|rust|ruby)\b',
+        user_prompt, re.I
+    )
+    if m:
+        lang = m.group(1).lower()
+        ext = ext_map.get(lang, lang)
+        return f"ответ.{ext}"
+
+    # 3. Язык в markdown-блоке ответа
+    m = re.search(r'^```([a-zA-Z0-9_+-]+)', ai_reply.strip(), re.MULTILINE)
+    if m:
+        lang = m.group(1).lower()
+        ext = ext_map.get(lang, "txt")
+        return f"ответ.{ext}"
+
+    return "ответ.txt"
+
+def get_file_type(filename: str) -> str:
+    ext = filename.split(".")[-1].lower() if "." in filename else ""
+    types = {
+        "html": "Code · HTML",
+        "py": "Code · Python",
+        "js": "Code · JavaScript",
+        "ts": "Code · TypeScript",
+        "json": "JSON",
+        "css": "CSS",
+        "md": "Markdown",
+        "txt": "Text",
+        "csv": "CSV",
+        "sql": "SQL",
+    }
+    return types.get(ext, "Code")
+
 # ------------------ Проверка Telegram WebApp initData ------------------
+
 def check_init_data(init_data: str) -> dict | None:
-    """
-    Проверяет подпись initData по алгоритму Telegram.
-    https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
-    Возвращает распарсенные данные (включая user) при успехе, иначе None.
-    """
     if not BOT_TOKEN:
         logger.error("webapp_api: BOT_TOKEN не задан — все запросы мини-аппа будут отклонены")
         return None
+
     if not init_data:
-        logger.warning("webapp_api: запрос без initData (заголовок Authorization отсутствует/пуст)")
+        logger.warning("webapp_api: запрос без initData")
         return None
+
     try:
         pairs = parse_qsl(init_data, keep_blank_values=True)
     except Exception:
         return None
+
     data = dict(pairs)
     received_hash = data.pop("hash", None)
     if not received_hash:
-        logger.warning("webapp_api: initData без hash — отклонено")
         return None
+
     auth_date = data.get("auth_date")
     if auth_date:
         try:
@@ -137,92 +219,86 @@ def check_init_data(init_data: str) -> dict | None:
                 return None
         except ValueError:
             pass
+
     check_string = "\n".join(f"{k}={v}" for k, v in sorted(data.items()))
     secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
     computed_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
+
     if not hmac.compare_digest(computed_hash, received_hash):
-        logger.warning("webapp_api: подпись initData не совпала — отклонено")
+        logger.warning("webapp_api: подпись initData не совпала")
         return None
+
     user_raw = data.get("user")
     if user_raw:
         try:
             data["user"] = json.loads(user_raw)
         except Exception:
             data["user"] = None
+
     return data
 
 async def _authorize(request: web.Request) -> tuple[int | None, web.Response | None]:
-    """
-    Извлекает и проверяет initData из заголовка Authorization
-    ('tma <initData>', стандарт Telegram), сверяет пользователя с базой
-    разрешённых. Возвращает (user_id, None) при успехе либо
-    (None, error_response) при отказе.
-    """
     auth_header = request.headers.get("Authorization", "")
     init_data = ""
     if auth_header.startswith("tma "):
         init_data = auth_header[4:]
     else:
-        # Фоллбек — initData может прийти отдельным заголовком
         init_data = request.headers.get("X-Telegram-Init-Data", "")
+
     parsed = check_init_data(init_data)
     if not parsed or not parsed.get("user"):
         return None, web.json_response(
             {"error": "unauthorized", "message": "Не удалось подтвердить пользователя Telegram."},
             status=401,
         )
+
     user_id = parsed["user"].get("id")
     if not user_id:
         return None, web.json_response({"error": "unauthorized"}, status=401)
+
     if user_id == ADMIN_ID:
         return user_id, None
+
     if await db.is_approved(user_id):
         return user_id, None
+
     if await db.is_pending(user_id):
         logger.info("webapp_api: пользователь %s — доступ ожидает одобрения", user_id)
         return None, web.json_response(
             {"error": "pending", "message": "Запрос на доступ ещё не одобрен."},
             status=403,
         )
+
     if await db.is_rejected(user_id):
         logger.info("webapp_api: пользователь %s — доступ отклонён", user_id)
         return None, web.json_response(
             {"error": "rejected", "message": "Доступ отклонён."},
             status=403,
         )
-    logger.info("webapp_api: пользователь %s — не найден в базе, нет доступа", user_id)
+
+    logger.info("webapp_api: пользователь %s — не найден в базе", user_id)
     return None, web.json_response(
         {"error": "no_access", "message": "Нет доступа. Откройте бота и отправьте /start."},
         status=403,
     )
 
 def build_vision_content(text: str, image_url: str):
-    """
-    Инспектирует сигнатуру функции make_vision_content в рантайме.
-    Вызывает её с правильным порядком и именами аргументов,
-    чтобы гарантировать совместимость с любой версией chat_handler.py.
-    """
     try:
         sig = inspect.signature(make_vision_content)
         params = list(sig.parameters.keys())
-        logger.info("make_vision_content signature parameters: %s", params)
-        
+
         kwargs = {}
-        # Пробуем связать аргументы по имени
         for p in params:
             if p in ('image_url', 'url', 'img_url', 'img', 'image_data_url', 'data_url', 'dataUrl'):
                 kwargs[p] = image_url
             elif p in ('text', 'caption', 'prompt', 'message', 'msg'):
                 kwargs[p] = text
-        
-        # Если удалось связать все аргументы по именам
+
         if kwargs and len(kwargs) == len(params):
             return make_vision_content(**kwargs)
-            
-        # Если по имени не вышло, пробуем позиционный разбор на основе количества
+
         if len(params) == 1:
             res = make_vision_content(image_url)
-            # Если возвращенный контент не содержит текстового блока, дополняем его
             if isinstance(res, list):
                 has_text = any(item.get("type") == "text" for item in res if isinstance(item, dict))
                 if not has_text:
@@ -232,6 +308,7 @@ def build_vision_content(text: str, image_url: str):
                 return [{"type": "text", "text": text}, res]
             else:
                 return [{"type": "text", "text": text}, {"type": "image_url", "image_url": {"url": image_url}}]
+
         elif len(params) >= 2:
             first_param = params[0]
             if first_param in ('image_url', 'url', 'img_url', 'img', 'image_data_url', 'data_url', 'dataUrl'):
@@ -239,40 +316,32 @@ def build_vision_content(text: str, image_url: str):
             else:
                 return make_vision_content(text, image_url)
     except Exception as e:
-        logger.warning("build_vision_content: error calling make_vision_content: %r. Falling back to default format.", e)
-        
-    # Дефолтный формат OpenAI/Anthropic
+        logger.warning("build_vision_content error: %r", e)
+
     return [
         {"type": "text", "text": text},
         {"type": "image_url", "image_url": {"url": image_url}}
     ]
 
 # ------------------ HTTP-хендлеры ------------------
+
 async def api_me(request: web.Request) -> web.Response:
-    """Проверка доступа — мини-апп вызывает это при старте."""
     user_id, err = await _authorize(request)
     if err is not None:
         return err
     if not isinstance(user_id, int):
-        logger.error("webapp_api: /api/me — user_id некорректен (%r), отклоняю", user_id)
         return web.json_response({"error": "unauthorized"}, status=401)
     return web.json_response({"ok": True, "user_id": user_id})
 
 async def api_chat(request: web.Request) -> web.Response:
-    """
-    Принимает: {"model": str, "history": [...], "message": str, "attachments": [...]}
-    history — предыдущие сообщения в формате [{"role": "user"/"assistant", "content": str}, ...]
-    Если по тексту определяется, что пользователь хочет картинку —
-    режим переключается на генерацию изображения автоматически и в ответе
-    возвращается base64 картинки вместо текста (intent == "image").
-    """
     user_id, err = await _authorize(request)
     if err is not None:
-        logger.info("webapp_api: /api/chat — отказ в доступе, прерываю запрос")
+        logger.info("webapp_api: /api/chat — отказ в доступе")
         return err
+
     if not isinstance(user_id, int):
-        logger.error("webapp_api: /api/chat — user_id некорректен (%r), отклоняю", user_id)
         return web.json_response({"error": "unauthorized"}, status=401)
+
     try:
         payload = await request.json()
     except Exception:
@@ -286,17 +355,19 @@ async def api_chat(request: web.Request) -> web.Response:
     if not user_text and not attachments:
         return web.json_response({"error": "empty_message"}, status=400)
 
-    # Если текста нет, но есть вложения, установим дефолтное описание
     if not user_text and attachments:
         user_text = "Вложения"
 
     intent = detect_intent(user_text)
+
+    # === ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ===
     if intent == "image":
         try:
             image_bytes = await generate_image(user_text)
         except Exception as e:
             logger.exception("webapp_api: ошибка генерации изображения")
             return web.json_response({"error": "generation_failed", "message": str(e)}, status=502)
+
         import base64 as b64
         return web.json_response({
             "intent": "image",
@@ -304,21 +375,17 @@ async def api_chat(request: web.Request) -> web.Response:
             "prompt": user_text,
         })
 
-    # Обычный чат
+    # === ОБЫЧНЫЙ ЧАТ ===
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages += trim_history(list(history))
 
-    # Сбор image_url content-блоков для vision-моделей из присланных вложений
     image_attachments = [
-        a for a in attachments 
+        a for a in attachments
         if a.get("dataUrl") and a.get("type", "").startswith("image/")
     ]
 
     if image_attachments:
-        # Используем инспектирующий хелпер для вызова make_vision_content
         user_content = build_vision_content(user_text, image_attachments[0]["dataUrl"])
-        
-        # Если изображений несколько, и получен список блоков, добавляем остальные.
         if len(image_attachments) > 1 and isinstance(user_content, list):
             for img in image_attachments[1:]:
                 user_content.append({
@@ -329,12 +396,30 @@ async def api_chat(request: web.Request) -> web.Response:
         user_content = user_text
 
     messages.append({"role": "user", "content": user_content})
+
     try:
         reply, debug = await call_ai(model_id, messages)
     except Exception as e:
         logger.exception("webapp_api: ошибка call_ai")
         return web.json_response({"error": "ai_failed", "message": str(e)}, status=502)
 
+    # === НОВЫЙ БЛОК: ОТПРАВКА ФАЙЛА ===
+    want_file = is_file_request(user_text)
+
+    if want_file:
+        filename = guess_filename_from_prompt(user_text, reply)
+        file_type = get_file_type(filename)
+
+        return web.json_response({
+            "file": {
+                "name": filename,
+                "type": file_type,
+                "content": reply,
+                "mime": "text/html" if filename.endswith(".html") else "text/plain"
+            }
+        })
+
+    # Обычный текстовый ответ
     return web.json_response({
         "intent": "chat",
         "reply": reply,
@@ -342,25 +427,28 @@ async def api_chat(request: web.Request) -> web.Response:
     })
 
 async def api_image(request: web.Request) -> web.Response:
-    """Принудительная генерация изображения, минуя автоопределение."""
     user_id, err = await _authorize(request)
     if err is not None:
         return err
+
     if not isinstance(user_id, int):
-        logger.error("webapp_api: /api/image — user_id некорректен (%r), отклоняю", user_id)
         return web.json_response({"error": "unauthorized"}, status=401)
+
     try:
         payload = await request.json()
     except Exception:
         return web.json_response({"error": "bad_request"}, status=400)
+
     prompt = (payload.get("prompt") or "").strip()
     if not prompt:
         return web.json_response({"error": "empty_prompt"}, status=400)
+
     try:
         image_bytes = await generate_image(prompt)
     except Exception as e:
         logger.exception("webapp_api: ошибка генерации изображения")
         return web.json_response({"error": "generation_failed", "message": str(e)}, status=502)
+
     import base64 as b64
     return web.json_response({
         "image_base64": b64.b64encode(image_bytes).decode("ascii"),
@@ -368,11 +456,9 @@ async def api_image(request: web.Request) -> web.Response:
     })
 
 def setup_webapp_routes(app: web.Application) -> None:
-    """Регистрирует все API-роуты мини-аппа в существующем aiohttp Application."""
-    # Увеличиваем лимит размера входящих запросов до 30 МБ, чтобы поддерживать большие фото без ошибок 413
     try:
         app._client_max_size = 1024 * 1024 * 30
-        logger.info("webapp_api: aiohttp client_max_size increased to 30MB successfully")
+        logger.info("webapp_api: client_max_size increased to 30MB")
     except Exception as e:
         logger.warning("webapp_api: failed to increase client_max_size: %r", e)
 
