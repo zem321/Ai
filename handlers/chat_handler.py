@@ -1,15 +1,27 @@
 import asyncio
+
 import os
+
 import json
+
 import base64
+
 import logging
+
 import re
+
 from io import BytesIO
+
 from html import escape
+
 import aiohttp
+
 from aiogram import Router, F
+
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
+
 from aiogram.fsm.context import FSMContext
+
 from keyboards import (
     cancel_keyboard,
     model_group_keyboard,
@@ -21,10 +33,12 @@ from keyboards import (
     GROUP_TITLES,
     MODELS,
 )
+
 from states import BotStates
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 router = Router()
 
 SYSTEM_PROMPT = (
@@ -47,6 +61,7 @@ MAX_IMAGE_BYTES = 15 * 1024 * 1024
 # --- Файлы ---
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_FILE_CHARS = 120_000
+
 TEXT_EXTENSIONS = {
     ".txt", ".md", ".json", ".csv", ".log", ".yaml", ".yml", ".xml", ".html", ".htm",
     ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".c", ".cpp", ".h", ".hpp", ".cs",
@@ -54,15 +69,17 @@ TEXT_EXTENSIONS = {
     ".sql", ".ini", ".cfg", ".conf", ".toml", ".env", ".css", ".scss", ".less",
     ".vue", ".svelte", ".r", ".pl", ".lua"
 }
+
 FILE_SEND_KEYWORDS = [
     "файл", "txt", ".txt", "скачать", "сохрани", "скинь",
     "отправь файлом", "пришли файлом", "в файл", "сохрани в файл",
     "сделай файл", "дай файл", "скачать файл", "дай txt", "в txt",
     "send as file", "as a file", "в виде файла", "файлом"
 ]
+
 # Короткая команда "перешли последний ответ файлом" - только точные короткие фразы
 FILE_RESEND_COMMANDS = [
-    "файлом", "в файл", "txt", "в txt", "файл", 
+    "файлом", "в файл", "txt", "в txt", "файл",
     "отправь файлом", "пришли файлом", "дай файл", "скачать", "сохрани"
 ]
 
@@ -70,12 +87,15 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 FREEMODEL_API_KEY = os.getenv("FREEMODEL_API_KEY") or os.getenv("API_KEY", "")
+
 # Базовый адрес для большинства моделей freemodel/* (OpenAI-совместимый формат,
 # например freemodel/gpt-*). Эндпоинт: {base}/v1/chat/completions
 FREEMODEL_API_BASE = os.getenv("FREEMODEL_OPENAI_BASE", "https://api.freemodel.dev")
+
 # Базовый адрес для моделей freemodel/claude-* — OpenRouter.
 # Эндпоинт: {base}/v1/chat/completions
 FREEMODEL_CLAUDE_BASE = os.getenv("FREEMODEL_CLAUDE_BASE", "https://openrouter.ai/api")
+
 # Отдельный ключ для OpenRouter. Если не задан — используется FREEMODEL_API_KEY.
 FREEMODEL_CLAUDE_API_KEY = os.getenv("FREEMODEL_CLAUDE_API_KEY", "")
 
@@ -146,29 +166,36 @@ if not FREEMODEL_API_KEY:
     logger.warning(
         "FREEMODEL_API_KEY не задан. Запросы к freemodel/gpt-* будут падать с ошибкой."
     )
+
 if not FREEMODEL_CLAUDE_API_KEY and not FREEMODEL_API_KEY:
     logger.warning(
         "Ни FREEMODEL_CLAUDE_API_KEY, ни FREEMODEL_API_KEY не заданы. "
         "Запросы к Claude через OpenRouter будут падать с ошибкой."
     )
+
 if not ASHIBALT_API_KEY:
     logger.warning(
         "ASHIBALT_API_KEY не задан. Запросы к Ashibalt будут падать с ошибкой."
     )
+
 
 # ------------------ Вспомогательные функции ------------------
 
 def get_history(data):
     return data.get("chat_history", [])
 
+
 def get_model(data):
     return data.get("selected_model", list(CHATGPT_MODELS.keys())[0])
+
 
 def strip_provider_prefix(model_id: str) -> str:
     return model_id.replace("freemodel/", "", 1)
 
+
 def trim_history(history: list) -> list:
     return history[-MAX_HISTORY:]
+
 
 def guess_mime_type(file_path: str | None) -> str:
     if not file_path:
@@ -182,6 +209,7 @@ def guess_mime_type(file_path: str | None) -> str:
         return "image/gif"
     return "image/jpeg"
 
+
 def extract_api_error(data) -> str:
     if not isinstance(data, dict):
         return str(data)
@@ -194,6 +222,7 @@ def extract_api_error(data) -> str:
         return str(data["detail"])
     return json.dumps(data, ensure_ascii=False)[:500]
 
+
 async def edit_error(status_msg: Message, title: str, error: Exception):
     logger.exception(title)
     await status_msg.edit_text(
@@ -201,6 +230,7 @@ async def edit_error(status_msg: Message, title: str, error: Exception):
         parse_mode="HTML",
         reply_markup=cancel_keyboard(),
     )
+
 
 async def send_ai_reply(status_msg: Message, reply: str):
     """
@@ -210,10 +240,13 @@ async def send_ai_reply(status_msg: Message, reply: str):
     """
     if not reply:
         reply = "Пустой ответ от модели."
+
     chunks = [reply[i:i + 3900] for i in range(0, len(reply), 3900)]
+
     if len(chunks) == 1:
         await status_msg.edit_text(chunks[0], reply_markup=cancel_keyboard())
         return
+
     await status_msg.edit_text(chunks[0])
     for index, chunk in enumerate(chunks[1:], start=1):
         is_last = index == len(chunks) - 1
@@ -222,45 +255,66 @@ async def send_ai_reply(status_msg: Message, reply: str):
             reply_markup=cancel_keyboard() if is_last else None,
         )
 
+
 # --- Работа с файлами для отправки ---
 
 def strip_code_fences(text: str) -> str:
     """Если ответ обернут в ```lang ... ```, вытаскивает чистое содержимое."""
     text = text.strip()
-    # ```lang\n ... \n```
     m = re.match(r"^```[a-zA-Z0-9_+-]*\s*\n(.*?)\n```\s*$", text, re.DOTALL)
     if m:
         return m.group(1)
     return text
 
+
 def guess_filename_from_prompt(user_prompt: str, ai_reply: str) -> str:
     """Пытается вытащить имя файла из запроса пользователя, иначе угадывает по содержимому."""
-    # 1. явное имя в промпте: script.py, report.md и т.п.
-    m = re.search(r'([a-zA-Z0-9_.-]+\.(?:py|js|ts|json|csv|md|txt|html|css|java|c|cpp|go|rs|php|rb|sh|yaml|yml|sql|xml))\b', user_prompt, re.I)
+
+    ext_map = {
+        "python": "py", "py": "py",
+        "javascript": "js", "js": "js",
+        "typescript": "ts", "ts": "ts",
+        "json": "json", "html": "html",
+        "css": "css", "java": "java",
+        "c": "c", "cpp": "cpp", "c++": "cpp",
+        "go": "go", "rust": "rs", "rs": "rs",
+        "php": "php", "ruby": "rb", "rb": "rb",
+        "bash": "sh", "sh": "sh", "shell": "sh",
+        "sql": "sql", "yaml": "yml", "yml": "yml",
+        "xml": "xml", "markdown": "md", "md": "md",
+        "txt": "txt", "csv": "csv", "toml": "toml",
+        "ini": "ini", "env": "env",
+    }
+
+    # 1. Явное имя файла в промпте: script.py, report.md и т.п.
+    m = re.search(
+        r'([a-zA-Z0-9_.-]+\.(?:py|js|ts|json|csv|md|txt|html|css|java|c|cpp|go|rs|php|rb|sh|yaml|yml|sql|xml|toml|ini|env))\b',
+        user_prompt, re.I
+    )
     if m:
         return m.group(1)
 
-    # 2. язык в markdown-блоке ответа
+    # 2. Расширение или язык упомянут в промпте: "скинь в .py", "дай json", "в csv" и т.п.
+    m = re.search(
+        r'(?:^|\s|в\s+|как?\s+|файл\s+|\.)'
+        r'(py|js|ts|json|csv|md|txt|html|css|java|cpp|go|rs|php|rb|sh|yaml|yml|sql|xml|toml|ini|env|'
+        r'python|javascript|typescript|markdown|bash|shell|rust|ruby)\b',
+        user_prompt, re.I
+    )
+    if m:
+        lang = m.group(1).lower()
+        ext = ext_map.get(lang, lang)
+        return f"ответ.{ext}"
+
+    # 3. Язык в markdown-блоке ответа модели
     m = re.search(r'^```([a-zA-Z0-9_+-]+)', ai_reply.strip(), re.MULTILINE)
     if m:
         lang = m.group(1).lower()
-        ext_map = {
-            "python": "py", "py": "py",
-            "javascript": "js", "js": "js",
-            "typescript": "ts", "ts": "ts",
-            "json": "json", "html": "html",
-            "css": "css", "java": "java",
-            "c": "c", "cpp": "cpp", "c++": "cpp",
-            "go": "go", "rust": "rs", "rs": "rs",
-            "php": "php", "ruby": "rb", "rb": "rb",
-            "bash": "sh", "sh": "sh", "shell": "sh",
-            "sql": "sql", "yaml": "yml", "yml": "yml",
-            "xml": "xml", "markdown": "md", "md": "md",
-        }
         ext = ext_map.get(lang, "txt")
         return f"ответ.{ext}"
 
     return "ответ.txt"
+
 
 async def send_text_as_file(target_message: Message, text: str, filename: str = "ответ.txt"):
     """Отправляет текст как файл, очищая markdown-ограждения."""
@@ -269,6 +323,7 @@ async def send_text_as_file(target_message: Message, text: str, filename: str = 
     clean = strip_code_fences(text)
     file = BufferedInputFile(clean.encode("utf-8"), filename=filename)
     await target_message.answer_document(file, caption=filename)
+
 
 async def send_debug_info(status_msg: Message, debug: dict):
     """
@@ -280,15 +335,18 @@ async def send_debug_info(status_msg: Message, debug: dict):
     """
     if not DEBUG_MODE or not debug:
         return
+
     lines = ["🔧 <b>Debug info</b>"]
     lines.append(f"Выбрана в боте: <code>{escape(str(debug.get('requested_model', '?')))}</code>")
     lines.append(f"Endpoint: <code>{escape(str(debug.get('url', '?')))}</code>")
     lines.append(f"Отправлено в payload.model: <code>{escape(str(debug.get('sent_model', '?')))}</code>")
+
     provider_model = debug.get("provider_model")
     if provider_model:
         lines.append(f"Ответ provider.model: <code>{escape(str(provider_model))}</code>")
     else:
         lines.append("Ответ provider.model: <i>провайдер не вернул это поле</i>")
+
     council_members = debug.get("council_members")
     if council_members:
         lines.append("")
@@ -305,15 +363,18 @@ async def send_debug_info(status_msg: Message, debug: dict):
                     f"provider.model={member_debug.get('provider_model', '?')}"
                 )
             lines.append(f"{label}: <code>{escape(str(model))}</code> — {escape(str(status))}")
+
         judge_debug = debug.get("judge_debug") or {}
         lines.append("")
         lines.append("<b>Совет — судья:</b>")
         lines.append(f"Endpoint: <code>{escape(str(judge_debug.get('url', '?')))}</code>")
         lines.append(f"Отправлено в payload.model: <code>{escape(str(judge_debug.get('sent_model', '?')))}</code>")
+
     try:
         await status_msg.answer("\n".join(lines), parse_mode="HTML")
     except Exception:
         logger.exception("Не удалось отправить debug info")
+
 
 async def telegram_file_to_bytes(message: Message, file_id: str) -> bytes:
     """Скачивает любой файл из Telegram в память."""
@@ -323,6 +384,7 @@ async def telegram_file_to_bytes(message: Message, file_id: str) -> bytes:
     buffer = BytesIO()
     await message.bot.download_file(tg_file.file_path, destination=buffer)
     return buffer.getvalue()
+
 
 async def telegram_file_to_data_url(message: Message, file_id: str, mime_type: str | None = None) -> str:
     """
@@ -345,6 +407,7 @@ async def telegram_file_to_data_url(message: Message, file_id: str, mime_type: s
     encoded = base64.b64encode(image_bytes).decode("utf-8")
     return f"data:{final_mime_type};base64,{encoded}"
 
+
 def make_vision_content(prompt: str, image_data_url: str) -> list:
     prompt = (prompt or "").strip()
     if not prompt:
@@ -361,6 +424,7 @@ def make_vision_content(prompt: str, image_data_url: str) -> list:
             },
         },
     ]
+
 
 # ------------------ Парсинг файлов ------------------
 
@@ -405,19 +469,18 @@ def extract_text_from_bytes(raw: bytes, filename: str, mime_type: str | None) ->
     )
 
     if is_text_ext or is_text_mime or mime == "":
-        # пробуем несколько кодировок
         for enc in ("utf-8", "cp1251", "latin1"):
             try:
                 return raw.decode(enc)
             except Exception:
                 continue
-        # последний шанс
         return raw.decode("utf-8", errors="replace")
 
     raise Exception(
         f"Неподдерживаемый формат файла: {filename or mime_type or 'unknown'}. "
         f"Поддерживаются: TXT, MD, JSON, CSV, код (.py/.js/…), PDF, DOCX, изображения."
     )
+
 
 # ------------------ Вызов моделей ------------------
 #
@@ -462,6 +525,7 @@ async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
                 return data["choices"][0]["message"]["content"], debug
             except Exception:
                 raise Exception(f"Неверный формат ответа NVIDIA: {json.dumps(data, ensure_ascii=False)[:500]}")
+
 
 async def call_freemodel_openai(
     raw_model: str,
@@ -521,16 +585,20 @@ async def call_freemodel_openai(
             except Exception:
                 raise Exception(f"Неверный формат ответа FreeModel: {json.dumps(data, ensure_ascii=False)[:500]}")
 
+
 async def call_ashibalt(model_id: str, messages: list) -> tuple[str, dict]:
     if not ASHIBALT_API_KEY:
         raise Exception("ASHIBALT_API_KEY не задан.")
+
     requested_raw_model = model_id.replace("ashibalt/", "", 1)
     candidate_models = ASHIBALT_MODEL_ALIASES.get(requested_raw_model, [requested_raw_model])
+
     headers = {
         "Authorization": f"Bearer {ASHIBALT_API_KEY}",
         "Content-Type": "application/json",
     }
     url = f"{ASHIBALT_API_BASE.rstrip('/')}/chat/completions"
+
     async def request_model(raw_model: str) -> tuple[str, dict]:
         payload = {
             "model": raw_model,
@@ -564,6 +632,7 @@ async def call_ashibalt(model_id: str, messages: list) -> tuple[str, dict]:
                     return data["choices"][0]["message"]["content"], debug
                 except Exception:
                     raise Exception(f"Неверный формат ответа Ashibalt: {json.dumps(data, ensure_ascii=False)[:500]}")
+
     last_error = None
     for index, raw_model in enumerate(candidate_models):
         try:
@@ -571,8 +640,6 @@ async def call_ashibalt(model_id: str, messages: list) -> tuple[str, dict]:
         except Exception as e:
             last_error = e
             error_text = str(e)
-            # Если Ashibalt не нашёл id модели, пробуем следующий алиас.
-            # Остальные ошибки (ключ, баланс, формат запроса и т.п.) не маскируем.
             lower_error = error_text.lower()
             model_not_found = (
                 "not available" in lower_error
@@ -587,15 +654,16 @@ async def call_ashibalt(model_id: str, messages: list) -> tuple[str, dict]:
                 )
                 continue
             raise
+
     raise Exception(
         f"Ashibalt не принял model id. Пробовал: {', '.join(candidate_models)}. "
         f"Последняя ошибка: {last_error}"
     )
 
+
 async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
     if not GEMINI_API_KEY:
         raise Exception("GEMINI_API_KEY не задан.")
-    # Убираем префикс "gemini/" для запроса
     raw_model = model_id.replace("gemini/", "", 1)
     headers = {
         "Authorization": f"Bearer {GEMINI_API_KEY}",
@@ -633,6 +701,7 @@ async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
                 return data["choices"][0]["message"]["content"], debug
             except Exception:
                 raise Exception(f"Неверный формат ответа Gemini: {json.dumps(data, ensure_ascii=False)[:500]}")
+
 
 # ------------------ Совет ИИ-моделей ------------------
 #
@@ -680,6 +749,7 @@ COUNCIL_JUDGE_SYSTEM_PROMPT = (
     "Никогда не пиши что не можешь создать файл."
 )
 
+
 async def call_council_member(model_id: str, messages: list) -> tuple[str, dict]:
     """
     Вызывает одну модель-участника совета. Ошибки не прерывают весь
@@ -694,6 +764,7 @@ async def call_council_member(model_id: str, messages: list) -> tuple[str, dict]
             f"[Эта модель не смогла ответить: {e}]",
             {"requested_model": model_id, "error": str(e)},
         )
+
 
 def build_council_judge_messages(original_messages: list, labeled_answers: list) -> list:
     """
@@ -713,6 +784,7 @@ def build_council_judge_messages(original_messages: list, labeled_answers: list)
         if msg.get("role") == "system":
             continue
         judge_messages.append(msg)
+
     answers_text = "\n\n".join(
         f"Вариант ответа {label}:\n{content}"
         for label, content in labeled_answers
@@ -729,6 +801,7 @@ def build_council_judge_messages(original_messages: list, labeled_answers: list)
     })
     return judge_messages
 
+
 async def call_ai_council(messages: list) -> tuple[str, dict]:
     """
     Реализация "Совета ИИ-моделей":
@@ -739,6 +812,7 @@ async def call_ai_council(messages: list) -> tuple[str, dict]:
     """
     tasks = [call_council_member(model_id, messages) for model_id in COUNCIL_MEMBER_MODELS]
     results = await asyncio.gather(*tasks)
+
     labeled_answers = []
     members_debug = []
     for label, model_id, (content, member_debug) in zip(COUNCIL_LABELS, COUNCIL_MEMBER_MODELS, results):
@@ -748,9 +822,11 @@ async def call_ai_council(messages: list) -> tuple[str, dict]:
             "model": model_id,
             "debug": member_debug,
         })
+
     judge_messages = build_council_judge_messages(messages, labeled_answers)
     logger.info("call_ai_council: отправляю ответы A/B/C судье %s", COUNCIL_JUDGE_MODEL)
     final_content, judge_debug = await call_ai(COUNCIL_JUDGE_MODEL, judge_messages)
+
     debug = {
         "url": "Совет ИИ-моделей (3 модели + судья)",
         "sent_model": judge_debug.get("sent_model"),
@@ -760,10 +836,13 @@ async def call_ai_council(messages: list) -> tuple[str, dict]:
     }
     return final_content, debug
 
+
 async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
     logger.info("call_ai: selected_model=%s", model_id)
+
     if model_id == COUNCIL_MODEL_ID:
         content, debug = await call_ai_council(messages)
+
     elif model_id.startswith("freemodel/"):
         raw_model = strip_provider_prefix(model_id)
         if raw_model.startswith("claude-"):
@@ -790,14 +869,19 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
             )
         else:
             content, debug = await call_freemodel_openai(raw_model, messages, FREEMODEL_API_BASE)
+
     elif model_id.startswith("ashibalt/"):
         content, debug = await call_ashibalt(model_id, messages)
+
     elif model_id.startswith("gemini/"):
         content, debug = await call_gemini(model_id, messages)
+
     else:
         content, debug = await call_nvidia(model_id, messages)
+
     debug["requested_model"] = model_id
     return content, debug
+
 
 # ------------------ Обработчики выбора моделей ------------------
 
@@ -810,15 +894,18 @@ async def select_model_group(callback: CallbackQuery):
     )
     await callback.answer()
 
+
 @router.callback_query(F.data.startswith("model_group_"))
 async def show_models_group(callback: CallbackQuery, state: FSMContext):
     group = callback.data.replace("model_group_", "")
+
     # "Совет ИИ-моделей" — это единственный режим в своей группе, поэтому
     # выбираем его сразу одним кликом, без промежуточного подменю.
     if group == "council":
         model_id = list(COUNCIL_MODELS.keys())[0]
         await activate_model(callback, state, model_id)
         return
+
     data = await state.get_data()
     current = data.get("selected_model", "")
     title = GROUP_TITLES.get(group, group.capitalize())
@@ -828,6 +915,7 @@ async def show_models_group(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML",
     )
     await callback.answer()
+
 
 async def activate_model(callback: CallbackQuery, state: FSMContext, model_id: str):
     """Сохраняет выбранную модель, переключает в режим чата и показывает
@@ -843,10 +931,12 @@ async def activate_model(callback: CallbackQuery, state: FSMContext, model_id: s
     )
     await callback.answer()
 
+
 @router.callback_query(F.data.startswith("model_"))
 async def set_model(callback: CallbackQuery, state: FSMContext):
     model_id = callback.data.replace("model_", "")
     await activate_model(callback, state, model_id)
+
 
 # ------------------ Обработчик кнопки "Чат с ИИ" ------------------
 
@@ -866,12 +956,14 @@ async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+
 # ------------------ Очистка истории ------------------
 
 @router.callback_query(F.data == "clear_history")
 async def cb_clear_history(callback: CallbackQuery, state: FSMContext):
     await state.update_data(chat_history=[])
     await callback.answer("История очищена ✅", show_alert=True)
+
 
 # ------------------ Обработчики чата ------------------
 
@@ -909,25 +1001,29 @@ async def handle_text(message: Message, state: FSMContext):
     user_content_for_model = text
     if want_file:
         user_content_for_model = (
-            text + 
+            text +
             "\n\n[Системное напоминание: бот УМЕЕТ отправлять файлы. "
             "Просто выдай полное содержимое файла, без фраз 'я не могу отправить файл'.]"
         )
 
     status_msg = await message.answer("<i>Думаю...</i>", parse_mode="HTML")
+
     try:
         history = list(get_history(data))
         history.append({
             "role": "user",
             "content": user_content_for_model,
         })
+
         messages = [
             {
                 "role": "system",
                 "content": SYSTEM_PROMPT,
             }
         ] + trim_history(history)
+
         reply, debug = await call_ai(model_id, messages)
+
         history.append({
             "role": "assistant",
             "content": reply,
@@ -936,31 +1032,40 @@ async def handle_text(message: Message, state: FSMContext):
 
         # Сначала ответ в чат, затем файл - сразу, без второго запроса
         await send_ai_reply(status_msg, reply)
+
         if want_file:
             filename = guess_filename_from_prompt(text, reply)
             await send_text_as_file(status_msg, reply, filename=filename)
+
         await send_debug_info(status_msg, debug)
+
     except Exception as e:
         await edit_error(status_msg, "Ошибка", e)
+
 
 @router.message(BotStates.chat_mode, F.photo)
 async def handle_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     model_id = get_model(data)
+
     status_msg = await message.answer("<i>Обрабатываю фото...</i>", parse_mode="HTML")
+
     try:
         history = list(get_history(data))
         photo = message.photo[-1]
         caption = message.caption or ""
+
         image_data_url = await telegram_file_to_data_url(
             message=message,
             file_id=photo.file_id,
             mime_type="image/jpeg",
         )
+
         user_content = make_vision_content(
             prompt=caption,
             image_data_url=image_data_url,
         )
+
         messages = [
             {
                 "role": "system",
@@ -972,7 +1077,9 @@ async def handle_photo(message: Message, state: FSMContext):
                 "content": user_content,
             }
         ]
+
         reply, debug = await call_ai(model_id, messages)
+
         history.append({
             "role": "user",
             "content": f"[Фото] {caption}".strip(),
@@ -982,14 +1089,17 @@ async def handle_photo(message: Message, state: FSMContext):
             "content": reply,
         })
         await state.update_data(chat_history=trim_history(history))
+
         await send_ai_reply(status_msg, reply)
         await send_debug_info(status_msg, debug)
+
     except Exception as e:
         await edit_error(
             status_msg,
             "Ошибка при обработке фото. Проверьте, что выбрана модель с поддержкой Vision",
             e,
         )
+
 
 @router.message(BotStates.chat_mode, F.document)
 async def handle_document(message: Message, state: FSMContext):
@@ -1041,6 +1151,7 @@ async def handle_document(message: Message, state: FSMContext):
         return
 
     status_msg = await message.answer("<i>Читаю файл...</i>", parse_mode="HTML")
+
     try:
         raw = await telegram_file_to_bytes(message, document.file_id)
         try:
@@ -1067,11 +1178,13 @@ async def handle_document(message: Message, state: FSMContext):
 
         history.append({"role": "assistant", "content": reply})
         await state.update_data(chat_history=trim_history(history))
+
         await send_ai_reply(status_msg, reply)
         await send_debug_info(status_msg, debug)
 
     except Exception as e:
         await edit_error(status_msg, "Ошибка при обработке файла", e)
+
 
 @router.message(BotStates.chat_mode)
 async def handle_unsupported_message(message: Message):
