@@ -2278,34 +2278,26 @@ function appendBotText(msgEl,text){
   }
 
   function smoothScrollLoop(){
-    if(m && !userHasScrolledUp){
-      // Просто прокручиваем к самому низу, если пользователь не скроллил вверх.
-      // Это гораздо стабильнее, чем вычислять положение элемента через getBoundingClientRect в каждом кадре.
-      m.scrollTop = m.scrollHeight;
+    if(m&&!userHasScrolledUp) {
+       // Ограничиваем частоту прокрутки, чтобы избежать дребезжания при рендеринге Markdown
+       const now = performance.now();
+       if (!m._lastScrollTime || now - m._lastScrollTime > 32) {
+         scrollElementAboveInputNow(b,18);
+         m._lastScrollTime = now;
+       }
     }
-    if(isTyping) requestAnimationFrame(smoothScrollLoop);
+    if(isTyping)requestAnimationFrame(smoothScrollLoop);
   }
   if(m)requestAnimationFrame(smoothScrollLoop);
 
   let i=0;
-  const botMsg = b.querySelector('.bot-msg');
   function type(){
     if(i<text.length){
       textEl.innerHTML=md(text.slice(0,i+1));
-
-      if(botMsg){
-        botMsg.style.overflow='hidden';
-        botMsg.style.maxHeight=botMsg.scrollHeight+'px';
-      }
-
       i++;
       setTimeout(type,12);
     }else{
       textEl.innerHTML=md(text);
-      if(botMsg){
-        botMsg.style.maxHeight='none';
-        botMsg.style.overflow='visible';
-      }
       isTyping=false;
       if(m){
         m.removeEventListener('wheel',onWheel);
@@ -2487,17 +2479,8 @@ function lastMessageRow(){
 function scrollElementAboveInputNow(el,gap=18){
   const m=document.getElementById('messages');
   if(!m||!el)return;
-  // syncMessagesBottomInset() удален отсюда, так как это вызывает пересчет стилей в каждом кадре
   const input=document.querySelector('.input-area');
   const inputH=input?.offsetHeight||110;
-  
-  // Используем scrollHeight для более стабильного определения дна при наборе текста
-  const isLastMessage = (el === lastMessageRow());
-  if (isLastMessage) {
-    m.scrollTop = m.scrollHeight;
-    return;
-  }
-
   const mRect=m.getBoundingClientRect();
   const eRect=el.getBoundingClientRect();
   const targetBottom=mRect.bottom-inputH-gap;
