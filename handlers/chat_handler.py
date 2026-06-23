@@ -1,27 +1,15 @@
 import asyncio
-
 import os
-
 import json
-
 import base64
-
 import logging
-
 import re
-
 from io import BytesIO
-
 from html import escape
-
 import aiohttp
-
 from aiogram import Router, F
-
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
-
 from aiogram.fsm.context import FSMContext
-
 from keyboards import (
     cancel_keyboard,
     model_group_keyboard,
@@ -186,7 +174,7 @@ def get_history(data):
 
 
 def get_model(data):
-    return data.get("selected_model", list(CHATGPT_MODELS.keys())[0])
+    return data.get("selected_model", list(GEMINI_MODELS.keys())[0])
 
 
 def strip_provider_prefix(model_id: str) -> str:
@@ -943,7 +931,7 @@ async def set_model(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "mode_chat")
 async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    model_id = data.get("selected_model") or list(CHATGPT_MODELS.keys())[0]
+    model_id = data.get("selected_model") or list(GEMINI_MODELS.keys())[0]
     await state.update_data(selected_model=model_id)
     await state.set_state(BotStates.chat_mode)
     await callback.message.edit_text(
