@@ -1348,8 +1348,16 @@ if(window.visualViewport){window.visualViewport.addEventListener('resize',lockVi
 window.addEventListener('resize',lockViewportHeight);
 window.addEventListener('scroll',()=>{if(window.scrollY!==0||window.scrollX!==0)window.scrollTo(0,0);});
 if(ta){
-  ta.addEventListener('focus',()=>{[30,100,200,350,500].forEach(t=>setTimeout(()=>{lockViewportHeight();syncMessagesBottomInset();scrollB();window.scrollTo(0,0);},t));});
-  ta.addEventListener('blur',()=>{[30,100,200,350,500].forEach(t=>setTimeout(()=>{lockViewportHeight();syncMessagesBottomInset();scrollB();window.scrollTo(0,0);},t));});
+  ta.addEventListener('focus',()=>{
+    const m=document.getElementById('messages');
+    const wasB = m ? (m.scrollHeight - m.clientHeight - m.scrollTop < 140) : false;
+    [30,100,200,350,500].forEach(t=>setTimeout(()=>{lockViewportHeight();syncMessagesBottomInset();if(wasB)scrollB(true);window.scrollTo(0,0);},t));
+  });
+  ta.addEventListener('blur',()=>{
+    const m=document.getElementById('messages');
+    const wasB = m ? (m.scrollHeight - m.clientHeight - m.scrollTop < 140) : false;
+    [30,100,200,350,500].forEach(t=>setTimeout(()=>{lockViewportHeight();syncMessagesBottomInset();if(wasB)scrollB(true);window.scrollTo(0,0);},t));
+  });
 }
 document.body.addEventListener('touchmove',e=>{if(e.target===document.body)e.preventDefault();},{passive:false});
 
@@ -2491,10 +2499,12 @@ function scrollElementAboveInputNow(el,gap=18){
 function scrollElementAboveInput(el,gap=18,delay=30){
   setTimeout(()=>scrollElementAboveInputNow(el,gap),delay);
 }
-function scrollB(){
+function scrollB(force=false){
   setTimeout(()=>{
     const m=document.getElementById('messages');
     if(!m)return;
+    const isAtBottom=(m.scrollHeight-m.clientHeight-m.scrollTop)<140;
+    if(!force && !isAtBottom)return;
     syncMessagesBottomInset();
     const last=lastMessageRow();
     if(last)scrollElementAboveInputNow(last,18);
@@ -2553,7 +2563,7 @@ function rerenderActiveChat(){
     }
     msgEl.appendChild(row);
   }
-  scrollB();
+  scrollB(true);
 }
 rerenderActiveChat();
 
