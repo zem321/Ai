@@ -3,6 +3,7 @@ import os
 import json
 import base64
 import logging
+import re
 from io import BytesIO
 from html import escape
 import aiohttp
@@ -29,7 +30,15 @@ router = Router()
 SYSTEM_PROMPT = (
     "Ты полезный ИИ-ассистент. "
     "Отвечай на русском языке если вопрос на русском. "
-    "Будь точным и лаконичным."
+    "Будь точным и лаконичным.\n\n"
+    "ВАЖНО ПРО ФАЙЛЫ:\n"
+    "- Ты работаешь в Telegram-боте, который УМЕЕТ отправлять файлы пользователю. "
+    "Никогда не пиши, что ты не можешь создать/отправить файл.\n"
+    "- Если пользователь просит сделать файл, сгенерировать код, таблицу, документ и т.п. - "
+    "просто выдай ПОЛНОЕ содержимое файла, без лишних комментариев до и после. "
+    "Если нужно пояснение — кратко после содержимого.\n"
+    "- Не оборачивай весь ответ в тройные кавычки, если тебя об этом явно не просили. "
+    "Выдавай чистый контент, готовый для сохранения."
 )
 
 MAX_HISTORY = 20
@@ -48,7 +57,7 @@ TEXT_EXTENSIONS = {
 FILE_SEND_KEYWORDS = [
     "отправь файлом", "пришли файлом", "в файл", "сохрани в файл",
     "сделай файл", "дай файл", "скачать файл", "дай txt", "в txt",
-    "send as file", "as a file"
+    "send as file", "as a file", "в виде файла", "файлом"
 ]
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
@@ -207,11 +216,52 @@ async def send_ai_reply(status_msg: Message, reply: str):
             reply_markup=cancel_keyboard() if is_last else None,
         )
 
+# --- Работа с файлами для отправки ---
+
+def strip_code_fences(text: str) -> str:
+    """Если ответ обернут в ```lang ... ```, вытаскивает чистое содержимое."""
+    text = text.strip()
+    # ```lang\n ... \n```
+    m = re.match(r"^```[a-zA-Z0-9_+-]*\s*\n(.*?)\n```\s*$", text, re.DOTALL)
+    if m:
+        return m.group(1)
+    return text
+
+def guess_filename_from_prompt(user_prompt: str, ai_reply: str) -> str:
+    """Пытается вытащить имя файла из запроса пользователя, иначе угадывает по содержимому."""
+    # 1. явное имя в промпте: script.py, report.md и т.п.
+    m = re.search(r'([a-zA-Z0-9_.-]+\.(?:py|js|ts|json|csv|md|txt|html|css|java|c|cpp|go|rs|php|rb|sh|yaml|yml|sql|xml))\b', user_prompt, re.I)
+    if m:
+        return m.group(1)
+
+    # 2. язык в markdown-блоке ответа
+    m = re.search(r'^```([a-zA-Z0-9_+-]+)', ai_reply.strip(), re.MULTILINE)
+    if m:
+        lang = m.group(1).lower()
+        ext_map = {
+            "python": "py", "py": "py",
+            "javascript": "js", "js": "js",
+            "typescript": "ts", "ts": "ts",
+            "json": "json", "html": "html",
+            "css": "css", "java": "java",
+            "c": "c", "cpp": "cpp", "c++": "cpp",
+            "go": "go", "rust": "rs", "rs": "rs",
+            "php": "php", "ruby": "rb", "rb": "rb",
+            "bash": "sh", "sh": "sh", "shell": "sh",
+            "sql": "sql", "yaml": "yml", "yml": "yml",
+            "xml": "xml", "markdown": "md", "md": "md",
+        }
+        ext = ext_map.get(lang, "txt")
+        return f"ответ.{ext}"
+
+    return "ответ.txt"
+
 async def send_text_as_file(target_message: Message, text: str, filename: str = "ответ.txt"):
-    """Отправляет текст как файл."""
+    """Отправляет текст как файл, очищая markdown-ограждения."""
     if not text:
         text = "(пусто)"
-    file = BufferedInputFile(text.encode("utf-8"), filename=filename)
+    clean = strip_code_fences(text)
+    file = BufferedInputFile(clean.encode("utf-8"), filename=filename)
     await target_message.answer_document(file, caption=filename)
 
 async def send_debug_info(status_msg: Message, debug: dict):
@@ -620,6 +670,8 @@ COUNCIL_JUDGE_SYSTEM_PROMPT = (
     "структура, ошибки и т.п.), без упоминания букв-обозначений или названий "
     "моделей.\n\n"
     "Отвечай на том языке, на котором задан исходный вопрос пользователя."
+    "\n\nВАЖНО: ты работаешь в Telegram-боте, который УМЕЕТ отправлять файлы. "
+    "Никогда не пиши что не можешь создать файл."
 )
 
 async def call_council_member(model_id: str, messages: list) -> tuple[str, dict]:
@@ -834,7 +886,8 @@ async def handle_text(message: Message, state: FSMContext):
                 last_assistant = msg.get("content", "")
                 break
         if last_assistant:
-            await send_text_as_file(message, last_assistant, filename="ответ.txt")
+            filename = guess_filename_from_prompt(text, last_assistant)
+            await send_text_as_file(message, last_assistant, filename=filename)
         else:
             await message.answer("В истории пока нет ответа от ИИ.", reply_markup=cancel_keyboard())
         return
@@ -842,12 +895,22 @@ async def handle_text(message: Message, state: FSMContext):
     model_id = get_model(data)
     want_file = any(k in low for k in FILE_SEND_KEYWORDS)
 
+    # Если пользователь просит файл - добавляем явную инструкцию к промпту,
+    # чтобы модель не отказывалась
+    user_content_for_model = text
+    if want_file:
+        user_content_for_model = (
+            text + 
+            "\n\n[Системное напоминание: бот УМЕЕТ отправлять файлы. "
+            "Просто выдай полное содержимое файла, без фраз 'я не могу отправить файл'.]"
+        )
+
     status_msg = await message.answer("<i>Думаю...</i>", parse_mode="HTML")
     try:
         history = list(get_history(data))
         history.append({
             "role": "user",
-            "content": text,
+            "content": user_content_for_model,
         })
         messages = [
             {
@@ -863,7 +926,8 @@ async def handle_text(message: Message, state: FSMContext):
         await state.update_data(chat_history=trim_history(history))
         await send_ai_reply(status_msg, reply)
         if want_file:
-            await send_text_as_file(status_msg, reply, filename="ответ.txt")
+            filename = guess_filename_from_prompt(text, reply)
+            await send_text_as_file(status_msg, reply, filename=filename)
         await send_debug_info(status_msg, debug)
     except Exception as e:
         await edit_error(status_msg, "Ошибка", e)
