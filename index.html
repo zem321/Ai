@@ -2278,17 +2278,21 @@ function appendBotText(msgEl,text){
   }
 
   function smoothScrollLoop(){
-    if(m&&!userHasScrolledUp)scrollElementAboveInputNow(b,18);
-    if(isTyping)requestAnimationFrame(smoothScrollLoop);
+    if(m && !userHasScrolledUp){
+      // Просто прокручиваем к самому низу, если пользователь не скроллил вверх.
+      // Это гораздо стабильнее, чем вычислять положение элемента через getBoundingClientRect в каждом кадре.
+      m.scrollTop = m.scrollHeight;
+    }
+    if(isTyping) requestAnimationFrame(smoothScrollLoop);
   }
   if(m)requestAnimationFrame(smoothScrollLoop);
 
   let i=0;
+  const botMsg = b.querySelector('.bot-msg');
   function type(){
     if(i<text.length){
       textEl.innerHTML=md(text.slice(0,i+1));
 
-      const botMsg=b.querySelector('.bot-msg');
       if(botMsg){
         botMsg.style.overflow='hidden';
         botMsg.style.maxHeight=botMsg.scrollHeight+'px';
@@ -2298,7 +2302,6 @@ function appendBotText(msgEl,text){
       setTimeout(type,12);
     }else{
       textEl.innerHTML=md(text);
-      const botMsg=b.querySelector('.bot-msg');
       if(botMsg){
         botMsg.style.maxHeight='none';
         botMsg.style.overflow='visible';
@@ -2484,9 +2487,17 @@ function lastMessageRow(){
 function scrollElementAboveInputNow(el,gap=18){
   const m=document.getElementById('messages');
   if(!m||!el)return;
-  syncMessagesBottomInset();
+  // syncMessagesBottomInset() удален отсюда, так как это вызывает пересчет стилей в каждом кадре
   const input=document.querySelector('.input-area');
   const inputH=input?.offsetHeight||110;
+  
+  // Используем scrollHeight для более стабильного определения дна при наборе текста
+  const isLastMessage = (el === lastMessageRow());
+  if (isLastMessage) {
+    m.scrollTop = m.scrollHeight;
+    return;
+  }
+
   const mRect=m.getBoundingClientRect();
   const eRect=el.getBoundingClientRect();
   const targetBottom=mRect.bottom-inputH-gap;
