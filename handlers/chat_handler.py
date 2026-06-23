@@ -34,13 +34,14 @@ SYSTEM_PROMPT = (
     "ВАЖНО ПРО ФАЙЛЫ:\n"
     "- Ты работаешь в Telegram-боте, который УМЕЕТ отправлять файлы пользователю. "
     "Никогда не пиши, что ты не можешь создать/отправить файл.\n"
-    "- Если пользователь просит сделать файл, сгенерировать код, таблицу, документ, "
-    "скрипт, прислать что-то файлом / в txt / скачать — "
-    "ВЫДАЙ ТОЛЬКО СОДЕРЖИМОЕ ФАЙЛА. Строго без вступлений, без пояснений до и после, "
-    "без вопросов 'нужно ли что-то еще?', 'готово, что дальше?' и т.п.\n"
-    "- Не оборачивай весь ответ в тройные backticks ```, если тебя об этом явно не просили. "
-    "Выдавай чистый контент, готовый для сохранения в файл 1-в-1.\n"
-    "- Если это код — только код. Если это текст — только текст."
+    "- Если пользователь просит сделать файл / скрипт / код / таблицу / документ, "
+    "прислать что-то файлом / в txt / скачать — "
+    "ВЫДАЙ ТОЛЬКО ЧИСТОЕ СОДЕРЖИМОЕ ФАЙЛА. "
+    "Строго запрещено: вступления 'Вот ваш файл', 'Конечно', пояснения до/после кода, "
+    "вопросы 'нужно ли что-то еще?', 'готово', подписи, комментарии вне кода. "
+    "ТОЛЬКО сам контент файла, 1-в-1 готовый для сохранения.\n"
+    "- Не оборачивай ответ в тройные backticks ```, если тебя явно об этом не просили.\n"
+    "- Если это код — только код. Если текст — только текст."
 )
 
 MAX_HISTORY = 20
@@ -62,11 +63,14 @@ FILE_SEND_KEYWORDS = [
     "сделай файл", "дай файл", "скачать файл", "дай txt", "в txt",
     "send as file", "as a file", "в виде файла", "файлом"
 ]
-# Короткая команда "перешли последний ответ файлом" - только точные короткие фразы
+# Короткая команда "перешли последний ответ файлом"
 FILE_RESEND_COMMANDS = [
     "файлом", "в файл", "txt", "в txt", "файл", 
     "отправь файлом", "пришли файлом", "дай файл", "скачать", "сохрани"
 ]
+
+# Режим ответа при запросе файлом: "file_only" или "both"
+FILE_RESPONSE_MODE = os.getenv("FILE_RESPONSE_MODE", "file_only")
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
@@ -143,6 +147,7 @@ logger.info("GEMINI_API_BASE = %s", GEMINI_API_BASE)
 logger.info("ASHIBALT_API_BASE = %s", ASHIBALT_API_BASE)
 logger.info("ASHIBALT_API_KEY задан = %s", bool(ASHIBALT_API_KEY))
 logger.info("DEBUG_MODE = %s", DEBUG_MODE)
+logger.info("FILE_RESPONSE_MODE = %s", FILE_RESPONSE_MODE)
 
 if not FREEMODEL_API_KEY:
     logger.warning(
@@ -227,13 +232,33 @@ async def send_ai_reply(status_msg: Message, reply: str):
 # --- Работа с файлами для отправки ---
 
 def strip_code_fences(text: str) -> str:
-    """Если ответ обернут в ```lang ... ```, вытаскивает чистое содержимое."""
+    """Вытаскивает чистое содержимое из markdown-блоков."""
     text = text.strip()
-    # ```lang\n ... \n```
+    # если весь ответ - один блок ```lang ... ```
     m = re.match(r"^```[a-zA-Z0-9_+-]*\s*\n(.*?)\n```\s*$", text, re.DOTALL)
     if m:
-        return m.group(1)
+        return m.group(1).strip()
+    # иначе ищем первый большой ``` блок внутри текста
+    m = re.search(r"```[a-zA-Z0-9_+-]*\s*\n(.*?)\n```", text, re.DOTALL)
+    if m and len(m.group(1).strip()) > 30:
+        return m.group(1).strip()
     return text
+
+def strip_ai_fluff(text: str) -> str:
+    """Убирает типичную болтовню ИИ до/после полезного контента."""
+    t = text.strip()
+    # убрать преамбулы
+    t = re.sub(r'^(вот (ваш|готовый)?\s*(файл|код|скрипт|текст|ответ)[:\-]?\s*\n*)', '', t, flags=re.I)
+    t = re.sub(r'^(конечно[,.! ]*\n*)', '', t, flags=re.I)
+    t = re.sub(r'^(готово[.! ]*\n*)', '', t, flags=re.I)
+    # убрать пост-болтовню в конце
+    t = re.sub(r'\n+\s*(если (нужно|требуется|хотите).{0,120})$', '', t, flags=re.I | re.S)
+    t = re.sub(r'\n+\s*(нужно ли (что|ещё|еще).{0,120})$', '', t, flags=re.I | re.S)
+    t = re.sub(r'\n+\s*(готово[.! ].{0,80})$', '', t, flags=re.I | re.S)
+    return t.strip()
+
+def clean_file_content(text: str) -> str:
+    return strip_ai_fluff(strip_code_fences(text))
 
 def guess_filename_from_prompt(user_prompt: str, ai_reply: str) -> str:
     """Пытается вытащить имя файла из запроса пользователя, иначе угадывает по содержимому."""
@@ -243,7 +268,7 @@ def guess_filename_from_prompt(user_prompt: str, ai_reply: str) -> str:
         return m.group(1)
 
     # 2. язык в markdown-блоке ответа
-    m = re.search(r'^```([a-zA-Z0-9_+-]+)', ai_reply.strip(), re.MULTILINE)
+    m = re.search(r'```([a-zA-Z0-9_+-]+)', ai_reply.strip())
     if m:
         lang = m.group(1).lower()
         ext_map = {
@@ -265,10 +290,10 @@ def guess_filename_from_prompt(user_prompt: str, ai_reply: str) -> str:
     return "ответ.txt"
 
 async def send_text_as_file(target_message: Message, text: str, filename: str = "ответ.txt"):
-    """Отправляет текст как файл, очищая markdown-ограждения."""
+    """Отправляет текст как файл, очищая markdown-ограждения и болтовню ИИ."""
     if not text:
         text = "(пусто)"
-    clean = strip_code_fences(text)
+    clean = clean_file_content(text)
     file = BufferedInputFile(clean.encode("utf-8"), filename=filename)
     await target_message.answer_document(file, caption=filename)
 
@@ -885,9 +910,6 @@ async def handle_text(message: Message, state: FSMContext):
     low = text.lower()
 
     want_file = any(k in low for k in FILE_SEND_KEYWORDS)
-
-    # Короткая команда "перешли последний ответ файлом" - только для совсем коротких сообщений
-    # вроде "файлом", "в файл", "txt" и т.п.
     is_resend_command = low.strip() in FILE_RESEND_COMMANDS
     file_request_only = want_file and is_resend_command
 
@@ -907,45 +929,37 @@ async def handle_text(message: Message, state: FSMContext):
 
     model_id = get_model(data)
 
-    # Если пользователь просит файл - добавляем явную инструкцию к промпту,
-    # чтобы модель не отказывалась и не болтала лишнего
     user_content_for_model = text
     if want_file:
         user_content_for_model = (
-            text + 
-            "\n\n[СИСТЕМНО: Выдай ТОЛЬКО содержимое файла, без вступлений, "
-            "пояснений и вопросов. Бот сам отправит это файлом.]"
+            text +
+            "\n\n[СИСТЕМНО: В ОТВЕТ ВЫДАЙ ТОЛЬКО ЧИСТОЕ СОДЕРЖИМОЕ ФАЙЛА. "
+            "Никаких вступлений, пояснений, вопросов. Только контент.]"
         )
 
     status_msg = await message.answer("<i>Думаю...</i>", parse_mode="HTML")
     try:
         history = list(get_history(data))
-        history.append({
-            "role": "user",
-            "content": user_content_for_model,
-        })
-        messages = [
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT,
-            }
-        ] + trim_history(history)
+        history.append({"role": "user", "content": user_content_for_model})
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trim_history(history)
         reply, debug = await call_ai(model_id, messages)
-        history.append({
-            "role": "assistant",
-            "content": reply,
-        })
+        history.append({"role": "assistant", "content": reply})
         await state.update_data(chat_history=trim_history(history))
 
         if want_file:
-            # Только файл, без дублирования текста в чат
             filename = guess_filename_from_prompt(text, reply)
+            # удаляем "Думаю..."
             try:
                 await status_msg.delete()
             except Exception:
-                pass
+                try:
+                    await status_msg.edit_text("📄 Отправляю файл...", parse_mode="HTML")
+                except Exception:
+                    pass
             await send_text_as_file(message, reply, filename=filename)
-            await send_debug_info(message, debug)
+            # debug отправляем отдельным сообщением, чтобы не путать с ответом ИИ
+            if DEBUG_MODE:
+                await send_debug_info(message, debug)
         else:
             await send_ai_reply(status_msg, reply)
             await send_debug_info(status_msg, debug)
