@@ -383,15 +383,69 @@ async def api_chat(request: web.Request) -> web.Response:
         a for a in attachments
         if a.get("dataUrl") and a.get("type", "").startswith("image/")
     ]
+    file_attachments = [
+        a for a in attachments
+        if a.get("dataUrl") and not a.get("type", "").startswith("image/")
+    ]
 
-    if image_attachments:
-        user_content = build_vision_content(user_text, image_attachments[0]["dataUrl"])
-        if len(image_attachments) > 1 and isinstance(user_content, list):
-            for img in image_attachments[1:]:
-                user_content.append({
-                    "type": "image_url",
-                    "image_url": {"url": img["dataUrl"]}
+    if image_attachments or file_attachments:
+        # Build multi-part content
+        content_parts = []
+
+        # Add user text first
+        if user_text and user_text != "Вложения":
+            content_parts.append({"type": "text", "text": user_text})
+
+        # Add images via vision
+        for img in image_attachments:
+            data_url = img["dataUrl"]
+            # Extract base64 data from data URL (data:image/jpeg;base64,...)
+            if "," in data_url:
+                header, b64data = data_url.split(",", 1)
+                media_type = header.split(";")[0].replace("data:", "") or "image/jpeg"
+            else:
+                b64data = data_url
+                media_type = img.get("type", "image/jpeg")
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{media_type};base64,{b64data}"}
+            })
+
+        # Add file contents as text blocks
+        for fa in file_attachments:
+            import base64 as _b64
+            fname = fa.get("name", "file")
+            ftype = fa.get("type", "")
+            data_url = fa.get("dataUrl", "")
+            try:
+                if "," in data_url:
+                    _, b64data = data_url.split(",", 1)
+                else:
+                    b64data = data_url
+                # Decode to text if text-like, otherwise note as binary
+                raw_bytes = _b64.b64decode(b64data)
+                try:
+                    file_text = raw_bytes.decode("utf-8")
+                    content_parts.append({
+                        "type": "text",
+                        "text": f"[Файл: {fname}]\n```\n{file_text}\n```"
+                    })
+                except UnicodeDecodeError:
+                    content_parts.append({
+                        "type": "text",
+                        "text": f"[Прикреплён двоичный файл: {fname}, тип: {ftype}]"
+                    })
+            except Exception as e:
+                logger.warning("Failed to decode file attachment %s: %r", fname, e)
+                content_parts.append({
+                    "type": "text",
+                    "text": f"[Файл: {fname}]"
                 })
+
+        if not content_parts:
+            content_parts.append({"type": "text", "text": user_text})
+
+        user_content = content_parts
     else:
         user_content = user_text
 
