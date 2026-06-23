@@ -1779,6 +1779,8 @@ async function handleFileSelection(e){
       }catch(_){
         try{item.dataUrl=await readFileAsDataURL(file);}catch(__){}
       }
+    } else {
+      try{item.dataUrl=await readFileAsDataURL(file);}catch(_){}
     }
     pendingFiles.push(item);
   }
@@ -2634,8 +2636,8 @@ async function sendToBackend(txt,files,msgEl){
       body:JSON.stringify({
         model:modelIdFor(model),
         history:chatHistory,
-        message:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения'),
-        attachments: (files || []).map(f => ({name: f.name || '', type: f.type || '', dataUrl: f.dataUrl || ''}))
+        message:(txt || (files?.length ? 'Вложения' : '')),
+        attachments: (files || []).map(f => ({name: f.name || '', type: f.type || '', dataUrl: f.dataUrl || '', kind: f.kind || 'file'}))
       })
     });
     if(resp.status===401||resp.status===403){
@@ -2657,12 +2659,12 @@ async function sendToBackend(txt,files,msgEl){
       chatHistory.push({role:'assistant',content:`[Файл отправлен: ${data.file.name}]`});
     } else if(data.intent==='image'){
       appendBotImage(msgEl,data.image_base64,data.prompt);
-      chatHistory.push({role:'user',content:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')});
+      chatHistory.push({role:'user',content:(txt || (files?.length ? '[изображение]' : ''))});
       chatHistory.push({role:'assistant',content:'[изображение отправлено]'});
     }else{
       const reply=data.reply||'';
       appendBotText(msgEl,reply);
-      chatHistory.push({role:'user',content:([txt, files?.length ? `[Вложения: ${files.length}]` : ''].filter(Boolean).join('\n') || 'Вложения')});
+      chatHistory.push({role:'user',content:(txt || (files?.length ? '[файл]' : ''))});
       chatHistory.push({role:'assistant',content:reply});
     }
     if(chatHistory.length>60)chatHistory=chatHistory.slice(-60);
