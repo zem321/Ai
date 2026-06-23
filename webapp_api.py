@@ -392,8 +392,9 @@ async def api_chat(request: web.Request) -> web.Response:
         # Build multi-part content
         content_parts = []
 
-        # Add user text first
-        if user_text and user_text != "Вложения":
+        # Add user text first — only if no file attachments (for files, text is embedded in prompt)
+        has_files = bool([a for a in attachments if a.get("dataUrl") and not a.get("type", "").startswith("image/")])
+        if user_text and user_text != "Вложения" and not has_files:
             content_parts.append({"type": "text", "text": user_text})
 
         # Add images via vision
@@ -411,7 +412,7 @@ async def api_chat(request: web.Request) -> web.Response:
                 "image_url": {"url": f"data:{media_type};base64,{b64data}"}
             })
 
-        # Add file contents as text blocks
+        # Add file contents as text blocks (same logic as bot's extract_text_from_bytes)
         for fa in file_attachments:
             import base64 as _b64
             fname = fa.get("name", "file")
@@ -422,25 +423,30 @@ async def api_chat(request: web.Request) -> web.Response:
                     _, b64data = data_url.split(",", 1)
                 else:
                     b64data = data_url
-                # Decode to text if text-like, otherwise note as binary
                 raw_bytes = _b64.b64decode(b64data)
-                try:
-                    file_text = raw_bytes.decode("utf-8")
-                    content_parts.append({
-                        "type": "text",
-                        "text": f"[Файл: {fname}]\n```\n{file_text}\n```"
-                    })
-                except UnicodeDecodeError:
-                    content_parts.append({
-                        "type": "text",
-                        "text": f"[Прикреплён двоичный файл: {fname}, тип: {ftype}]"
-                    })
+                # Try encodings: utf-8 → cp1251 → latin1 (same as bot)
+                file_text = None
+                for enc in ("utf-8", "cp1251", "latin1"):
+                    try:
+                        file_text = raw_bytes.decode(enc)
+                        break
+                    except Exception:
+                        continue
+                if file_text is None:
+                    file_text = raw_bytes.decode("utf-8", errors="replace")
+                # Trim if too large (same as bot: MAX_FILE_CHARS = 120_000)
+                MAX_FILE_CHARS = 120_000
+                if len(file_text) > MAX_FILE_CHARS:
+                    file_text = file_text[:MAX_FILE_CHARS] + f"\n\n[...обрезано, файл больше {MAX_FILE_CHARS} символов]"
+                # Format same as bot
+                if user_text and user_text != "Вложения":
+                    prompt_text = f"{user_text}\n\n--- Содержимое файла {fname} ---\n{file_text}"
+                else:
+                    prompt_text = f"Проанализируй содержимое файла {fname}:\n\n{file_text}"
+                content_parts.append({"type": "text", "text": prompt_text})
             except Exception as e:
                 logger.warning("Failed to decode file attachment %s: %r", fname, e)
-                content_parts.append({
-                    "type": "text",
-                    "text": f"[Файл: {fname}]"
-                })
+                content_parts.append({"type": "text", "text": f"[Файл: {fname}] — не удалось прочитать"})
 
         if not content_parts:
             content_parts.append({"type": "text", "text": user_text})
