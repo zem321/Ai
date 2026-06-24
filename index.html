@@ -1874,6 +1874,10 @@ function send(){
   sendToBackend(txt,filesToSend,msgEl);
 }
 
+// Хранилище контента файлов (вместо dataset — чтобы избежать искажений UTF-8)
+window.__botFiles = window.__botFiles || {};
+let __botFileCounter = 0;
+
 function appendBotFile(msgEl, fileData) {
   document.getElementById('tr')?.remove();
 
@@ -1885,9 +1889,14 @@ function appendBotFile(msgEl, fileData) {
   const fileName = fileData.name || 'file.txt';
   const fileType = fileData.type || 'File';
   const content = fileData.content || '';
+  const mime = fileData.mime || 'text/plain';
+
+  // Сохраняем контент в JS-объекте, не в dataset (dataset искажает UTF-8)
+  const fileId = 'bf_' + (++__botFileCounter);
+  window.__botFiles[fileId] = { content, name: fileName, mime };
 
   container.innerHTML = `
-    <div class="bot-file" onclick="downloadFileFromAI(this)">
+    <div class="bot-file" onclick="downloadFileFromAI(this)" data-file-id="${fileId}">
       <div class="bot-file-icon">
         <span style="font-size:16px;font-weight:700;">&lt;/&gt;</span>
       </div>
@@ -1898,21 +1907,21 @@ function appendBotFile(msgEl, fileData) {
     </div>
   `;
 
-  container.dataset.fileName = fileName;
-  container.dataset.fileContent = content;
-  container.dataset.mime = fileData.mime || 'text/plain';
-
   msgEl.appendChild(container);
   scrollElementAboveInput(container, 18);
 }
 
 function downloadFileFromAI(el) {
-  const row = el.closest('.msg-row');
-  const name = row.dataset.fileName || 'file.txt';
-  const content = row.dataset.fileContent || '';
-  const mime = row.dataset.mime || 'text/plain';
+  const fileId = el.dataset.fileId;
+  const fileData = window.__botFiles?.[fileId];
+  if (!fileData) return;
 
-  const blob = new Blob([content], { type: mime });
+  const name = fileData.name || 'file.txt';
+  const content = fileData.content || '';
+  const mime = (fileData.mime || 'text/plain') + ';charset=utf-8';
+
+  // Создаём Blob с явной кодировкой UTF-8
+  const blob = new Blob([new TextEncoder().encode(content)], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
