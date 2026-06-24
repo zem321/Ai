@@ -95,17 +95,13 @@ IMAGE_KEYWORDS = (
     "картинку с", "картинка с", "изображение с", "фото с",
 )
 
-FILE_KEYWORDS = [
-    "файлом", "в файл", "сохрани в файл",
-    "отправь файлом", "пришли файлом", "дай файл", "скачать файл",
-    "дай txt", "в txt", "send as file", "as a file", "в виде файла",
-    "сделай файл",
-]
-
-# Ключевые слова которые означают создание файла ТОЛЬКО если явно просят
-FILE_CREATE_KEYWORDS = [
-    "скачать", "сохрани", "скинь", "txt", ".txt", "файл",
-    "html", "python", "js", "json", "css", "markdown", "md"
+# Только явные команды отправки файлом
+FILE_SEND_COMMANDS = [
+    "отправь файлом", "ответ файлом", "скинь файлом", "дай файлом",
+    "пришли файлом", "прислать файлом", "отправить файлом", "скинуть файлом",
+    "отправьте файлом", "пришлите файлом", "скиньте файлом",
+    "send as file", "as a file", "в виде файла",
+    "файлом",
 ]
 
 def detect_intent(text: str) -> str:
@@ -124,66 +120,83 @@ def detect_intent(text: str) -> str:
 
     return "chat"
 
-def is_file_request(text: str) -> bool:
-    """Проверяет, просит ли пользователь отправить ответ файлом.
-    Срабатывает только на явные команды, не на слова внутри файла."""
-    low = (text or "").lower().strip()
-
-    # Точные фразы — всегда файл
-    if any(cmd in low for cmd in FILE_KEYWORDS):
-        return True
-
-    # Слова-кандидаты срабатывают только если нет признаков анализа/вопроса
-    ANALYSIS_WORDS = [
-        "объясни", "расскажи", "что делает", "как работает", "проанализируй",
-        "опиши", "разбери", "проверь", "найди", "исправь", "почему", "зачем",
-        "можешь", "помоги", "прочитай", "посмотри", "explain", "describe", "analyze"
+def extract_file_extension(text: str) -> str:
+    """Извлекает расширение из запроса: 'в docx', 'py', '.html' и т.д."""
+    low = (text or "").lower()
+    
+    # Ищем "в расширение", "в .расширение", "формате расширение"
+    patterns = [
+        r'в\s+\.?([a-z0-9]{2,5})(?:\s|$)',  # в docx, в .py, в html
+        r'формате\s+\.?([a-z0-9]{2,5})(?:\s|$)',  # формате docx
+        r'\.([a-z0-9]{2,5})(?:\s|$)',  # .docx, .html
     ]
-    is_analysis = any(w in low for w in ANALYSIS_WORDS)
-    if is_analysis:
-        return False
+    
+    for pattern in patterns:
+        match = re.search(pattern, low)
+        if match:
+            ext = match.group(1).lower()
+            if ext.isalnum() and 2 <= len(ext) <= 5:
+                return ext
+    return ""
 
-    # Иначе проверяем FILE_CREATE_KEYWORDS
-    return any(kw in low for kw in FILE_CREATE_KEYWORDS)
+def is_file_request(text: str) -> bool:
+    """Срабатывает ТОЛЬКО на явные команды типа 'отправь файлом', 'скинь файлом'."""
+    low = (text or "").lower().strip()
+    return any(cmd in low for cmd in FILE_SEND_COMMANDS)
 
 def guess_filename_from_prompt(user_prompt: str, ai_reply: str) -> str:
-    """Пытается угадать имя файла."""
+    """Определяет имя и расширение файла из запроса пользователя."""
+    low = (user_prompt or "").lower()
+
     ext_map = {
         "python": "py", "py": "py",
         "javascript": "js", "js": "js",
         "typescript": "ts", "ts": "ts",
         "json": "json", "html": "html",
         "css": "css", "java": "java",
-        "c": "c", "cpp": "cpp",
+        "c": "c", "cpp": "cpp", "c++": "cpp",
         "go": "go", "rust": "rs", "rs": "rs",
         "php": "php", "ruby": "rb",
-        "bash": "sh", "sh": "sh",
+        "bash": "sh", "sh": "sh", "shell": "sh",
         "sql": "sql", "yaml": "yml", "yml": "yml",
         "xml": "xml", "markdown": "md", "md": "md",
-        "txt": "txt", "csv": "csv",
+        "txt": "txt", "csv": "csv", "toml": "toml",
+        "docx": "docx", "doc": "docx",
+        "xlsx": "xlsx", "xls": "xlsx",
+        "pdf": "pdf",
+        "zip": "zip",
     }
 
-    # 1. Явное имя файла в промпте
+    # Русские слова → расширения
+    ru_map = {
+        "докс": "docx", "ворд": "docx", "word": "docx",
+        "эксель": "xlsx", "excel": "xlsx", "таблиц": "xlsx",
+        "пдф": "pdf", "питон": "py", "пайтон": "py",
+        "джавастрипт": "js", "хтмл": "html",
+    }
+    for ru, ext in ru_map.items():
+        if ru in low:
+            return f"ответ.{ext}"
+
+    # 1. Явное имя файла в промпте: script.py, report.docx и т.п.
     m = re.search(
-        r'([a-zA-Z0-9_.-]+\.(?:py|js|ts|json|csv|md|txt|html|css|java|c|cpp|go|rs|php|rb|sh|yaml|yml|sql|xml|toml|ini|env))\b',
+        r'([a-zA-Z0-9_а-яё.-]+\.(?:py|js|ts|json|csv|md|txt|html|css|java|c|cpp|go|rs|php|rb|sh|yaml|yml|sql|xml|toml|ini|env|docx|doc|xlsx|xls|pdf|zip))\b',
         user_prompt, re.I
     )
     if m:
         return m.group(1)
 
-    # 2. Расширение в промпте
+    # 2. Расширение упомянуто в промпте: "в .py", "в docx", "скинь xlsx"
     m = re.search(
-        r'(?:^|\s|в\s+|как?\s+|файл\s+|\.)'
-        r'(py|js|ts|json|csv|md|txt|html|css|java|cpp|go|rs|php|rb|sh|yaml|yml|sql|xml|toml|ini|env|'
-        r'python|javascript|typescript|markdown|bash|shell|rust|ruby)\b',
-        user_prompt, re.I
+        r'(?:^|\s|в\s+|\.)(py|js|ts|json|csv|md|txt|html|css|java|cpp|go|rs|php|rb|sh|yaml|yml|sql|xml|toml|ini|env|docx|doc|xlsx|xls|pdf|zip|python|javascript|typescript|markdown|bash|shell|rust|ruby)(?:\s|$|,|\.|файл)',
+        low, re.I
     )
     if m:
         lang = m.group(1).lower()
         ext = ext_map.get(lang, lang)
         return f"ответ.{ext}"
 
-    # 3. Язык в markdown-блоке ответа
+    # 3. Язык в markdown-блоке ответа модели
     m = re.search(r'^```([a-zA-Z0-9_+-]+)', ai_reply.strip(), re.MULTILINE)
     if m:
         lang = m.group(1).lower()
@@ -481,11 +494,20 @@ async def api_chat(request: web.Request) -> web.Response:
         logger.exception("webapp_api: ошибка call_ai")
         return web.json_response({"error": "ai_failed", "message": str(e)}, status=502)
 
-    # === НОВЫЙ БЛОК: ОТПРАВКА ФАЙЛА ===
+    # === ОТПРАВКА ФАЙЛА ===
     want_file = is_file_request(user_text)
 
     if want_file:
-        filename = guess_filename_from_prompt(user_text, reply)
+        # Сначала пытаемся извлечь расширение из запроса (в docx, в py, и т.д.)
+        requested_ext = extract_file_extension(user_text)
+        
+        if requested_ext:
+            # Используем явно указанное расширение
+            filename = f"ответ.{requested_ext}"
+        else:
+            # Иначе угадываем по содержимому
+            filename = guess_filename_from_prompt(user_text, reply)
+        
         file_type = get_file_type(filename)
 
         return web.json_response({
