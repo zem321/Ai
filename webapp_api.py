@@ -114,9 +114,8 @@ def detect_intent(text: str) -> str:
         if kw in t:
             return "image"
 
-    for kw in FILE_KEYWORDS:
-        if kw in t:
-            return "file"
+    if is_file_request(t):
+        return "file"
 
     return "chat"
 
