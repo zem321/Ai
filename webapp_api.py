@@ -96,10 +96,15 @@ IMAGE_KEYWORDS = (
 )
 
 FILE_KEYWORDS = [
-    "файл", "txt", ".txt", "скачать", "сохрани", "скинь",
-    "отправь файлом", "пришли файлом", "в файл", "сохрани в файл",
-    "сделай файл", "дай файл", "скачать файл", "дай txt", "в txt",
-    "send as file", "as a file", "в виде файла", "файлом",
+    "файлом", "в файл", "сохрани в файл",
+    "отправь файлом", "пришли файлом", "дай файл", "скачать файл",
+    "дай txt", "в txt", "send as file", "as a file", "в виде файла",
+    "сделай файл",
+]
+
+# Ключевые слова которые означают создание файла ТОЛЬКО если явно просят
+FILE_CREATE_KEYWORDS = [
+    "скачать", "сохрани", "скинь", "txt", ".txt", "файл",
     "html", "python", "js", "json", "css", "markdown", "md"
 ]
 
@@ -120,13 +125,26 @@ def detect_intent(text: str) -> str:
     return "chat"
 
 def is_file_request(text: str) -> bool:
-    """Проверяет, просит ли пользователь отправить ответ файлом."""
+    """Проверяет, просит ли пользователь отправить ответ файлом.
+    Срабатывает только на явные команды, не на слова внутри файла."""
     low = (text or "").lower().strip()
-    file_commands = [
-        "файлом", "в файл", "txt", "в txt", "файл",
-        "отправь файлом", "пришли файлом", "дай файл", "скачать", "сохрани"
+
+    # Точные фразы — всегда файл
+    if any(cmd in low for cmd in FILE_KEYWORDS):
+        return True
+
+    # Слова-кандидаты срабатывают только если нет признаков анализа/вопроса
+    ANALYSIS_WORDS = [
+        "объясни", "расскажи", "что делает", "как работает", "проанализируй",
+        "опиши", "разбери", "проверь", "найди", "исправь", "почему", "зачем",
+        "можешь", "помоги", "прочитай", "посмотри", "explain", "describe", "analyze"
     ]
-    return any(cmd in low for cmd in file_commands) or any(kw in low for kw in FILE_KEYWORDS)
+    is_analysis = any(w in low for w in ANALYSIS_WORDS)
+    if is_analysis:
+        return False
+
+    # Иначе проверяем FILE_CREATE_KEYWORDS
+    return any(kw in low for kw in FILE_CREATE_KEYWORDS)
 
 def guess_filename_from_prompt(user_prompt: str, ai_reply: str) -> str:
     """Пытается угадать имя файла."""
