@@ -119,23 +119,68 @@ def detect_intent(text: str) -> str:
 
     return "chat"
 
+# Явные названия расширений/форматов на русском и английском
+EXT_ALIASES = {
+    # русские
+    "докс": "docx", "ворд": "docx",
+    "эксель": "xlsx", "таблиц": "xlsx",
+    "питон": "py", "пайтон": "py",
+    "джаваскрипт": "js", "хтмл": "html",
+    "пдф": "pdf", "пдп": "pdf",
+    "маркдаун": "md", "текст": "txt",
+    # английские слова/аббревиатуры → расширение
+    "word": "docx", "excel": "xlsx",
+    "python": "py", "javascript": "js",
+    "typescript": "ts", "markdown": "md",
+    "html": "html", "css": "css",
+    "json": "json", "yaml": "yml",
+    "sql": "sql", "xml": "xml",
+    "bash": "sh", "shell": "sh",
+    "rust": "rs", "golang": "go",
+    "java": "java", "php": "php",
+    "ruby": "rb", "swift": "swift",
+    "kotlin": "kt", "cpp": "cpp",
+    "csharp": "cs", "csv": "csv",
+    "pdf": "pdf", "zip": "zip",
+    "toml": "toml", "ini": "ini",
+}
+
+# Прямые расширения (когда пишут само расширение без точки)
+KNOWN_EXTS = {
+    "docx","doc","xlsx","xls","py","js","ts","json","html","htm",
+    "css","md","txt","csv","sql","sh","yaml","yml","xml","pdf",
+    "zip","go","rs","rb","java","php","cpp","cs","toml","ini",
+    "swift","kt","r","c","h","pl","lua",
+}
+
 def extract_file_extension(text: str) -> str:
-    """Извлекает расширение из запроса: 'в docx', 'py', '.html' и т.д."""
+    """Извлекает расширение из запроса: 'в docx', 'в py', '.html', 'word', 'python' и т.д."""
     low = (text or "").lower()
-    
-    # Ищем "в расширение", "в .расширение", "формате расширение"
-    patterns = [
-        r'в\s+\.?([a-z0-9]{2,5})(?:\s|$)',  # в docx, в .py, в html
-        r'формате\s+\.?([a-z0-9]{2,5})(?:\s|$)',  # формате docx
-        r'\.([a-z0-9]{2,5})(?:\s|$)',  # .docx, .html
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, low)
-        if match:
-            ext = match.group(1).lower()
-            if ext.isalnum() and 2 <= len(ext) <= 5:
-                return ext
+
+    # 1. Точечное расширение: .docx, .py и т.д.
+    m = re.search(r'\.([a-z0-9]{1,5})(?:\s|$|,)', low)
+    if m:
+        ext = m.group(1)
+        if ext in KNOWN_EXTS:
+            return ext
+
+    # 2. «в расширение» / «в формате расширение» / «формате расширение»
+    m = re.search(r'(?:в\s+формате|формате|в)\s+\.?([a-z0-9а-яё]{2,12})(?:\s|$|,)', low)
+    if m:
+        word = m.group(1)
+        if word in EXT_ALIASES:
+            return EXT_ALIASES[word]
+        if word in KNOWN_EXTS:
+            return word
+
+    # 3. Любое слово из EXT_ALIASES встречается в тексте
+    words = re.findall(r'[a-z0-9а-яё]+', low)
+    for w in words:
+        if w in EXT_ALIASES:
+            return EXT_ALIASES[w]
+        if w in KNOWN_EXTS:
+            return w
+
     return ""
 
 def is_file_request(text: str) -> bool:
