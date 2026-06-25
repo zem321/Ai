@@ -1700,18 +1700,30 @@ function closeSheet(){
   document.getElementById('sheet-bd').classList.remove('open');
 }
 function showGroups(){
-  setSheetContent(Object.keys(GROUP_MODELS).map((key,i)=>{
-    const handler=key==='council'?'pickCouncil()':'showGroup("'+key+'")';
-    return `${i?'<div class="ms-sep"></div>':''}<div class="ms-item ms-group" onclick="${handler}"><div class="ms-info"><div class="ms-name">${GROUP_LABELS[key]}</div></div><div class="ms-arrow">›</div></div>`;
-  }).join(''));
+  setSheetContent(Object.keys(GROUP_MODELS).map((key,i)=>`${i?'<div class="ms-sep"></div>':''}<div class="ms-item ms-group" data-action="group" data-key="${key}"><div class="ms-info"><div class="ms-name">${GROUP_LABELS[key]}</div></div><div class="ms-arrow">›</div></div>`).join(''));
 }
 function showGroup(key){
-  setSheetContent(`<div class="ms-item ms-back" onclick="showGroups()"><div class="ms-info"><div class="ms-name">‹ ${GROUP_LABELS[key]}</div></div></div>`+
-    GROUP_MODELS[key].map((m,i)=>`${i?'<div class="ms-sep"></div>':''}<div class="ms-item${model===m[0]?' active':''}" onclick="pickModel('${m[0]}','${m[1]}')">${
-      `<div class="ms-info"><div class="ms-name">${m[1]}</div></div>${checkSvg()}`}</div>`).join(''));
+  setSheetContent(`<div class="ms-item ms-back" data-action="back"><div class="ms-info"><div class="ms-name">‹ ${GROUP_LABELS[key]}</div></div></div>`+
+    GROUP_MODELS[key].map((m,i)=>`${i?'<div class="ms-sep"></div>':''}<div class="ms-item${model===m[0]?' active':''}" data-action="model" data-id="${m[0]}" data-label="${m[1]}">`+
+    `<div class="ms-info"><div class="ms-name">${m[1]}</div></div>${checkSvg()}</div>`).join(''));
+  document.getElementById('model-sheet-list').dataset.group=key;
 }
-function pickModel(id,label){model=id;document.getElementById('model-label').textContent=label;setTimeout(closeSheet,160);}
-function pickCouncil(){model='council/ai-council';document.getElementById('model-label').textContent='Совет ИИ-моделей';setTimeout(closeSheet,160);}
+document.addEventListener('click',function(e){
+  const item=e.target.closest('[data-action]');
+  if(!item)return;
+  const action=item.dataset.action;
+  if(action==='group'){
+    const key=item.dataset.key;
+    if(key==='council'){model='council/ai-council';document.getElementById('model-label').textContent='Совет ИИ-моделей';setTimeout(closeSheet,160);}
+    else showGroup(key);
+  } else if(action==='model'){
+    model=item.dataset.id;
+    document.getElementById('model-label').textContent=item.dataset.label;
+    setTimeout(closeSheet,160);
+  } else if(action==='back'){
+    showGroups();
+  }
+});
 function openSidebar(){renderSb();document.getElementById('sidebar').classList.add('open');document.getElementById('sb-bd').classList.add('open');}
 function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-bd').classList.remove('open');}
 function renderSb(){
