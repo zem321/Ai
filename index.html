@@ -596,17 +596,6 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
   transition:transform .42s var(--ease), background .42s var(--ease);
 }
 .pill-model:active{transform:scale(.94);}
-select.pill-model{
-  -webkit-appearance:none;
-  appearance:none;
-  display:block;
-  padding:0 26px 0 14px;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
-  background-repeat:no-repeat;
-  background-position:right 10px center;
-  outline:none;
-  width:auto;
-}
 
 
 .tool-spacer{flex:1;}
@@ -1459,25 +1448,19 @@ html,body,.app{background:#F2EFE8 !important;}
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
         </button>
-        <select id="model-select" class="pill-model liquid-glass-pill" onchange="onModelChange(this)">
-          <optgroup label="ChatGPT">
-            <option value="freemodel/gpt-5.5" selected>GPT-5.5</option>
-            <option value="freemodel/gpt-5.4-nano">GPT-5.4 Mini</option>
-          </optgroup>
-          <optgroup label="Gemini">
-            <option value="gemini/gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
-            <option value="gemini/gemini-3.5-flash">Gemini 3.5 Flash</option>
-            <option value="gemini/gemini-3.1-pro">Gemini 3.1 Pro</option>
-          </optgroup>
-          <optgroup label="Other Models">
-            <option value="meta/llama-4-maverick-17b-128e-instruct">Llama 4</option>
-            <option value="z-ai/glm-5.1">GLM-5.1</option>
-            <option value="nvidia/nemotron-3-super-120b-a12b">Nemotron 3 Super</option>
-          </optgroup>
-          <optgroup label="Специальные">
-            <option value="council/ai-council">⚡ Совет ИИ-моделей</option>
-          </optgroup>
+        <button class="pill-model liquid-glass-pill" id="model-btn" onclick="openGroupPicker()">
+          <span id="model-label">GPT-5.5</span>
+        </button>
+        <!-- Скрытый select для выбора группы -->
+        <select id="group-select" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" onchange="onGroupChange(this)">
+          <option value="">—</option>
+          <option value="chatgpt">ChatGPT</option>
+          <option value="gemini">Gemini</option>
+          <option value="other">Other Models</option>
+          <option value="council">Совет ИИ-моделей</option>
         </select>
+        <!-- Скрытый select для выбора модели внутри группы -->
+        <select id="model-select" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" onchange="onModelChange(this)"></select>
         <div class="tool-spacer"></div>
         <button class="send-btn" id="send-btn" disabled onclick="send()">
           <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
@@ -1657,7 +1640,41 @@ function toggleInc(){
   if(isInc)document.getElementById('messages').style.display='none';
 }
 
-function onModelChange(sel){model=sel.value;}
+const GROUP_MODELS={
+  chatgpt:[['freemodel/gpt-5.5','GPT-5.5'],['freemodel/gpt-5.4-nano','GPT-5.4 Mini']],
+  gemini:[['gemini/gemini-3.1-flash-lite','Gemini 3.1 Flash Lite'],['gemini/gemini-3.5-flash','Gemini 3.5 Flash'],['gemini/gemini-3.1-pro','Gemini 3.1 Pro']],
+  other:[['meta/llama-4-maverick-17b-128e-instruct','Llama 4'],['z-ai/glm-5.1','GLM-5.1'],['nvidia/nemotron-3-super-120b-a12b','Nemotron 3 Super']],
+  council:[['council/ai-council','Совет ИИ-моделей']]
+};
+function openGroupPicker(){
+  const gs=document.getElementById('group-select');
+  gs.value='';
+  gs.style.pointerEvents='auto';
+  gs.focus();
+  gs.click();
+}
+function onGroupChange(sel){
+  sel.style.pointerEvents='none';
+  const key=sel.value;
+  if(!key)return;
+  if(key==='council'){
+    model='council/ai-council';
+    document.getElementById('model-label').textContent='Совет ИИ-моделей';
+    return;
+  }
+  const ms=document.getElementById('model-select');
+  ms.innerHTML=GROUP_MODELS[key].map(m=>`<option value="${m[0]}">${m[1]}</option>`).join('');
+  ms.style.pointerEvents='auto';
+  ms.focus();
+  ms.click();
+}
+function onModelChange(sel){
+  sel.style.pointerEvents='none';
+  if(!sel.value)return;
+  model=sel.value;
+  const label=sel.options[sel.selectedIndex].text;
+  document.getElementById('model-label').textContent=label;
+}
 function openSidebar(){renderSb();document.getElementById('sidebar').classList.add('open');document.getElementById('sb-bd').classList.add('open');}
 function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-bd').classList.remove('open');}
 function renderSb(){
