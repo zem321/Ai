@@ -1453,7 +1453,6 @@ html,body,.app{background:#F2EFE8 !important;}
         </button>
         <!-- Скрытый select для выбора группы -->
         <select id="group-select" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" onchange="onGroupChange(this)">
-          <option value="">—</option>
           <option value="chatgpt">ChatGPT</option>
           <option value="gemini">Gemini</option>
           <option value="other">Other Models</option>
@@ -1656,6 +1655,7 @@ function openGroupPicker(){
 function onGroupChange(sel){
   sel.style.pointerEvents='none';
   const key=sel.value;
+  sel.selectedIndex=0;
   if(!key)return;
   if(key==='council'){
     model='council/ai-council';
@@ -1663,7 +1663,7 @@ function onGroupChange(sel){
     return;
   }
   const ms=document.getElementById('model-select');
-  ms.innerHTML=GROUP_MODELS[key].map(m=>`<option value="${m[0]}">${m[1]}</option>`).join('');
+  ms.innerHTML='<option value="" disabled selected></option>'+GROUP_MODELS[key].map(m=>`<option value="${m[0]}">${m[1]}</option>`).join('');
   ms.style.pointerEvents='auto';
   ms.focus();
   ms.click();
