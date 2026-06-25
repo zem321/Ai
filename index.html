@@ -596,6 +596,18 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
   transition:transform .42s var(--ease), background .42s var(--ease);
 }
 .pill-model:active{transform:scale(.94);}
+select.pill-model{
+  -webkit-appearance:none;
+  appearance:none;
+  display:block;
+  padding:0 28px 0 14px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 10px center;
+  outline:none;
+  max-width:160px;
+}
+
 
 .tool-spacer{flex:1;}
 
@@ -1447,9 +1459,25 @@ html,body,.app{background:#F2EFE8 !important;}
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
         </button>
-        <button class="pill-model liquid-glass-pill" onclick="openSheet()">
-          <span id="model-label">GPT-5.5</span>
-        </button>
+        <select id="model-select" class="pill-model liquid-glass-pill" onchange="onModelChange(this)">
+          <optgroup label="ChatGPT">
+            <option value="freemodel/gpt-5.5" selected>GPT-5.5</option>
+            <option value="freemodel/gpt-5.4-nano">GPT-5.4 Mini</option>
+          </optgroup>
+          <optgroup label="Gemini">
+            <option value="gemini/gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
+            <option value="gemini/gemini-3.5-flash">Gemini 3.5 Flash</option>
+            <option value="gemini/gemini-3.1-pro">Gemini 3.1 Pro</option>
+          </optgroup>
+          <optgroup label="Other Models">
+            <option value="meta/llama-4-maverick-17b-128e-instruct">Llama 4</option>
+            <option value="z-ai/glm-5.1">GLM-5.1</option>
+            <option value="nvidia/nemotron-3-super-120b-a12b">Nemotron 3 Super</option>
+          </optgroup>
+          <optgroup label="Специальные">
+            <option value="council/ai-council">⚡ Совет ИИ-моделей</option>
+          </optgroup>
+        </select>
         <div class="tool-spacer"></div>
         <button class="send-btn" id="send-btn" disabled onclick="send()">
           <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
@@ -1463,20 +1491,6 @@ html,body,.app{background:#F2EFE8 !important;}
 </div><!-- /app -->
 
 <!-- Sheet backdrop -->
-<div class="sheet-bd" id="sheet-bd" onclick="closeSheet()"></div>
-
-<!-- MODEL SHEET — iOS Action Sheet style -->
-<div class="sheet" id="sheet">
-  <div class="sheet-drag"></div>
-
-  <div class="sheet-header">
-    <button class="sheet-done" onclick="closeSheet()">Готово</button>
-    <span class="sheet-title">Выбор модели</span>
-    <div style="width:52px"></div>
-  </div>
-
-  <div class="model-sheet-list" id="model-sheet-list"></div>
-</div>
 
 <!-- Sidebar backdrop -->
 <div class="sb-bd" id="sb-bd" onclick="closeSidebar()"></div>
@@ -1541,7 +1555,7 @@ const animStyle=document.createElement('style');
 animStyle.textContent='@keyframes oracleDot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}} .typing-dots{display:inline-flex;gap:5px;align-items:center}.typing-dots span{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.35;animation:oracleDot 1s infinite ease-in-out}.typing-dots span:nth-child(2){animation-delay:.15s}.typing-dots span:nth-child(3){animation-delay:.3s}';
 document.head.appendChild(animStyle);
 
-let model='GPT-5.5',msgs=[],chats=[],activeChatId=null,isInc=false,loaderToggle=0,chatHistory=[],accessGranted=false,pendingFiles=[];
+let model='freemodel/gpt-5.5',msgs=[],chats=[],activeChatId=null,isInc=false,loaderToggle=0,chatHistory=[],accessGranted=false,pendingFiles=[];
 
 // === Хранилище чатов: всё локально в localStorage ===
 const CHATS_KEY='oracle_chats_v1';
@@ -1601,7 +1615,7 @@ const MODEL_NAME_TO_ID={
   'Nemotron 3 Super':'nvidia/nemotron-3-super-120b-a12b',
   'Совет ИИ-моделей':'council/ai-council'
 };
-function modelIdFor(name){return MODEL_NAME_TO_ID[name]||'freemodel/gpt-5.5';}
+function modelIdFor(id){return id||'freemodel/gpt-5.5';}
 
 (function initTelegramAccess(){
   try{
@@ -1643,39 +1657,7 @@ function toggleInc(){
   if(isInc)document.getElementById('messages').style.display='none';
 }
 
-function checkSvg(){return `<svg class="ms-check" width="18" height="14" viewBox="0 0 18 14" fill="none"><path d="M1 7.5L5.5 12L17 1" stroke="#22C55E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;}
-function setModelList(html,animate=true){
-  const list=document.getElementById('model-sheet-list');
-  const sheet=document.getElementById('sheet');
-  const shouldAnimate=animate&&sheet.classList.contains('open')&&list.children.length;
-  list.classList.remove('switching');
-  if(!shouldAnimate){clearTimeout(list._heightTimer);list.innerHTML=html;return;}
-  clearTimeout(list._heightTimer);
-  const oldLayer=list.querySelector('.model-list-layer.new')||list;
-  const oldHtml=oldLayer.innerHTML;
-  list.innerHTML=`<div class="model-list-layer old">${oldHtml}</div><div class="model-list-layer new">${html}</div>`;
-  void list.offsetHeight;
-  requestAnimationFrame(()=>list.classList.add('switching'));
-  list._heightTimer=setTimeout(()=>{list.classList.remove('switching');list.innerHTML=html;},560);
-}
-function renderModelGroups(animate=true){
-  setModelList(groupOrder.map((key,i)=>{
-    const handler = key==='council' ? 'selectCouncilModel()' : `showModelGroup('${key}')`;
-    return `${i?'<div class="ms-sep"></div>':''}<div class="ms-item ms-group" onclick="${handler}"><div class="ms-info"><div class="ms-name">${groupLabels[key]}</div></div><div class="ms-arrow">›</div></div>`;
-  }).join(''),animate);
-}
-function selectCouncilModel(){
-  model='Совет ИИ-моделей';
-  document.getElementById('model-label').textContent=model;
-  setTimeout(closeSheet,180);
-}
-function showModelGroup(key){
-  setModelList(`<div class="ms-item ms-back" onclick="renderModelGroups()"><div class="ms-info"><div class="ms-name">‹ ${groupLabels[key]}</div></div></div>${modelGroups[key].map((m,i)=>`${i?'<div class="ms-sep"></div>':''}<div class="ms-item ${model===m[0]?'active':''}" data-n="${m[0]}" onclick="pickModel(this)"><div class="ms-info"><div class="ms-name">${m[0]}</div></div>${checkSvg()}</div>`).join('')}`,true);
-}
-function openSheet(){renderModelGroups(false);requestAnimationFrame(()=>{document.getElementById('sheet').classList.add('open');document.getElementById('sheet-bd').classList.add('open');});}
-function closeSheet(){document.getElementById('sheet').classList.remove('open');document.getElementById('sheet-bd').classList.remove('open');}
-function pickModel(el){document.querySelectorAll('.ms-item').forEach(i=>i.classList.remove('active'));el.classList.add('active');model=el.dataset.n;document.getElementById('model-label').textContent=model;setTimeout(closeSheet,180);}
-
+function onModelChange(sel){model=sel.value;}
 function openSidebar(){renderSb();document.getElementById('sidebar').classList.add('open');document.getElementById('sb-bd').classList.add('open');}
 function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-bd').classList.remove('open');}
 function renderSb(){
