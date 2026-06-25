@@ -1752,20 +1752,32 @@ function renderSb(){
   /* tap на item */
   el.querySelectorAll('.sb-item').forEach(item=>{
     let pressTimer=null;
+    let moved=false;
     const id=item.dataset.id;
     item.addEventListener('click',e=>{
       if(e.target.closest('.sb-del'))return;
       if(item.classList.contains('show-del')){item.classList.remove('show-del');return;}
       openChat(id);
     });
-    /* long press для показа кнопки удаления */
-    item.addEventListener('pointerdown',()=>{pressTimer=setTimeout(()=>{
-      document.querySelectorAll('.sb-item.show-del').forEach(i=>i.classList.remove('show-del'));
-      item.classList.add('show-del');
-    },450);});
-    item.addEventListener('pointerup',()=>clearTimeout(pressTimer));
-    item.addEventListener('pointercancel',()=>clearTimeout(pressTimer));
-    item.addEventListener('pointermove',()=>clearTimeout(pressTimer));
+    /* long press — работает на iOS и Android */
+    function startPress(){
+      moved=false;
+      clearTimeout(pressTimer);
+      pressTimer=setTimeout(()=>{
+        if(moved)return;
+        document.querySelectorAll('.sb-item.show-del').forEach(i=>i.classList.remove('show-del'));
+        item.classList.add('show-del');
+      },450);
+    }
+    function cancelPress(){clearTimeout(pressTimer);}
+    function onMove(){moved=true;clearTimeout(pressTimer);}
+    item.addEventListener('touchstart',startPress,{passive:true});
+    item.addEventListener('touchend',cancelPress,{passive:true});
+    item.addEventListener('touchcancel',cancelPress,{passive:true});
+    item.addEventListener('touchmove',onMove,{passive:true});
+    item.addEventListener('mousedown',startPress);
+    item.addEventListener('mouseup',cancelPress);
+    item.addEventListener('mouseleave',cancelPress);
   });
   /* tap на удаление */
   el.querySelectorAll('.sb-del').forEach(btn=>{
@@ -1773,6 +1785,11 @@ function renderSb(){
       e.stopPropagation();
       deleteChat(btn.dataset.del);
     });
+    btn.addEventListener('touchend',e=>{
+      e.stopPropagation();
+      e.preventDefault();
+      deleteChat(btn.dataset.del);
+    },{passive:false});
   });
 }
 function deleteChat(id){
