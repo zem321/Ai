@@ -1451,14 +1451,13 @@ html,body,.app{background:#F2EFE8 !important;}
         <button class="pill-model liquid-glass-pill" id="model-btn" onclick="openGroupPicker()">
           <span id="model-label">GPT-5.5</span>
         </button>
-        <!-- Скрытый select для выбора группы -->
+        <!-- iOS: скрытые select -->
         <select id="group-select" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" onchange="onGroupChange(this)">
           <option value="chatgpt">ChatGPT</option>
           <option value="gemini">Gemini</option>
           <option value="other">Other Models</option>
           <option value="council">Совет ИИ-моделей</option>
         </select>
-        <!-- Скрытый select для выбора модели внутри группы -->
         <select id="model-select" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" onchange="onModelChange(this)"></select>
         <div class="tool-spacer"></div>
         <button class="send-btn" id="send-btn" disabled onclick="send()">
@@ -1473,6 +1472,12 @@ html,body,.app{background:#F2EFE8 !important;}
 </div><!-- /app -->
 
 <!-- Sheet backdrop -->
+
+<!-- Android model sheet -->
+<div class="sheet-bd" id="sheet-bd" onclick="closeSheet()"></div>
+<div class="sheet" id="sheet">
+  <div class="model-sheet-list" id="model-sheet-list"></div>
+</div>
 
 <!-- Sidebar backdrop -->
 <div class="sb-bd" id="sb-bd" onclick="closeSidebar()"></div>
@@ -1645,9 +1650,14 @@ const GROUP_MODELS={
   other:[['meta/llama-4-maverick-17b-128e-instruct','Llama 4'],['z-ai/glm-5.1','GLM-5.1'],['nvidia/nemotron-3-super-120b-a12b','Nemotron 3 Super']],
   council:[['council/ai-council','Совет ИИ-моделей']]
 };
+const GROUP_LABELS={chatgpt:'ChatGPT',gemini:'Gemini',other:'Other Models',council:'Совет ИИ-моделей'};
+const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(/macintosh/i.test(navigator.userAgent)&&navigator.maxTouchPoints>1);
+
+/* ---- iOS: нативный select ---- */
 function openGroupPicker(){
+  if(!isIOS){openSheet();return;}
   const gs=document.getElementById('group-select');
-  gs.value='';
+  gs.selectedIndex=0;
   gs.style.pointerEvents='auto';
   gs.focus();
   gs.click();
@@ -1672,9 +1682,36 @@ function onModelChange(sel){
   sel.style.pointerEvents='none';
   if(!sel.value)return;
   model=sel.value;
-  const label=sel.options[sel.selectedIndex].text;
-  document.getElementById('model-label').textContent=label;
+  document.getElementById('model-label').textContent=sel.options[sel.selectedIndex].text;
 }
+
+/* ---- Android: кастомный sheet ---- */
+function checkSvg(){return `<svg class="ms-check" width="18" height="14" viewBox="0 0 18 14" fill="none"><path d="M1 7.5L5.5 12L17 1" stroke="#22C55E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;}
+function setSheetContent(html){document.getElementById('model-sheet-list').innerHTML=html;}
+function openSheet(){
+  showGroups();
+  requestAnimationFrame(()=>{
+    document.getElementById('sheet').classList.add('open');
+    document.getElementById('sheet-bd').classList.add('open');
+  });
+}
+function closeSheet(){
+  document.getElementById('sheet').classList.remove('open');
+  document.getElementById('sheet-bd').classList.remove('open');
+}
+function showGroups(){
+  setSheetContent(Object.keys(GROUP_MODELS).map((key,i)=>{
+    const handler=key==='council'?'pickCouncil()':'showGroup("'+key+'")';
+    return `${i?'<div class="ms-sep"></div>':''}<div class="ms-item ms-group" onclick="${handler}"><div class="ms-info"><div class="ms-name">${GROUP_LABELS[key]}</div></div><div class="ms-arrow">›</div></div>`;
+  }).join(''));
+}
+function showGroup(key){
+  setSheetContent(`<div class="ms-item ms-back" onclick="showGroups()"><div class="ms-info"><div class="ms-name">‹ ${GROUP_LABELS[key]}</div></div></div>`+
+    GROUP_MODELS[key].map((m,i)=>`${i?'<div class="ms-sep"></div>':''}<div class="ms-item${model===m[0]?' active':''}" onclick="pickModel('${m[0]}','${m[1]}')">${
+      `<div class="ms-info"><div class="ms-name">${m[1]}</div></div>${checkSvg()}`}</div>`).join(''));
+}
+function pickModel(id,label){model=id;document.getElementById('model-label').textContent=label;setTimeout(closeSheet,160);}
+function pickCouncil(){model='council/ai-council';document.getElementById('model-label').textContent='Совет ИИ-моделей';setTimeout(closeSheet,160);}
 function openSidebar(){renderSb();document.getElementById('sidebar').classList.add('open');document.getElementById('sb-bd').classList.add('open');}
 function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-bd').classList.remove('open');}
 function renderSb(){
