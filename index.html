@@ -911,6 +911,19 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
   flex-shrink:0;background:transparent;
   padding:12px 14px max(env(safe-area-inset-bottom), 16px);
 }
+.model-tap-prompt{
+  position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 80px);
+  left:50%;transform:translateX(-50%);
+  background:var(--text);color:var(--bg);
+  padding:13px 28px;border-radius:999px;
+  font-size:15px;font-weight:600;
+  box-shadow:0 4px 24px rgba(0,0,0,.25);
+  z-index:100;cursor:pointer;
+  white-space:nowrap;
+  animation:prompt-in .22s cubic-bezier(0.22,1,0.36,1);
+  -webkit-tap-highlight-color:transparent;
+}
+@keyframes prompt-in{from{opacity:0;transform:translateX(-50%) translateY(12px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
 .sb-admin-btn{
   width:100%;display:flex;align-items:center;gap:9px;
   padding:11px 14px;border-radius:12px;margin-bottom:8px;
@@ -1556,7 +1569,6 @@ html,body,.app{background:#F2EFE8 !important;}
         <button class="pill-model liquid-glass-pill" id="model-btn" onclick="openGroupPicker()">
           <span id="model-label">GPT-5.5</span>
         </button>
-        <!-- iOS: скрытые select -->
         <select id="group-select" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" onchange="onGroupChange(this)">
           <option value="chatgpt">ChatGPT</option>
           <option value="gemini">Gemini</option>
@@ -1785,7 +1797,6 @@ const GROUP_MODELS={
 const GROUP_LABELS={chatgpt:'ChatGPT',gemini:'Gemini',other:'Other Models',council:'Совет ИИ-моделей'};
 const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(/macintosh/i.test(navigator.userAgent)&&navigator.maxTouchPoints>1);
 
-/* ---- iOS: нативный select ---- */
 function openGroupPicker(){
   if(!isIOS){openSheet();return;}
   const gs=document.getElementById('group-select');
@@ -1794,6 +1805,7 @@ function openGroupPicker(){
   gs.focus();
   gs.click();
 }
+
 function onGroupChange(sel){
   sel.style.pointerEvents='none';
   const key=sel.value;
@@ -1804,13 +1816,45 @@ function onGroupChange(sel){
     document.getElementById('model-label').textContent='Совет ИИ-моделей';
     return;
   }
+  // Готовим второй select
   const ms=document.getElementById('model-select');
   ms.innerHTML='<option value="" disabled selected></option>'+GROUP_MODELS[key].map(m=>`<option value="${m[0]}">${m[1]}</option>`).join('');
-  ms.style.pointerEvents='auto';
-  setTimeout(()=>{ms.focus();ms.click();},350);
+  // Показываем tap-prompt — пользователь сам тапает, это прямой жест
+  showModelTapPrompt(GROUP_LABELS[key], ms);
 }
+
+function showModelTapPrompt(groupName, ms){
+  removeModelTapPrompt();
+  const btn=document.createElement('div');
+  btn.className='model-tap-prompt';
+  btn.id='model-tap-prompt';
+  btn.textContent='Выбрать модель · '+groupName;
+  btn.addEventListener('touchend', function(e){
+    e.preventDefault();
+    removeModelTapPrompt();
+    ms.style.pointerEvents='auto';
+    ms.focus();
+    ms.click();
+  },{passive:false});
+  btn.addEventListener('click', function(){
+    removeModelTapPrompt();
+    ms.style.pointerEvents='auto';
+    ms.focus();
+    ms.click();
+  });
+  document.body.appendChild(btn);
+  // Автоскрытие через 5 сек
+  btn._timer=setTimeout(removeModelTapPrompt, 5000);
+}
+
+function removeModelTapPrompt(){
+  const el=document.getElementById('model-tap-prompt');
+  if(el){clearTimeout(el._timer);el.remove();}
+}
+
 function onModelChange(sel){
   sel.style.pointerEvents='none';
+  removeModelTapPrompt();
   if(!sel.value)return;
   model=sel.value;
   document.getElementById('model-label').textContent=sel.options[sel.selectedIndex].text;
