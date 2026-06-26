@@ -2811,27 +2811,33 @@ function appendBotText(msgEl,text){
 
   const botMsg=b.querySelector('.bot-msg');
 
-  // Плавный вывод через rAF — равномерный поток без рывков
+  // Во время анимации — сырой текст (без markdown пересборки DOM)
+  // В конце — один раз рендерим markdown
   const totalChars=text.length;
-  const durationMs=Math.max(totalChars*38, 800); // ~38ms на символ, мин 0.8с
+  const durationMs=Math.max(totalChars*42, 1000);
   const startTime=performance.now();
   let lastI=0;
+
+  // Контейнер для сырого текста во время анимации
+  const pre=document.createElement('span');
+  pre.style.cssText='white-space:pre-wrap;word-break:break-word;font:inherit;color:inherit;';
+  textEl.appendChild(pre);
 
   function type(now){
     const elapsed=now-startTime;
     const progress=Math.min(elapsed/durationMs,1);
-    // Ease-out для плавного замедления в конце
-    const eased=1-Math.pow(1-progress,2);
+    const eased=1-Math.pow(1-progress,2.5);
     const i=Math.floor(eased*totalChars);
 
     if(i>lastI){
       lastI=i;
-      textEl.innerHTML=md(text.slice(0,i));
+      pre.textContent=text.slice(0,i);
     }
 
     if(progress<1){
       requestAnimationFrame(type);
     }else{
+      // Финальный рендер markdown — одним разом
       textEl.innerHTML=md(text);
       isTyping=false;
       if(m){
