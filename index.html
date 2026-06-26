@@ -2811,34 +2811,30 @@ function appendBotText(msgEl,text){
 
   const botMsg=b.querySelector('.bot-msg');
 
-  // Во время анимации — сырой текст (без markdown пересборки DOM)
-  // В конце — один раз рендерим markdown
-  const totalChars=text.length;
-  const durationMs=Math.max(totalChars*42, 1000);
+  // Рендерим весь текст сразу (markdown корректный)
+  textEl.innerHTML=md(text);
+
+  // Плавно открываем через clip-path сверху вниз
+  textEl.style.clipPath='inset(0 0 100% 0)';
+  textEl.style.transition='none';
+
+  const durationMs=Math.max(text.length*28, 600);
   const startTime=performance.now();
-  let lastI=0;
 
-  // Контейнер для сырого текста во время анимации
-  const pre=document.createElement('span');
-  pre.style.cssText='white-space:pre-wrap;word-break:break-word;font:inherit;color:inherit;';
-  textEl.appendChild(pre);
+  function reveal(now){
+    const progress=Math.min((now-startTime)/durationMs,1);
+    // Линейное открытие — равномерный поток вниз
+    const pct=Math.round((1-progress)*100);
+    textEl.style.clipPath=`inset(0 0 ${pct}% 0)`;
 
-  function type(now){
-    const elapsed=now-startTime;
-    const progress=Math.min(elapsed/durationMs,1);
-    const eased=1-Math.pow(1-progress,2.5);
-    const i=Math.floor(eased*totalChars);
-
-    if(i>lastI){
-      lastI=i;
-      pre.textContent=text.slice(0,i);
-    }
+    // Скролл следует за открытием
+    if(m&&!userHasScrolledUp) scrollElementAboveInputNow(b,18);
 
     if(progress<1){
-      requestAnimationFrame(type);
+      requestAnimationFrame(reveal);
     }else{
-      // Финальный рендер markdown — одним разом
-      textEl.innerHTML=md(text);
+      textEl.style.clipPath='none';
+      textEl.style.transition='';
       isTyping=false;
       if(m){
         m.removeEventListener('wheel',onWheel);
@@ -2850,7 +2846,7 @@ function appendBotText(msgEl,text){
       scrollElementAboveInput(b,18,60);
     }
   }
-  requestAnimationFrame(type);
+  requestAnimationFrame(reveal);
 }
 function appendBotImage(msgEl,base64,caption){
   document.getElementById('tr')?.remove();
