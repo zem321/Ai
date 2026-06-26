@@ -406,7 +406,7 @@ async def api_me(request: web.Request) -> web.Response:
         return err
     if not isinstance(user_id, int):
         return web.json_response({"error": "unauthorized"}, status=401)
-    return web.json_response({"ok": True, "user_id": user_id})
+    return web.json_response({"ok": True, "user_id": user_id, "is_admin": user_id == ADMIN_ID})
 
 async def api_chat(request: web.Request) -> web.Response:
     user_id, err = await _authorize(request)
@@ -538,6 +538,9 @@ async def api_chat(request: web.Request) -> web.Response:
         logger.exception("webapp_api: ошибка call_ai")
         return web.json_response({"error": "ai_failed", "message": str(e)}, status=502)
 
+    # Логируем запрос в статистику
+    await db.log_request(user_id, model_id, source="webapp")
+
     # === ОТПРАВКА ФАЙЛА ===
     want_file = is_file_request(user_text)
 
@@ -599,6 +602,65 @@ async def api_image(request: web.Request) -> web.Response:
         "prompt": prompt,
     })
 
+
+# ─── Admin API ────────────────────────────────────────────────────────────────
+
+async def _authorize_admin(request: web.Request):
+    """Проверяет что запрос от администратора. Возвращает (True, None) или (False, Response)."""
+    user_id, err = await _authorize(request)
+    if err is not None:
+        return False, err
+    if user_id != ADMIN_ID:
+        return False, web.json_response({"error": "forbidden"}, status=403)
+    return True, None
+
+
+async def api_admin_users(request: web.Request) -> web.Response:
+    """GET /api/admin/users — список всех пользователей со статусом и статистикой."""
+    ok, err = await _authorize_admin(request)
+    if not ok:
+        return err
+    users = await db.get_all_users_with_stats()
+    return web.json_response({"ok": True, "users": users})
+
+
+async def api_admin_user_stats(request: web.Request) -> web.Response:
+    """GET /api/admin/users/{user_id}/stats — детальная статистика пользователя."""
+    ok, err = await _authorize_admin(request)
+    if not ok:
+        return err
+    uid = int(request.match_info["user_id"])
+    stats = await db.get_user_stats(uid)
+    return web.json_response({"ok": True, "user_id": uid, "stats": stats})
+
+
+async def api_admin_action(request: web.Request) -> web.Response:
+    """POST /api/admin/action — approve/reject/revoke пользователя."""
+    ok, err = await _authorize_admin(request)
+    if not ok:
+        return err
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_request"}, status=400)
+
+    action = payload.get("action")  # "approve" | "reject" | "revoke"
+    uid = payload.get("user_id")
+    if not action or not uid:
+        return web.json_response({"error": "missing fields"}, status=400)
+
+    uid = int(uid)
+    if action == "approve":
+        await db.approve_user(uid)
+    elif action in ("reject", "revoke"):
+        await db.reject_user(uid)
+    else:
+        return web.json_response({"error": "unknown action"}, status=400)
+
+    logger.info("admin action=%s user_id=%s", action, uid)
+    return web.json_response({"ok": True, "action": action, "user_id": uid})
+
+
 def setup_webapp_routes(app: web.Application) -> None:
     try:
         app._client_max_size = 1024 * 1024 * 30
@@ -609,3 +671,6 @@ def setup_webapp_routes(app: web.Application) -> None:
     app.router.add_get("/api/me", api_me)
     app.router.add_post("/api/chat", api_chat)
     app.router.add_post("/api/image", api_image)
+    app.router.add_get("/api/admin/users", api_admin_users)
+    app.router.add_get("/api/admin/users/{user_id}/stats", api_admin_user_stats)
+    app.router.add_post("/api/admin/action", api_admin_action)
