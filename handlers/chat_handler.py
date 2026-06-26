@@ -23,6 +23,7 @@ from keyboards import (
 )
 
 from states import BotStates
+import database as db
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -1011,6 +1012,7 @@ async def handle_text(message: Message, state: FSMContext):
         ] + trim_history(history)
 
         reply, debug = await call_ai(model_id, messages)
+        await db.log_request(message.from_user.id, model_id, source="bot")
 
         history.append({
             "role": "assistant",
@@ -1067,6 +1069,7 @@ async def handle_photo(message: Message, state: FSMContext):
         ]
 
         reply, debug = await call_ai(model_id, messages)
+        await db.log_request(message.from_user.id, model_id, source="bot")
 
         history.append({
             "role": "user",
@@ -1117,6 +1120,7 @@ async def handle_document(message: Message, state: FSMContext):
                 {"role": "user", "content": user_content}
             ]
             reply, debug = await call_ai(model_id, messages)
+            await db.log_request(message.from_user.id, model_id, source="bot")
             history.append({"role": "user", "content": f"[Изображение-файл] {caption}".strip()})
             history.append({"role": "assistant", "content": reply})
             await state.update_data(chat_history=trim_history(history))
@@ -1163,6 +1167,7 @@ async def handle_document(message: Message, state: FSMContext):
 
         await status_msg.edit_text("<i>Думаю...</i>", parse_mode="HTML")
         reply, debug = await call_ai(model_id, messages)
+        await db.log_request(message.from_user.id, model_id, source="bot")
 
         history.append({"role": "assistant", "content": reply})
         await state.update_data(chat_history=trim_history(history))
