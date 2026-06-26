@@ -12,9 +12,9 @@
 
 :root{
   --ease:cubic-bezier(0.22,1,0.36,1);
-  --bg:#F2F2F2;
+  --bg:#EFEFEF;
   --surface:#FFFFFF;
-  --surface-2:#F7F7F7;
+  --surface-2:#F5F5F5;
   --text:#1C1C1C;
   --text-2:#2C2C2C;
   --sub:#8A8A8A;
@@ -24,9 +24,9 @@
   --check:#3478F6;
   --border:rgba(0,0,0,.07);
   --border-2:rgba(0,0,0,.11);
-  --bubble-user:#E8E8E8;
+  --bubble-user:#E4E4E4;
   --bubble-bot:transparent;
-  --sb-bg:#EAEAEA;
+  --sb-bg:#E6E6E6;
   --sb-border:rgba(0,0,0,.07);
   --ic:#FFFFFF;
   --ic-border:rgba(0,0,0,.08);
@@ -2817,36 +2817,30 @@ function appendBotText(msgEl,text){
     if(wi<words.length){
       displayed+=words[wi];
       wi++;
-      // Рендерим текущий накопленный текст
-      const rendered=md(displayed);
-      // Добавляем span с анимацией только для последнего слова
-      const lastWord=words[wi-1].trim();
-      if(lastWord){
-        textEl.innerHTML=rendered;
-        // Находим последний текстовый узел и оборачиваем слово
-        const allText=textEl.querySelectorAll('p,li,td,h1,h2,h3,h4,blockquote');
-        const target=allText.length?allText[allText.length-1]:textEl;
-        // Простая анимация через opacity на контейнере последнего слова
-      }else{
-        textEl.innerHTML=rendered;
-      }
+      textEl.innerHTML=md(displayed);
 
       const botMsg=b.querySelector('.bot-msg');
       if(botMsg){
         botMsg.style.overflow='hidden';
         botMsg.style.maxHeight=botMsg.scrollHeight+'px';
       }
-      // Скорость: быстрее для пробелов, пауза на знаках препинания
+      // Скорость: пробелы мгновенно, знаки препинания — пауза, обычные слова — 38ms
       const w=words[wi-1];
-      const delay=w.trim()===''?0:/[.!?]$/.test(w.trim())?60:18;
+      const delay=w.trim()===''?0:/[.!?,:;]$/.test(w.trim())?110:38;
       setTimeout(type,delay);
     }else{
-      textEl.innerHTML=md(text);
-      const botMsg=b.querySelector('.bot-msg');
-      if(botMsg){
-        botMsg.style.maxHeight='none';
-        botMsg.style.overflow='visible';
-      }
+      // Плавное завершение — финальный рендер с opacity transition
+      textEl.style.transition='opacity .25s ease';
+      textEl.style.opacity='0.7';
+      setTimeout(()=>{
+        textEl.innerHTML=md(text);
+        textEl.style.opacity='1';
+        const botMsg=b.querySelector('.bot-msg');
+        if(botMsg){
+          botMsg.style.maxHeight='none';
+          botMsg.style.overflow='visible';
+        }
+      },80);
       isTyping=false;
       if(m){
         m.removeEventListener('wheel',onWheel);
