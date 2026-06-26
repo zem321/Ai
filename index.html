@@ -2809,32 +2809,34 @@ function appendBotText(msgEl,text){
   }
   if(m)requestAnimationFrame(smoothScrollLoop);
 
-  const botMsg=b.querySelector('.bot-msg');
+  const botMsg=b.querySelector('.bot-msg'); (слова + пробелы + переносы)
+  const tokens=text.match(/\S+|\s+/g)||[];
+  let wi=0;
+  let displayed='';
 
-  // Рендерим весь текст сразу (markdown корректный)
-  textEl.innerHTML=md(text);
+  // CSS для плавного появления каждого слова
+  if(!document.getElementById('word-fade-style')){
+    const s=document.createElement('style');
+    s.id='word-fade-style';
+    s.textContent=`.wf{display:inline;animation:wf .35s ease both}@keyframes wf{from{opacity:0}to{opacity:1}}`;
+    document.head.appendChild(s);
+  }
 
-  // Плавно открываем через clip-path сверху вниз
-  textEl.style.clipPath='inset(0 0 100% 0)';
-  textEl.style.transition='none';
-
-  const durationMs=Math.max(text.length*28, 600);
-  const startTime=performance.now();
-
-  function reveal(now){
-    const progress=Math.min((now-startTime)/durationMs,1);
-    // Линейное открытие — равномерный поток вниз
-    const pct=Math.round((1-progress)*100);
-    textEl.style.clipPath=`inset(0 0 ${pct}% 0)`;
-
-    // Скролл следует за открытием
-    if(m&&!userHasScrolledUp) scrollElementAboveInputNow(b,18);
-
-    if(progress<1){
-      requestAnimationFrame(reveal);
-    }else{
-      textEl.style.clipPath='none';
-      textEl.style.transition='';
+  function type(){
+    if(wi<tokens.length){
+      const token=tokens[wi++];
+      displayed+=token;
+      // Рендерим накопленный текст как plain + последнее слово с анимацией
+      if(token.trim()){
+        textEl.innerHTML=escHtml(displayed.slice(0,-token.length))
+          +`<span class="wf">${escHtml(token)}</span>`;
+      } else {
+        textEl.innerHTML=escHtml(displayed);
+      }
+      setTimeout(type, token.trim()?42:0);
+    } else {
+      // Финал — рендерим markdown одним разом
+      textEl.innerHTML=md(text);
       isTyping=false;
       if(m){
         m.removeEventListener('wheel',onWheel);
@@ -2846,7 +2848,12 @@ function appendBotText(msgEl,text){
       scrollElementAboveInput(b,18,60);
     }
   }
-  requestAnimationFrame(reveal);
+
+  function escHtml(s){
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  }
+
+  type();
 }
 function appendBotImage(msgEl,base64,caption){
   document.getElementById('tr')?.remove();
