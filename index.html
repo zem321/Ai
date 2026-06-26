@@ -1807,8 +1807,7 @@ function onGroupChange(sel){
   const ms=document.getElementById('model-select');
   ms.innerHTML='<option value="" disabled selected></option>'+GROUP_MODELS[key].map(m=>`<option value="${m[0]}">${m[1]}</option>`).join('');
   ms.style.pointerEvents='auto';
-  ms.focus();
-  ms.click();
+  setTimeout(()=>{ms.focus();ms.click();},350);
 }
 function onModelChange(sel){
   sel.style.pointerEvents='none';
