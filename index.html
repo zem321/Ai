@@ -2804,49 +2804,32 @@ function appendBotText(msgEl,text){
     m.addEventListener('scroll',onScroll,{passive:true});
   }
 
-  // Плавный автоскролл — не дёргаем каждый кадр, а мягко тянем к низу
   function smoothScrollLoop(){
-    if(m&&!userHasScrolledUp){
-      const target=m.scrollHeight-m.clientHeight;
-      const current=m.scrollTop;
-      const diff=target-current;
-      if(diff>1) m.scrollTop=current+diff*0.12;
-    }
+    if(m&&!userHasScrolledUp)scrollElementAboveInputNow(b,18);
     if(isTyping)requestAnimationFrame(smoothScrollLoop);
   }
   if(m)requestAnimationFrame(smoothScrollLoop);
 
-  // Убираем maxHeight — пусть блок растёт плавно через CSS
   const botMsg=b.querySelector('.bot-msg');
-  if(botMsg){
-    botMsg.style.overflow='hidden';
-    botMsg.style.maxHeight='none';
-  }
 
   const words=text.split(/(\s+)/);
   let wi=0;
   let displayed='';
   function type(){
     if(wi<words.length){
-      // Берём пачку слов за раз для равномерного потока
-      const batch=3;
-      for(let k=0;k<batch&&wi<words.length;k++){
-        displayed+=words[wi];
-        wi++;
-      }
+      displayed+=words[wi];
+      wi++;
       textEl.innerHTML=md(displayed);
       const w=words[wi-1]||'';
-      const delay=/[.!?]$/.test(w.trim())?90:/[,:;]$/.test(w.trim())?50:28;
+      const delay=w.trim()===''?0:/[.!?]$/.test(w.trim())?320:/[,:;]$/.test(w.trim())?180:55;
       setTimeout(type,delay);
     }else{
-      // Плавное завершение
       textEl.style.transition='opacity .3s ease';
       textEl.style.opacity='0.85';
       setTimeout(()=>{
         textEl.innerHTML=md(text);
         textEl.style.transition='opacity .2s ease';
         textEl.style.opacity='1';
-        if(botMsg){botMsg.style.overflow='visible';}
       },60);
       isTyping=false;
       if(m){
