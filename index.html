@@ -339,8 +339,7 @@ html,body{
   color:var(--text);word-break:break-word;
 }
 .bot-msg{
-  max-width:90%;padding-left:0;
-  transition:max-height 0.25s cubic-bezier(0.1, 0.76, 0.55, 0.94);
+  max-width:100%;padding-left:0;
 }
 .bot-text{font-size:16px;line-height:1.65;color:var(--text-2);word-break:break-word;}
 .bot-text b,.bot-text strong{font-weight:600;color:var(--text);}
@@ -2812,25 +2811,28 @@ function appendBotText(msgEl,text){
 
   const botMsg=b.querySelector('.bot-msg');
 
-  const words=text.split(/(\s+)/);
-  let wi=0;
-  let displayed='';
-  function type(){
-    if(wi<words.length){
-      displayed+=words[wi];
-      wi++;
-      textEl.innerHTML=md(displayed);
-      const w=words[wi-1]||'';
-      const delay=w.trim()===''?0:/[.!?]$/.test(w.trim())?320:/[,:;]$/.test(w.trim())?180:55;
-      setTimeout(type,delay);
+  // Плавный вывод через rAF — равномерный поток без рывков
+  const totalChars=text.length;
+  const durationMs=Math.max(totalChars*38, 800); // ~38ms на символ, мин 0.8с
+  const startTime=performance.now();
+  let lastI=0;
+
+  function type(now){
+    const elapsed=now-startTime;
+    const progress=Math.min(elapsed/durationMs,1);
+    // Ease-out для плавного замедления в конце
+    const eased=1-Math.pow(1-progress,2);
+    const i=Math.floor(eased*totalChars);
+
+    if(i>lastI){
+      lastI=i;
+      textEl.innerHTML=md(text.slice(0,i));
+    }
+
+    if(progress<1){
+      requestAnimationFrame(type);
     }else{
-      textEl.style.transition='opacity .3s ease';
-      textEl.style.opacity='0.85';
-      setTimeout(()=>{
-        textEl.innerHTML=md(text);
-        textEl.style.transition='opacity .2s ease';
-        textEl.style.opacity='1';
-      },60);
+      textEl.innerHTML=md(text);
       isTyping=false;
       if(m){
         m.removeEventListener('wheel',onWheel);
@@ -2842,7 +2844,7 @@ function appendBotText(msgEl,text){
       scrollElementAboveInput(b,18,60);
     }
   }
-  type();
+  requestAnimationFrame(type);
 }
 function appendBotImage(msgEl,base64,caption){
   document.getElementById('tr')?.remove();
