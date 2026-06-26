@@ -1811,22 +1811,26 @@ function onGroupChange(sel){
     document.getElementById('model-label').textContent='Совет ИИ-моделей';
     return;
   }
-  // Заполняем model-select и показываем его поверх кнопки
   const ms=document.getElementById('model-select');
   ms.innerHTML='<option value="" disabled selected></option>'+
     GROUP_MODELS[key].map(m=>`<option value="${m[0]}">${m[1]}</option>`).join('');
+  // Переключаем через visibility — элемент остаётся в DOM и кликабелен
+  sel.style.visibility='hidden';
+  ms.style.visibility='visible';
   ms.style.display='block';
-  // Скрываем group-select чтобы не мешал
-  sel.style.display='none';
+  ms.focus();
+  ms.click();
 }
 
 function onModelChange(sel){
   if(!sel.value)return;
   model=sel.value;
   document.getElementById('model-label').textContent=sel.options[sel.selectedIndex].text;
-  // Возвращаем group-select, скрываем model-select
+  sel.style.visibility='hidden';
   sel.style.display='none';
-  document.getElementById('group-select').style.display='block';
+  const gs=document.getElementById('group-select');
+  gs.style.visibility='visible';
+  gs.style.display='block';
 }
 
 function removeModelTapPrompt(){}
