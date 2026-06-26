@@ -911,6 +911,96 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
   flex-shrink:0;background:transparent;
   padding:12px 14px max(env(safe-area-inset-bottom), 16px);
 }
+.sb-admin-btn{
+  width:100%;display:flex;align-items:center;gap:9px;
+  padding:11px 14px;border-radius:12px;margin-bottom:8px;
+  font-size:14px;font-weight:600;
+  background:rgba(99,102,241,.12);color:#6366f1;
+  border:1.5px solid rgba(99,102,241,.25);
+  font-family:inherit;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  transition:opacity .2s;
+}
+.sb-admin-btn:active{opacity:.7;}
+.admin-screen{
+  position:fixed;inset:0;z-index:35;
+  background:var(--bg);display:flex;flex-direction:column;
+  transform:translateX(100%);
+  transition:transform .38s cubic-bezier(0.22,1,0.36,1);
+  padding-top:env(safe-area-inset-top,52px);
+}
+.admin-screen.open{transform:translateX(0);}
+.admin-header{display:flex;align-items:center;gap:12px;padding:14px 16px 10px;flex-shrink:0;}
+.admin-back{
+  width:34px;height:34px;border-radius:50%;
+  background:var(--glass);border:1px solid var(--glass-border);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent;
+}
+.admin-back:active{opacity:.7;}
+.admin-title{font-size:20px;font-weight:700;letter-spacing:-.3px;}
+.admin-tabs{display:flex;gap:6px;padding:4px 16px 12px;overflow-x:auto;flex-shrink:0;}
+.admin-tabs::-webkit-scrollbar{display:none;}
+.admin-tab{
+  padding:7px 16px;border-radius:999px;font-size:13px;font-weight:600;
+  cursor:pointer;white-space:nowrap;
+  border:1.5px solid var(--glass-border);background:var(--glass);color:var(--sub);
+  -webkit-tap-highlight-color:transparent;transition:all .18s;
+}
+.admin-tab.active{background:var(--text);color:var(--bg);border-color:transparent;}
+.admin-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 14px 20px;}
+.admin-body::-webkit-scrollbar{display:none;}
+.a-section-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--sub);padding:12px 2px 8px;}
+.a-card{background:var(--glass);border:1px solid var(--glass-border);border-radius:14px;overflow:hidden;margin-bottom:10px;}
+.a-row{display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s;}
+.a-row:active{background:rgba(0,0,0,.05);}
+.a-row+.a-row{border-top:1px solid var(--glass-border);}
+.a-avatar{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;flex-shrink:0;}
+.a-info{flex:1;min-width:0;}
+.a-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.a-meta{font-size:12px;color:var(--sub);margin-top:2px;}
+.a-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;}
+.a-badge.approved{background:rgba(34,197,94,.15);color:#22C55E;}
+.a-badge.pending{background:rgba(245,158,11,.15);color:#F59E0B;}
+.a-badge.rejected{background:rgba(239,68,68,.15);color:#EF4444;}
+.a-req{font-size:12px;color:var(--sub);text-align:right;flex-shrink:0;line-height:1.6;}
+.a-req b{color:var(--text);font-size:13px;}
+.a-empty{padding:30px;text-align:center;color:var(--sub);font-size:14px;}
+.a-stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;}
+.a-stat-box{background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;padding:12px;text-align:center;}
+.a-stat-num{font-size:22px;font-weight:700;letter-spacing:-.5px;}
+.a-stat-lbl{font-size:11px;color:var(--sub);margin-top:2px;}
+.a-detail-bd{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .25s;}
+.a-detail-bd.open{opacity:1;pointer-events:all;}
+.a-detail-sheet{position:fixed;bottom:0;left:0;right:0;z-index:46;background:var(--bg);border-radius:22px 22px 0 0;padding-bottom:env(safe-area-inset-bottom,20px);max-height:88vh;overflow-y:auto;transform:translateY(100%);transition:transform .34s cubic-bezier(0.22,1,0.36,1);}
+.a-detail-sheet.open{transform:translateY(0);}
+.a-detail-sheet::-webkit-scrollbar{display:none;}
+.a-drag{width:38px;height:4px;background:var(--glass-border);border-radius:2px;margin:12px auto 6px;}
+.a-detail-head{display:flex;align-items:center;gap:14px;padding:6px 18px 14px;}
+.a-detail-avatar{width:50px;height:50px;border-radius:50%;flex-shrink:0;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:#fff;}
+.a-detail-name{font-size:18px;font-weight:700;}
+.a-detail-uid{font-size:12px;color:var(--sub);margin-top:2px;}
+.a-model-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--glass-border);}
+.a-model-row:last-child{border:none;}
+.a-model-name{font-size:13px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.a-model-bar-wrap{width:80px;height:5px;background:var(--glass-border);border-radius:3px;flex-shrink:0;}
+.a-model-bar{height:100%;border-radius:3px;background:#6366f1;}
+.a-model-cnt{font-size:12px;color:var(--sub);min-width:24px;text-align:right;flex-shrink:0;}
+.a-source-row{display:flex;justify-content:space-between;align-items:center;padding:10px 18px;}
+.a-source-row+.a-source-row{border-top:1px solid var(--glass-border);}
+.a-actions{display:flex;gap:8px;padding:6px 18px 10px;}
+.a-btn{flex:1;padding:13px;border-radius:12px;font-size:14px;font-weight:600;border:none;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;transition:opacity .18s,transform .18s;}
+.a-btn:active{opacity:.75;transform:scale(.97);}
+.a-btn-approve{background:#22C55E;color:#fff;}
+.a-btn-reject{background:#EF4444;color:#fff;}
+.a-filter-row{display:flex;gap:6px;padding:4px 0 10px;overflow-x:auto;}
+.a-filter-row::-webkit-scrollbar{display:none;}
+.a-chip{padding:5px 12px;border-radius:999px;font-size:12px;font-weight:600;border:1.5px solid var(--glass-border);background:var(--glass);color:var(--sub);cursor:pointer;white-space:nowrap;-webkit-tap-highlight-color:transparent;transition:all .15s;}
+.a-chip.active{color:var(--text);border-color:var(--text);}
+.a-chip.approved.active{color:#22C55E;border-color:#22C55E;background:rgba(34,197,94,.1);}
+.a-chip.pending.active{color:#F59E0B;border-color:#F59E0B;background:rgba(245,158,11,.1);}
+.a-chip.rejected.active{color:#EF4444;border-color:#EF4444;background:rgba(239,68,68,.1);}
+.a-loader{padding:30px;text-align:center;color:var(--sub);font-size:14px;}
 .new-chat-btn{
   display:flex;align-items:center;justify-content:center;gap:8px;
   width:100%;padding:14px;
@@ -1484,6 +1574,29 @@ html,body,.app{background:#F2EFE8 !important;}
     </div>
   </div>
 
+<!-- Admin Screen -->
+<div class="admin-screen" id="admin-screen">
+  <div class="admin-header">
+    <div class="admin-back" onclick="closeAdmin()">
+      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+    <div class="admin-title">Администрирование</div>
+  </div>
+  <div class="admin-tabs">
+    <div class="admin-tab active" data-tab="users" onclick="adminSwitchTab('users')">Пользователи</div>
+    <div class="admin-tab" data-tab="pending" onclick="adminSwitchTab('pending')">Ожидают</div>
+    <div class="admin-tab" data-tab="stats" onclick="adminSwitchTab('stats')">Статистика</div>
+  </div>
+  <div class="admin-body" id="admin-body"><div class="a-loader">Загрузка...</div></div>
+</div>
+
+<!-- Admin detail sheet -->
+<div class="a-detail-bd" id="a-detail-bd" onclick="closeAdminDetail()"></div>
+<div class="a-detail-sheet" id="a-detail-sheet">
+  <div class="a-drag"></div>
+  <div id="a-detail-content"></div>
+</div>
+
 </div><!-- /app -->
 
 <!-- Sheet backdrop -->
@@ -1503,6 +1616,10 @@ html,body,.app{background:#F2EFE8 !important;}
   <div class="sb-label">Недавние</div>
   <div class="sb-list" id="sb-list"></div>
   <div class="sb-footer">
+    <button class="sb-admin-btn" id="sb-admin-btn" style="display:none" onclick="openAdmin()">
+      <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+      Администрирование
+    </button>
     <button class="new-chat-btn" onclick="newChat()">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -1557,7 +1674,7 @@ const animStyle=document.createElement('style');
 animStyle.textContent='@keyframes oracleDot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}} .typing-dots{display:inline-flex;gap:5px;align-items:center}.typing-dots span{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.35;animation:oracleDot 1s infinite ease-in-out}.typing-dots span:nth-child(2){animation-delay:.15s}.typing-dots span:nth-child(3){animation-delay:.3s}';
 document.head.appendChild(animStyle);
 
-let model='freemodel/gpt-5.5',msgs=[],chats=[],activeChatId=null,isInc=false,loaderToggle=0,chatHistory=[],accessGranted=false,pendingFiles=[];
+let model='freemodel/gpt-5.5',msgs=[],chats=[],activeChatId=null,isInc=false,loaderToggle=0,chatHistory=[],accessGranted=false,pendingFiles=[],isAdmin=false;
 
 // === Хранилище чатов: всё локально в localStorage ===
 const CHATS_KEY='oracle_chats_v1';
@@ -1632,7 +1749,7 @@ function modelIdFor(id){return id||'freemodel/gpt-5.5';}
   const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
   fetch('/api/me',{headers:{'Authorization':'tma '+initData}})
     .then(r=>{if(!r.ok)return r.json().then(d=>{throw d;}).catch(()=>{throw {message:'Нет доступа.'};});return r.json();})
-    .then(data=>{if(data&&data.ok===true){accessGranted=true;if(ta)ta.disabled=false;toggleSend();}else{showAccessDenied((data&&data.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.');}})
+    .then(data=>{if(data&&data.ok===true){accessGranted=true;if(data.is_admin){isAdmin=true;document.getElementById('sb-admin-btn').style.display='flex';}if(ta)ta.disabled=false;toggleSend();}else{showAccessDenied((data&&data.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.');}})
     .catch(err=>showAccessDenied((err&&err.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.'));
 })();
 
@@ -2952,6 +3069,189 @@ function hideKeyboardOnOutsideTap(ev){
 }
 document.addEventListener('touchstart',hideKeyboardOnOutsideTap,{passive:true,capture:true});
 document.addEventListener('mousedown',hideKeyboardOnOutsideTap,{capture:true});
+
+// ─── Admin Panel ──────────────────────────────────────────────────────────────
+let adminUsers=[], adminTab='users', adminFilter='all', adminCurrentUser=null;
+
+function authH(){
+  const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+  return {'Content-Type':'application/json','Authorization':'tma '+initData};
+}
+
+async function openAdmin(){
+  closeSidebar();
+  document.getElementById('admin-screen').classList.add('open');
+  await adminLoadUsers();
+}
+function closeAdmin(){
+  document.getElementById('admin-screen').classList.remove('open');
+}
+
+async function adminLoadUsers(){
+  document.getElementById('admin-body').innerHTML='<div class="a-loader">Загрузка...</div>';
+  try{
+    const r=await fetch('/api/admin/users',{headers:authH()});
+    const d=await r.json();
+    if(!d.ok)throw new Error(d.error);
+    adminUsers=d.users;
+    adminRenderTab();
+  }catch(e){
+    document.getElementById('admin-body').innerHTML=`<div class="a-empty">Ошибка: ${e.message}</div>`;
+  }
+}
+
+function adminSwitchTab(tab){
+  adminTab=tab;
+  adminFilter='all';
+  document.querySelectorAll('.admin-tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
+  adminRenderTab();
+}
+
+function adminRenderTab(){
+  if(adminTab==='stats') adminRenderStats();
+  else adminRenderUsers(adminFilter);
+}
+
+function adminStatusLabel(s){return s==='approved'?'Одобрен':s==='pending'?'Ожидает':'Отклонён';}
+
+function adminRenderUsers(filter){
+  adminFilter=filter;
+  let users=adminUsers;
+  const pending=adminTab==='pending';
+  if(pending) users=users.filter(u=>u.status==='pending');
+  else if(filter!=='all') users=users.filter(u=>u.status===filter);
+
+  const chips=pending?'':['all','approved','pending','rejected'].map(f=>`
+    <div class="a-chip ${f}${filter===f?' active':''}" onclick="adminRenderUsers('${f}')">
+      ${f==='all'?'Все':f==='approved'?'Одобренные':f==='pending'?'Ожидают':'Отклонённые'}
+      (${f==='all'?adminUsers.length:adminUsers.filter(u=>u.status===f).length})
+    </div>`).join('');
+
+  const rows=users.map(u=>`
+    <div class="a-row" onclick="adminOpenDetail(${u.user_id})">
+      <div class="a-avatar">${String(u.user_id).slice(-2)}</div>
+      <div class="a-info">
+        <div class="a-name">ID: ${u.user_id}</div>
+        <div class="a-meta"><span class="a-badge ${u.status}">${adminStatusLabel(u.status)}</span></div>
+      </div>
+      <div class="a-req"><div><b>${u.day||0}</b> сег.</div><div><b>${u.week||0}</b> нед.</div></div>
+    </div>`).join('');
+
+  document.getElementById('admin-body').innerHTML=
+    (chips?`<div class="a-filter-row">${chips}</div>`:'') +
+    (rows?`<div class="a-card">${rows}</div>`:`<div class="a-empty">${pending?'Нет ожидающих':'Нет пользователей'}</div>`);
+}
+
+function adminRenderStats(){
+  const total=adminUsers.reduce((s,u)=>s+(u.total||0),0);
+  const day=adminUsers.reduce((s,u)=>s+(u.day||0),0);
+  const week=adminUsers.reduce((s,u)=>s+(u.week||0),0);
+  const approved=adminUsers.filter(u=>u.status==='approved').length;
+  const pending=adminUsers.filter(u=>u.status==='pending').length;
+  const top5=[...adminUsers].sort((a,b)=>(b.total||0)-(a.total||0)).slice(0,5);
+
+  document.getElementById('admin-body').innerHTML=`
+    <div class="a-section-title">Общая статистика</div>
+    <div class="a-stat-grid">
+      <div class="a-stat-box"><div class="a-stat-num">${total}</div><div class="a-stat-lbl">Всего запросов</div></div>
+      <div class="a-stat-box"><div class="a-stat-num">${day}</div><div class="a-stat-lbl">За сегодня</div></div>
+      <div class="a-stat-box"><div class="a-stat-num">${week}</div><div class="a-stat-lbl">За неделю</div></div>
+    </div>
+    <div class="a-section-title">Пользователи</div>
+    <div class="a-card">
+      <div class="a-row" style="cursor:default"><div class="a-info"><div class="a-name">Одобренных</div></div><div class="a-req"><b>${approved}</b></div></div>
+      <div class="a-row" style="cursor:default"><div class="a-info"><div class="a-name">Ожидают</div></div><div class="a-req"><b style="color:#F59E0B">${pending}</b></div></div>
+      <div class="a-row" style="cursor:default"><div class="a-info"><div class="a-name">Всего в базе</div></div><div class="a-req"><b>${adminUsers.length}</b></div></div>
+    </div>
+    <div class="a-section-title">Топ по запросам</div>
+    <div class="a-card">
+      ${top5.map(u=>`<div class="a-row" onclick="adminOpenDetail(${u.user_id})">
+        <div class="a-avatar">${String(u.user_id).slice(-2)}</div>
+        <div class="a-info"><div class="a-name">ID: ${u.user_id}</div><div class="a-meta"><span class="a-badge ${u.status}">${adminStatusLabel(u.status)}</span></div></div>
+        <div class="a-req"><b>${u.total||0}</b> всего</div>
+      </div>`).join('')}
+    </div>`;
+}
+
+async function adminOpenDetail(userId){
+  adminCurrentUser=adminUsers.find(u=>u.user_id===userId);
+  if(!adminCurrentUser)return;
+  document.getElementById('a-detail-content').innerHTML='<div class="a-loader">Загрузка...</div>';
+  document.getElementById('a-detail-bd').classList.add('open');
+  document.getElementById('a-detail-sheet').classList.add('open');
+
+  let stats={total:0,day:0,week:0,models:{},sources:{}};
+  try{
+    const r=await fetch(`/api/admin/users/${userId}/stats`,{headers:authH()});
+    const d=await r.json();
+    if(d.ok)stats=d.stats;
+  }catch(e){}
+
+  const u=adminCurrentUser;
+  const modelEntries=Object.entries(stats.models||{}).sort((a,b)=>b[1]-a[1]);
+  const maxM=modelEntries[0]?.[1]||1;
+  const modelsHTML=modelEntries.length
+    ?modelEntries.map(([m,cnt])=>`<div class="a-model-row">
+        <div class="a-model-name">${m||'—'}</div>
+        <div class="a-model-bar-wrap"><div class="a-model-bar" style="width:${Math.round(cnt/maxM*100)}%"></div></div>
+        <div class="a-model-cnt">${cnt}</div>
+      </div>`).join('')
+    :'<div style="padding:10px 0;color:var(--sub);font-size:13px">Нет данных</div>';
+
+  const botCnt=stats.sources?.bot||0;
+  const webCnt=stats.sources?.webapp||0;
+
+  const actionBtns=u.status==='approved'
+    ?`<button class="a-btn a-btn-reject" onclick="adminDoAction('reject')">Отозвать доступ</button>`
+    :u.status==='pending'
+    ?`<button class="a-btn a-btn-approve" onclick="adminDoAction('approve')">Одобрить</button>
+      <button class="a-btn a-btn-reject" onclick="adminDoAction('reject')">Отклонить</button>`
+    :`<button class="a-btn a-btn-approve" onclick="adminDoAction('approve')">Одобрить</button>`;
+
+  document.getElementById('a-detail-content').innerHTML=`
+    <div class="a-detail-head">
+      <div class="a-detail-avatar">${String(u.user_id).slice(-2)}</div>
+      <div>
+        <div class="a-detail-name">ID: ${u.user_id}</div>
+        <div class="a-detail-uid"><span class="a-badge ${u.status}">${adminStatusLabel(u.status)}</span></div>
+      </div>
+    </div>
+    <div style="padding:0 18px">
+      <div class="a-stat-grid">
+        <div class="a-stat-box"><div class="a-stat-num">${stats.total||0}</div><div class="a-stat-lbl">Всего</div></div>
+        <div class="a-stat-box"><div class="a-stat-num">${stats.day||0}</div><div class="a-stat-lbl">Сегодня</div></div>
+        <div class="a-stat-box"><div class="a-stat-num">${stats.week||0}</div><div class="a-stat-lbl">Неделя</div></div>
+      </div>
+      <div class="a-section-title">По моделям</div>
+      <div class="a-card" style="padding:4px 12px">${modelsHTML}</div>
+    </div>
+    <div class="a-card" style="margin:10px 18px">
+      <div class="a-source-row"><span>🤖 Через бот</span><span style="color:var(--sub)">${botCnt} запр.</span></div>
+      <div class="a-source-row"><span>🌐 Мини-апп</span><span style="color:var(--sub)">${webCnt} запр.</span></div>
+    </div>
+    <div class="a-actions">${actionBtns}</div>`;
+}
+
+async function adminDoAction(action){
+  if(!adminCurrentUser)return;
+  const uid=adminCurrentUser.user_id;
+  try{
+    const r=await fetch('/api/admin/action',{method:'POST',headers:authH(),body:JSON.stringify({action,user_id:uid})});
+    const d=await r.json();
+    if(!d.ok)throw new Error(d.error);
+    const u=adminUsers.find(u=>u.user_id===uid);
+    const newStatus=action==='approve'?'approved':'rejected';
+    if(u)u.status=newStatus;
+    adminCurrentUser.status=newStatus;
+    closeAdminDetail();
+    adminRenderTab();
+  }catch(e){alert('Ошибка: '+e.message);}
+}
+
+function closeAdminDetail(){
+  document.getElementById('a-detail-bd').classList.remove('open');
+  document.getElementById('a-detail-sheet').classList.remove('open');
+}
 </script>
 <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0ebfd9a1ef0de4e',t:'MTc4MTk3MTI3MA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0ec3c485dce902d',t:'MTc4MTk3MzgzOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0ec6076ab8e5610',t:'MTc4MTk3NTMyMA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0f9a7697e0e7155',t:'MTc4MjExNDU0MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a10594a2ee10aa08',t:'MTc4MjIzOTYwMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
