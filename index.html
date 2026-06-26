@@ -1570,14 +1570,13 @@ html,body,.app{background:#F2EFE8 !important;}
           <button class="pill-model liquid-glass-pill" id="model-btn">
             <span id="model-label">GPT-5.5</span>
           </button>
-          <select id="group-select" onchange="onGroupChange(this)" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2;font-size:16px;">
+          <select id="group-select" onchange="onModelChange(this)" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2;font-size:16px;">
             <option value="">—</option>
             <option value="chatgpt">ChatGPT</option>
             <option value="gemini">Gemini</option>
             <option value="other">Other Models</option>
             <option value="council">Совет ИИ-моделей</option>
           </select>
-          <select id="model-select" onchange="onModelChange(this)" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:3;font-size:16px;display:none;"></select>
         </div>
         <div class="tool-spacer"></div>
         <button class="send-btn" id="send-btn" disabled onclick="send()">
@@ -1804,33 +1803,37 @@ function openGroupPicker(){if(!isIOS)openSheet();}
 
 function onGroupChange(sel){
   const key=sel.value;
-  sel.selectedIndex=0;
-  if(!key)return;
+  if(!key||key==='__model__')return;
   if(key==='council'){
+    sel.selectedIndex=0;
     model='council/ai-council';
     document.getElementById('model-label').textContent='Совет ИИ-моделей';
     return;
   }
-  const ms=document.getElementById('model-select');
-  ms.innerHTML='<option value="" disabled selected></option>'+
-    GROUP_MODELS[key].map(m=>`<option value="${m[0]}">${m[1]}</option>`).join('');
-  // Переключаем через visibility — элемент остаётся в DOM и кликабелен
-  sel.style.visibility='hidden';
-  ms.style.visibility='visible';
-  ms.style.display='block';
-  ms.focus();
-  ms.click();
+  // Заменяем options прямо в открытом select на модели группы
+  // Добавляем маркер __model__ чтобы отличить второй выбор
+  sel.innerHTML='<option value="">‹ Назад</option>'+
+    GROUP_MODELS[key].map(m=>`<option value="__model__${m[0]}||${m[1]}">${m[1]}</option>`).join('');
+  sel.selectedIndex=0;
 }
 
 function onModelChange(sel){
-  if(!sel.value)return;
-  model=sel.value;
-  document.getElementById('model-label').textContent=sel.options[sel.selectedIndex].text;
-  sel.style.visibility='hidden';
-  sel.style.display='none';
-  const gs=document.getElementById('group-select');
-  gs.style.visibility='visible';
-  gs.style.display='block';
+  const val=sel.value;
+  if(!val||val==='')return;
+  if(val.startsWith('__model__')){
+    const parts=val.slice(9).split('||');
+    model=parts[0];
+    document.getElementById('model-label').textContent=parts[1]||parts[0];
+    // Возвращаем группы
+    sel.innerHTML='<option value="">—</option>'+
+      '<option value="chatgpt">ChatGPT</option>'+
+      '<option value="gemini">Gemini</option>'+
+      '<option value="other">Other Models</option>'+
+      '<option value="council">Совет ИИ-моделей</option>';
+    sel.selectedIndex=0;
+  } else {
+    onGroupChange(sel);
+  }
 }
 
 function removeModelTapPrompt(){}
