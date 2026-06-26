@@ -858,7 +858,7 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
 }
 .sidebar.open{transform:translateX(0);}
 
-.sb-head{padding:6px 20px 20px;}
+.sb-head{padding:6px 20px 20px;display:flex;align-items:center;justify-content:space-between;gap:10px;}
 .sb-head h2{font-size:24px;font-weight:700;letter-spacing:-.4px;}
 .sb-label{
   font-size:11px;font-weight:600;
@@ -958,14 +958,14 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
 }
 .ios18-cancel:active{opacity:.7;}
 .sb-admin-btn{
-  width:100%;display:flex;align-items:center;gap:9px;
-  padding:11px 14px;border-radius:12px;margin-bottom:8px;
-  font-size:14px;font-weight:600;
+  display:flex;align-items:center;gap:5px;
+  padding:5px 10px;border-radius:999px;
+  font-size:11px;font-weight:600;
   background:rgba(99,102,241,.12);color:#6366f1;
   border:1.5px solid rgba(99,102,241,.25);
-  font-family:inherit;cursor:pointer;
+  font-family:inherit;cursor:pointer;white-space:nowrap;
   -webkit-tap-highlight-color:transparent;
-  transition:opacity .2s;
+  transition:opacity .2s;flex-shrink:0;
 }
 .sb-admin-btn:active{opacity:.7;}
 .admin-screen{
@@ -1016,10 +1016,10 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
 .a-stat-box{background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;padding:12px;text-align:center;}
 .a-stat-num{font-size:22px;font-weight:700;letter-spacing:-.5px;}
 .a-stat-lbl{font-size:11px;color:var(--sub);margin-top:2px;}
-.a-detail-bd{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .25s;}
+.a-detail-bd{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .3s cubic-bezier(0.22,1,0.36,1);}
 .a-detail-bd.open{opacity:1;pointer-events:all;}
-.a-detail-sheet{position:fixed;bottom:0;left:0;right:0;z-index:46;background:var(--bg);border-radius:22px 22px 0 0;padding-bottom:env(safe-area-inset-bottom,20px);max-height:88vh;overflow-y:auto;transform:translateY(100%);transition:transform .34s cubic-bezier(0.22,1,0.36,1);}
-.a-detail-sheet.open{transform:translateY(0);}
+.a-detail-sheet{position:fixed;bottom:0;left:0;right:0;z-index:46;background:var(--bg);border-radius:22px 22px 0 0;padding-bottom:env(safe-area-inset-bottom,20px);max-height:88vh;overflow-y:auto;transform:translateY(100%);transition:transform .42s cubic-bezier(0.22,1,0.36,1),opacity .42s cubic-bezier(0.22,1,0.36,1);opacity:0;}
+.a-detail-sheet.open{transform:translateY(0);opacity:1;}
 .a-detail-sheet::-webkit-scrollbar{display:none;}
 .a-drag{width:38px;height:4px;background:var(--glass-border);border-radius:2px;margin:12px auto 6px;}
 .a-detail-head{display:flex;align-items:center;gap:14px;padding:6px 18px 14px;}
@@ -1600,7 +1600,7 @@ html,body,.app{background:#F2EFE8 !important;}
           </svg>
         </button>
         <button class="pill-model liquid-glass-pill" id="model-btn" onclick="openGroupPicker()">
-          <span id="model-label">GPT-5.5</span>
+          <span id="model-label">Gemini 3.1 Flash Lite</span>
         </button>
         <select id="group-select" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" onchange="onGroupChange(this)">
           <option value="chatgpt">ChatGPT</option>
@@ -1657,14 +1657,16 @@ html,body,.app{background:#F2EFE8 !important;}
 
 <!-- SIDEBAR -->
 <div class="sidebar" id="sidebar">
-  <div class="sb-head"><h2>Oracle AI</h2></div>
+  <div class="sb-head">
+    <h2>Oracle AI</h2>
+    <button class="sb-admin-btn" id="sb-admin-btn" style="display:none" onclick="openAdmin()">
+      <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+      Админ панель
+    </button>
+  </div>
   <div class="sb-label">Недавние</div>
   <div class="sb-list" id="sb-list"></div>
   <div class="sb-footer">
-    <button class="sb-admin-btn" id="sb-admin-btn" style="display:none" onclick="openAdmin()">
-      <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-      Администрирование
-    </button>
     <button class="new-chat-btn" onclick="newChat()">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -1719,7 +1721,7 @@ const animStyle=document.createElement('style');
 animStyle.textContent='@keyframes oracleDot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}} .typing-dots{display:inline-flex;gap:5px;align-items:center}.typing-dots span{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.35;animation:oracleDot 1s infinite ease-in-out}.typing-dots span:nth-child(2){animation-delay:.15s}.typing-dots span:nth-child(3){animation-delay:.3s}';
 document.head.appendChild(animStyle);
 
-let model='freemodel/gpt-5.5',msgs=[],chats=[],activeChatId=null,isInc=false,loaderToggle=0,chatHistory=[],accessGranted=false,pendingFiles=[],isAdmin=false;
+let model='gemini/gemini-3.1-flash-lite',msgs=[],chats=[],activeChatId=null,isInc=false,loaderToggle=0,chatHistory=[],accessGranted=false,pendingFiles=[],isAdmin=false;
 
 // === Хранилище чатов: всё локально в localStorage ===
 const CHATS_KEY='oracle_chats_v1';
@@ -3298,8 +3300,10 @@ async function adminDoAction(action){
 }
 
 function closeAdminDetail(){
-  document.getElementById('a-detail-bd').classList.remove('open');
-  document.getElementById('a-detail-sheet').classList.remove('open');
+  const bd=document.getElementById('a-detail-bd');
+  const sh=document.getElementById('a-detail-sheet');
+  sh.classList.remove('open');
+  bd.classList.remove('open');
 }
 </script>
 <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d879a9bd4ae0ee',t:'MTc4MTc2NjYzNw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0d8991d0f58cc98',t:'MTc4MTc2NzkyNQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0ebfd9a1ef0de4e',t:'MTc4MTk3MTI3MA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0ec3c485dce902d',t:'MTc4MTk3MzgzOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0ec6076ab8e5610',t:'MTc4MTk3NTMyMA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0f9a7697e0e7155',t:'MTc4MjExNDU0MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a10594a2ee10aa08',t:'MTc4MjIzOTYwMQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
