@@ -1571,18 +1571,13 @@ html,body,.app{background:#F2EFE8 !important;}
             <span id="model-label">GPT-5.5</span>
           </button>
           <select id="group-select" onchange="onGroupChange(this)" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2;font-size:16px;">
-            <option value="">— Группа —</option>
+            <option value="">—</option>
             <option value="chatgpt">ChatGPT</option>
             <option value="gemini">Gemini</option>
             <option value="other">Other Models</option>
             <option value="council">Совет ИИ-моделей</option>
           </select>
-        </div>
-        <div id="model-select-wrap" style="position:relative;flex-shrink:0;display:none;">
-          <button class="pill-model liquid-glass-pill" id="model-btn2">
-            <span id="model-group-label">Модель</span>
-          </button>
-          <select id="model-select" onchange="onModelChange(this)" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2;font-size:16px;"></select>
+          <select id="model-select" onchange="onModelChange(this)" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:3;font-size:16px;display:none;"></select>
         </div>
         <div class="tool-spacer"></div>
         <button class="send-btn" id="send-btn" disabled onclick="send()">
@@ -1814,23 +1809,24 @@ function onGroupChange(sel){
   if(key==='council'){
     model='council/ai-council';
     document.getElementById('model-label').textContent='Совет ИИ-моделей';
-    document.getElementById('model-select-wrap').style.display='none';
     return;
   }
-  // Показываем вторую пилюлю с моделями группы
+  // Заполняем model-select и показываем его поверх кнопки
   const ms=document.getElementById('model-select');
-  ms.innerHTML='<option value="" disabled selected>'+GROUP_LABELS[key]+'...</option>'+
+  ms.innerHTML='<option value="" disabled selected></option>'+
     GROUP_MODELS[key].map(m=>`<option value="${m[0]}">${m[1]}</option>`).join('');
-  document.getElementById('model-group-label').textContent=GROUP_LABELS[key];
-  document.getElementById('model-select-wrap').style.display='block';
+  ms.style.display='block';
+  // Скрываем group-select чтобы не мешал
+  sel.style.display='none';
 }
 
 function onModelChange(sel){
   if(!sel.value)return;
   model=sel.value;
-  const label=sel.options[sel.selectedIndex].text;
-  document.getElementById('model-label').textContent=label;
-  document.getElementById('model-select-wrap').style.display='none';
+  document.getElementById('model-label').textContent=sel.options[sel.selectedIndex].text;
+  // Возвращаем group-select, скрываем model-select
+  sel.style.display='none';
+  document.getElementById('group-select').style.display='block';
 }
 
 function removeModelTapPrompt(){}
