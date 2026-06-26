@@ -12,40 +12,40 @@
 
 :root{
   --ease:cubic-bezier(0.22,1,0.36,1);
-  --bg:#F5F4F0;
+  --bg:#F2F2F2;
   --surface:#FFFFFF;
-  --surface-2:#FAFAF8;
-  --text:#1A1A18;
-  --text-2:#2D2D2A;
-  --sub:#8E8E86;
-  --sub-2:#A8A8A0;
+  --surface-2:#F7F7F7;
+  --text:#1C1C1C;
+  --text-2:#2C2C2C;
+  --sub:#8A8A8A;
+  --sub-2:#ABABAB;
   --accent:#C96A3C;
   --accent-2:#B85A2E;
   --check:#3478F6;
-  --border:rgba(0,0,0,.06);
-  --border-2:rgba(0,0,0,.10);
-  --bubble-user:#E8E8E3;
+  --border:rgba(0,0,0,.07);
+  --border-2:rgba(0,0,0,.11);
+  --bubble-user:#E8E8E8;
   --bubble-bot:transparent;
-  --sb-bg:#F2F1ED;
-  --sb-border:rgba(0,0,0,.06);
+  --sb-bg:#EAEAEA;
+  --sb-border:rgba(0,0,0,.07);
   --ic:#FFFFFF;
   --ic-border:rgba(0,0,0,.08);
   --ic-shadow:0 2px 16px rgba(0,0,0,.06), 0 0 1px rgba(0,0,0,.04);
-  --pill:#F0F0EC;
-  --pill-border:rgba(0,0,0,.06);
-  --pill-text:#5A5A54;
+  --pill:#E8E8E8;
+  --pill-border:rgba(0,0,0,.07);
+  --pill-text:#555555;
   --sh-bg:rgba(255,255,255,.94);
-  --sh-list:#F8F8F6;
+  --sh-list:#F5F5F5;
   --sh-sep:rgba(0,0,0,.06);
-  --cp:#F0F0EC;
-  --sb-item-bg:#ECEAE6;
+  --cp:#F0F0F0;
+  --sb-item-bg:#DCDCDC;
   --sb-item-border:rgba(0,0,0,.07);
-  --sb-item-active:#E2E0DC;
-  --send-bg:#1A1A18;
+  --sb-item-active:#D2D2D2;
+  --send-bg:#1C1C1C;
   --send-icon:#FFFFFF;
-  --glass-bg-light:linear-gradient(160deg,rgba(255,255,255,.45) 0%,rgba(255,255,255,.15) 45%,rgba(255,255,255,.28) 100%);
+  --glass-bg-light:linear-gradient(160deg,rgba(255,255,255,.55) 0%,rgba(255,255,255,.35) 45%,rgba(255,255,255,.45) 100%);
   --glass-bg-dark:linear-gradient(160deg,rgba(255,255,255,.15) 0%,rgba(255,255,255,.05) 45%,rgba(255,255,255,.10) 100%);
-  --glass-border-light:rgba(255,255,255,.65);
+  --glass-border-light:rgba(255,255,255,.70);
   --glass-border-dark:rgba(255,255,255,.18);
   --glass-shadow-light:0 6px 24px rgba(0,0,0,.10),0 1px 4px rgba(0,0,0,.06),inset 0 1.5px 0 rgba(255,255,255,.95),inset 0 -1px 0 rgba(0,0,0,.04);
   --glass-shadow-dark:0 6px 28px rgba(0,0,0,.55),0 1px 4px rgba(0,0,0,.35),inset 0 1.5px 0 rgba(255,255,255,.12),inset 0 -1px 0 rgba(0,0,0,.45);
@@ -55,34 +55,34 @@
 
 @media(prefers-color-scheme:dark){
   :root{
-    --bg:#111110;
-    --surface:#1A1A18;
-    --surface-2:#1E1E1C;
-    --text:#F0F0EB;
-    --text-2:#E0E0DB;
-    --sub:#6A6A64;
-    --sub-2:#50504A;
-    --border:rgba(255,255,255,.06);
-    --border-2:rgba(255,255,255,.10);
-    --bubble-user:#252523;
+    --bg:#1A1A1A;
+    --surface:#242424;
+    --surface-2:#2A2A2A;
+    --text:#EBEBEB;
+    --text-2:#D8D8D8;
+    --sub:#6E6E6E;
+    --sub-2:#535353;
+    --border:rgba(255,255,255,.07);
+    --border-2:rgba(255,255,255,.11);
+    --bubble-user:#2E2E2E;
     --bubble-bot:transparent;
-    --sb-bg:#111110;
-    --sb-border:rgba(255,255,255,.06);
-    --ic:#1E1E1C;
+    --sb-bg:#141414;
+    --sb-border:rgba(255,255,255,.07);
+    --ic:#242424;
     --ic-border:rgba(255,255,255,.08);
     --ic-shadow:0 2px 16px rgba(0,0,0,.25), 0 0 1px rgba(255,255,255,.04);
-    --pill:#252523;
-    --pill-border:rgba(255,255,255,.08);
-    --pill-text:#A0A09A;
-    --sh-bg:rgba(30,30,28,.96);
-    --sh-list:#272725;
-    --sh-sep:rgba(255,255,255,.06);
-    --cp:#272725;
-    --sb-item-bg:#2A2A28;
+    --pill:#2A2A2A;
+    --pill-border:rgba(255,255,255,.09);
+    --pill-text:#A0A0A0;
+    --sh-bg:rgba(28,28,28,.97);
+    --sh-list:#2A2A2A;
+    --sh-sep:rgba(255,255,255,.07);
+    --cp:#2A2A2A;
+    --sb-item-bg:#2E2E2E;
     --sb-item-border:rgba(255,255,255,.08);
-    --sb-item-active:#323230;
-    --send-bg:#F0F0EB;
-    --send-icon:#1A1A18;
+    --sb-item-active:#383838;
+    --send-bg:#EBEBEB;
+    --send-icon:#1A1A1A;
   }
 }
 
@@ -344,6 +344,8 @@ html,body{
 }
 .bot-text{font-size:16px;line-height:1.65;color:var(--text-2);word-break:break-word;}
 .bot-text b,.bot-text strong{font-weight:600;color:var(--text);}
+@keyframes fadeWord{from{opacity:0;transform:translateY(2px);}to{opacity:1;transform:translateY(0);}}
+.bot-text .word-new{animation:fadeWord .18s ease forwards;}
 .bot-text code {
   font-family: 'Courier New', Courier, monospace;
   background-color: rgba(0, 0, 0, 0.05);
@@ -2808,19 +2810,36 @@ function appendBotText(msgEl,text){
   }
   if(m)requestAnimationFrame(smoothScrollLoop);
 
-  let i=0;
+  const words=text.split(/(\s+)/);
+  let wi=0;
+  let displayed='';
   function type(){
-    if(i<text.length){
-      textEl.innerHTML=md(text.slice(0,i+1));
+    if(wi<words.length){
+      displayed+=words[wi];
+      wi++;
+      // Рендерим текущий накопленный текст
+      const rendered=md(displayed);
+      // Добавляем span с анимацией только для последнего слова
+      const lastWord=words[wi-1].trim();
+      if(lastWord){
+        textEl.innerHTML=rendered;
+        // Находим последний текстовый узел и оборачиваем слово
+        const allText=textEl.querySelectorAll('p,li,td,h1,h2,h3,h4,blockquote');
+        const target=allText.length?allText[allText.length-1]:textEl;
+        // Простая анимация через opacity на контейнере последнего слова
+      }else{
+        textEl.innerHTML=rendered;
+      }
 
       const botMsg=b.querySelector('.bot-msg');
       if(botMsg){
         botMsg.style.overflow='hidden';
         botMsg.style.maxHeight=botMsg.scrollHeight+'px';
       }
-
-      i++;
-      setTimeout(type,12);
+      // Скорость: быстрее для пробелов, пауза на знаках препинания
+      const w=words[wi-1];
+      const delay=w.trim()===''?0:/[.!?]$/.test(w.trim())?60:18;
+      setTimeout(type,delay);
     }else{
       textEl.innerHTML=md(text);
       const botMsg=b.querySelector('.bot-msg');
