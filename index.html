@@ -924,6 +924,39 @@ textarea:focus{outline:none !important;box-shadow:none !important;}
   -webkit-tap-highlight-color:transparent;
 }
 @keyframes prompt-in{from{opacity:0;transform:translateX(-50%) translateY(12px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+.model-tap-prompt{display:none;}
+#ios18-picker{background:rgba(0,0,0,.4);}
+.ios18-sheet{
+  position:absolute;bottom:0;left:0;right:0;
+  background:var(--bg);border-radius:18px 18px 0 0;
+  padding-bottom:env(safe-area-inset-bottom,20px);
+  overflow:hidden;
+}
+.ios18-title{
+  text-align:center;font-size:13px;font-weight:600;
+  color:var(--sub);padding:16px 20px 8px;
+}
+.ios18-item{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 20px;font-size:17px;color:var(--text);
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+  transition:background .15s;
+}
+.ios18-item:active{background:rgba(0,0,0,.06);}
+.ios18-back{
+  padding:14px 20px;font-size:17px;color:#007AFF;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+.ios18-arrow{color:var(--sub);font-size:18px;}
+.ios18-sep{height:1px;background:var(--glass-border);margin:0 20px;}
+.ios18-cancel{
+  margin:8px 16px 0;padding:16px;
+  background:var(--glass);border-radius:14px;
+  text-align:center;font-size:17px;font-weight:600;
+  color:#007AFF;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+.ios18-cancel:active{opacity:.7;}
 .sb-admin-btn{
   width:100%;display:flex;align-items:center;gap:9px;
   padding:11px 14px;border-radius:12px;margin-bottom:8px;
@@ -1567,17 +1600,19 @@ html,body,.app{background:#F2EFE8 !important;}
           </svg>
         </button>
         <div style="position:relative;flex-shrink:0;">
-          <button class="pill-model liquid-glass-pill" id="model-btn">
+          <button class="pill-model liquid-glass-pill" id="model-btn" onclick="openGroupPicker()">
             <span id="model-label">GPT-5.5</span>
           </button>
-          <select id="group-select" onchange="onModelChange(this)" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2;font-size:16px;">
-            <option value="">—</option>
+          <select id="group-select" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" onchange="onGroupChange(this)">
             <option value="chatgpt">ChatGPT</option>
             <option value="gemini">Gemini</option>
             <option value="other">Other Models</option>
             <option value="council">Совет ИИ-моделей</option>
           </select>
+          <select id="model-select" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" onchange="onModelChange(this)"></select>
         </div>
+        <!-- iOS 18: inline picker -->
+        <div id="ios18-picker" style="display:none;position:fixed;inset:0;z-index:200;"></div>
         <div class="tool-spacer"></div>
         <button class="send-btn" id="send-btn" disabled onclick="send()">
           <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
@@ -1797,44 +1832,92 @@ const GROUP_MODELS={
   council:[['council/ai-council','Совет ИИ-моделей']]
 };
 const GROUP_LABELS={chatgpt:'ChatGPT',gemini:'Gemini',other:'Other Models',council:'Совет ИИ-моделей'};
+
+// Определяем iOS и версию
+const iosMatch=navigator.userAgent.match(/OS (\d+)_/);
+const iosVersion=iosMatch?parseInt(iosMatch[1]):0;
 const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent)||(/macintosh/i.test(navigator.userAgent)&&navigator.maxTouchPoints>1);
+const isIOS18=isIOS&&iosVersion>=18&&iosVersion<26;
+const isIOS26=isIOS&&iosVersion>=26;
 
-function openGroupPicker(){if(!isIOS)openSheet();}
+function openGroupPicker(){
+  if(!isIOS){openSheet();return;}
+  if(isIOS18){showIOS18Picker('groups',null);return;}
+  // iOS 26: нативный select
+  const gs=document.getElementById('group-select');
+  gs.selectedIndex=0;
+  gs.style.pointerEvents='auto';
+  gs.focus();
+  gs.click();
+}
 
+/* ── iOS 26: два нативных select ── */
 function onGroupChange(sel){
+  sel.style.pointerEvents='none';
   const key=sel.value;
-  if(!key||key==='__model__')return;
+  sel.selectedIndex=0;
+  if(!key)return;
   if(key==='council'){
-    sel.selectedIndex=0;
     model='council/ai-council';
     document.getElementById('model-label').textContent='Совет ИИ-моделей';
     return;
   }
-  // Заменяем options прямо в открытом select на модели группы
-  // Добавляем маркер __model__ чтобы отличить второй выбор
-  sel.innerHTML='<option value="">‹ Назад</option>'+
-    GROUP_MODELS[key].map(m=>`<option value="__model__${m[0]}||${m[1]}">${m[1]}</option>`).join('');
-  sel.selectedIndex=0;
+  const ms=document.getElementById('model-select');
+  ms.innerHTML='<option value="" disabled selected></option>'+GROUP_MODELS[key].map(m=>`<option value="${m[0]}">${m[1]}</option>`).join('');
+  ms.style.pointerEvents='auto';
+  ms.focus();
+  ms.click();
+}
+function onModelChange(sel){
+  sel.style.pointerEvents='none';
+  if(!sel.value)return;
+  model=sel.value;
+  document.getElementById('model-label').textContent=sel.options[sel.selectedIndex].text;
 }
 
-function onModelChange(sel){
-  const val=sel.value;
-  if(!val||val==='')return;
-  if(val.startsWith('__model__')){
-    const parts=val.slice(9).split('||');
-    model=parts[0];
-    document.getElementById('model-label').textContent=parts[1]||parts[0];
-    // Возвращаем группы
-    sel.innerHTML='<option value="">—</option>'+
-      '<option value="chatgpt">ChatGPT</option>'+
-      '<option value="gemini">Gemini</option>'+
-      '<option value="other">Other Models</option>'+
-      '<option value="council">Совет ИИ-моделей</option>';
-    sel.selectedIndex=0;
+/* ── iOS 18: inline picker ── */
+function showIOS18Picker(mode, groupKey){
+  const overlay=document.getElementById('ios18-picker');
+  let html='';
+  if(mode==='groups'){
+    html=`<div class="ios18-sheet">
+      <div class="ios18-title">Выбор модели</div>
+      ${Object.keys(GROUP_MODELS).map(key=>`
+        <div class="ios18-item" data-key="${key}">${GROUP_LABELS[key]}<span class="ios18-arrow">›</span></div>
+        <div class="ios18-sep"></div>`).join('')}
+      <div class="ios18-cancel" id="ios18-cancel">Отмена</div>
+    </div>`;
   } else {
-    onGroupChange(sel);
+    html=`<div class="ios18-sheet">
+      <div class="ios18-title">${GROUP_LABELS[groupKey]}</div>
+      <div class="ios18-back" data-back="1">‹ Назад</div>
+      <div class="ios18-sep"></div>
+      ${GROUP_MODELS[groupKey].map(m=>`
+        <div class="ios18-item ios18-model" data-id="${m[0]}" data-label="${m[1]}">${m[1]}</div>
+        <div class="ios18-sep"></div>`).join('')}
+      <div class="ios18-cancel" id="ios18-cancel">Отмена</div>
+    </div>`;
   }
+  overlay.innerHTML=html;
+  overlay.style.display='block';
+  overlay.onclick=function(e){
+    const item=e.target.closest('[data-key]');
+    const back=e.target.closest('[data-back]');
+    const mdl=e.target.closest('[data-id]');
+    const cancel=e.target.closest('#ios18-cancel');
+    if(cancel||e.target===overlay){hideIOS18Picker();return;}
+    if(back){showIOS18Picker('groups',null);return;}
+    if(item){
+      const key=item.dataset.key;
+      if(key==='council'){model='council/ai-council';document.getElementById('model-label').textContent='Совет ИИ-моделей';hideIOS18Picker();return;}
+      showIOS18Picker('models',key);return;
+    }
+    if(mdl){model=mdl.dataset.id;document.getElementById('model-label').textContent=mdl.dataset.label;hideIOS18Picker();}
+  };
 }
+function hideIOS18Picker(){document.getElementById('ios18-picker').style.display='none';}
+function removeModelTapPrompt(){}
+
 
 function removeModelTapPrompt(){}
 
