@@ -10,7 +10,7 @@ GEMINI_MODELS = {
 # Остальные модели (Other)
 OTHER_MODELS = {
     "meta/llama-4-maverick-17b-128e-instruct": "Llama 4 Maverick 17B",
-    "z-ai/glm-5.1": "GLM-5.1",
+    "z-ai/glm-5.2": "GLM-5.2",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
 }
 
