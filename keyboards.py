@@ -12,8 +12,6 @@ OTHER_MODELS = {
     "meta/llama-4-maverick-17b-128e-instruct": "Llama 4 Maverick 17B",
     "z-ai/glm-5.1": "GLM-5.1",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
-    "ashibalt/kimi-k2.6": "Kimi K2.6",
-    "ashibalt/kimi-k2.7-code": "Kimi K2.7 Code",
 }
 
 MODELS = {**GEMINI_MODELS, **OTHER_MODELS}
