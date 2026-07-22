@@ -7,6 +7,9 @@ GEMINI_MODELS = {
     "gemini/gemini-3.5-flash-lite": "Gemini 3.5 Flash Lite",
     "gemini/gemini-3.5-flash": "Gemini 3.5 Flash",
     "gemini/gemini-3.6-flash": "Gemini 3.6 Flash",
+    "gemini/gemini-3.5-flash-lite-preview": "Gemini 3.5 Flash Lite (Preview)",
+    "gemini/gemini-3.5-flash-lite-latest": "Gemini 3.5 Flash Lite (Latest)",
+
 }
 
 # NVIDIA модели (ранее известные как Other)
