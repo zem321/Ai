@@ -290,7 +290,7 @@ async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
     raw_model = model_id.replace("gemini/", "", 1)
     
     # Официальный OpenAI-совместимый эндпоинт от Google
-    url = "[https://generativelanguage.googleapis.com/v1beta/openai/chat/completions](https://generativelanguage.googleapis.com/v1beta/openai/chat/completions)"
+    url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {GEMINI_API_KEY}"
