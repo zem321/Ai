@@ -8,7 +8,8 @@ _pool: asyncpg.Pool | None = None
 
 async def init_db():
     global _pool
-    _pool = await asyncpg.create_pool(DATABASE_URL)
+    # Добавлен параметр ssl="require" для корректной работы с облачными БД (Neon, Supabase)
+    _pool = await asyncpg.create_pool(DATABASE_URL, ssl="require")
     async with _pool.acquire() as conn:
         await conn.execute(
             """
