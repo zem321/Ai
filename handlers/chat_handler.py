@@ -288,63 +288,20 @@ async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
         raise Exception("GEMINI_API_KEY не задан.")
     
     raw_model = model_id.replace("gemini/", "", 1)
+    
+    # Официальный OpenAI-совместимый эндпоинт от Google
+    url = "[https://generativelanguage.googleapis.com/v1beta/openai/chat/completions](https://generativelanguage.googleapis.com/v1beta/openai/chat/completions)"
     headers = {
         "Content-Type": "application/json",
-        "X-goog-api-key": GEMINI_API_KEY,
+        "Authorization": f"Bearer {GEMINI_API_KEY}"
     }
-
-    # Маппинг из стандартного формата сообщений в формат Gemini API
-    gemini_contents = []
-    system_text = ""
-
-    for msg in messages:
-        role = msg.get("role")
-        content = msg.get("content", "")
-
-        parts = []
-        if isinstance(content, list):
-            for item in content:
-                if item.get("type") == "text":
-                    parts.append({"text": item.get("text", "")})
-                elif item.get("type") == "image_url":
-                    url_data = item.get("image_url", {}).get("url", "")
-                    if url_data.startswith("data:"):
-                        try:
-                            mime_part, b64_part = url_data.split(";", 1)
-                            mime_type = mime_part.replace("data:", "")
-                            b64_data = b64_part.replace("base64,", "")
-                            parts.append({
-                                "inline_data": {
-                                    "mime_type": mime_type,
-                                    "data": b64_data
-                                }
-                            })
-                        except Exception:
-                            pass
-        else:
-            parts.append({"text": str(content)})
-
-        if role == "system":
-            system_text += "\n".join([p.get("text", "") for p in parts if "text" in p]) + "\n\n"
-        else:
-            gemini_role = "user" if role == "user" else "model"
-            gemini_contents.append({"role": gemini_role, "parts": parts})
-
-    # Подставляем системный промпт в начало первого сообщения пользователя
-    if system_text:
-        if not gemini_contents:
-            gemini_contents.append({"role": "user", "parts": [{"text": system_text.strip()}]})
-        else:
-            if "text" in gemini_contents[0]["parts"][0]:
-                gemini_contents[0]["parts"][0]["text"] = system_text + gemini_contents[0]["parts"][0]["text"]
-            else:
-                gemini_contents[0]["parts"].insert(0, {"text": system_text})
 
     payload = {
-        "contents": gemini_contents
+        "model": raw_model,
+        "messages": messages,
+        "temperature": 0.7
     }
 
-    url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){raw_model}:generateContent"
     logger.info("call_gemini -> url=%s model=%s", url, raw_model)
 
     async with aiohttp.ClientSession() as session:
@@ -353,7 +310,7 @@ async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
             try:
                 data = json.loads(text)
             except Exception:
-                raise Exception(f"Gemini вернул неожиданный ответ: {text[:500]}")
+                raise Exception(f"Ошибка серверов Google (ответ не JSON): {text[:200]}")
             
             if resp.status != 200:
                 raise Exception(extract_api_error(data))
@@ -361,13 +318,14 @@ async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
             debug = {
                 "url": url,
                 "sent_model": raw_model,
-                "provider_model": raw_model,
+                "provider_model": data.get("model", raw_model),
             }
+            
             try:
-                reply = data["candidates"][0]["content"]["parts"][0]["text"]
+                reply = data["choices"][0]["message"]["content"]
                 return reply, debug
             except Exception:
-                raise Exception(f"Неверный формат ответа Gemini: {json.dumps(data, ensure_ascii=False)[:500]}")
+                raise Exception(f"Неверный формат ответа Google API: {json.dumps(data, ensure_ascii=False)[:500]}")
 
 
 async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
