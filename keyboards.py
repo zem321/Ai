@@ -4,9 +4,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 GEMINI_MODELS = {
     "gemini/gemini-3.1-flash-lite": "Gemini 3.1 Flash Lite",
     "gemini/gemini-3.5-flash-lite": "Gemini 3.5 Flash Lite",
-    "gemini/gemini-3.5-flash": "Gemini 3.5 Flash",
     "gemini/gemini-3.6-flash": "Gemini 3.6 Flash",
-    "gemini/gemini-3.1-pro": "Gemini 3.1 Pro",
 }
 
 # Остальные модели (Other)
