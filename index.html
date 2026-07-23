@@ -40,6 +40,7 @@
       --glass-b-blur: blur(2px) saturate(102%) brightness(.90);
       --glass-b-shadow: 0 2px 8px rgba(0,0,0,.45);
     }
+    #moreBtn{background:transparent; box-shadow:none;}
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{height:100%; margin:0; background:var(--bg); color:var(--ink); overflow:hidden;}
@@ -2215,11 +2216,22 @@
     loadChats();
     pruneOldChats();
 
-    const savedActive = localStorage.getItem(ACTIVE_KEY);
-    if(savedActive && chats[savedActive]){
-      currentChatId = savedActive;
-    } else if(chatOrder.length > 0){
-      currentChatId = chatOrder[0];
+    const navigationEntry = performance.getEntriesByType
+      ? performance.getEntriesByType('navigation')[0]
+      : null;
+    const isReload = navigationEntry
+      ? navigationEntry.type === 'reload'
+      : !!(performance.navigation && performance.navigation.type === 1);
+
+    if(isReload){
+      const savedActive = localStorage.getItem(ACTIVE_KEY);
+      if(savedActive && chats[savedActive]){
+        currentChatId = savedActive;
+      } else if(chatOrder.length > 0){
+        currentChatId = chatOrder[0];
+      } else {
+        createChat(false);
+      }
     } else {
       createChat(false);
     }
