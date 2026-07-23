@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Ассистент</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
+<link href="[https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600;700&display=swap](https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600;700&display=swap)" rel="stylesheet">
 <style>
   :root{
     --ease: cubic-bezier(0.22,1,0.36,1);
@@ -148,7 +148,7 @@
     padding:calc(env(safe-area-inset-top,10px) + 76px) 18px 0;
     padding-bottom:0 !important;
     scroll-padding-bottom:var(--messages-bottom-inset, 130px);
-    display:flex; flex-direction:column; gap:26px; scroll-behavior:smooth;}
+    display:flex; flex-direction:column; gap:26px;}
   .messages::-webkit-scrollbar{width:0;}
   #scroll-spacer{flex-shrink:0; width:100%;}
   .welcome{margin:auto; text-align:center; display:flex; flex-direction:column; align-items:center; gap:10px; padding:0 24px; animation:fadeUp .55s var(--spring);}
@@ -482,7 +482,7 @@
     .input-card{max-width:760px; margin:0 auto;}
   }
 </style>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="[https://telegram.org/js/telegram-web-app.js](https://telegram.org/js/telegram-web-app.js)"></script>
 </head>
 <body>
 <div class="app">
@@ -707,6 +707,10 @@
       return `<table style="border-left: 2px solid var(--ink); border-right: 2px solid var(--ink); border-radius: 6px; margin: 10px auto; font-family: inherit; font-size: 16px;">${tableRows}</table>`;
     });
     res = res.replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, '<div class="formula-block">$1</div>');
+    res = res.replace(/\$\$\s*([\s\S]*)$/g, (match, contents) => {
+      if (contents.includes('$$')) return match; 
+      return '<div class="formula-block">' + contents + '</div>';
+    });
     res = res.replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, '<div class="formula-block">$1</div>');
     res = res.replace(/\$([^$]+)\$/g, '<span class="formula-inline">$1</span>');
     res = res.replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, '<span class="formula-inline">$1</span>');
@@ -852,25 +856,22 @@
         }
         code.push(line);
       }
-      if (!closed) {
-        out.push(...original);
-        i = j - 1;
-        continue;
-      }
       if (normalizeCodeLang(lang) === 'markdown') {
         let markdownLines = code.slice();
         while (markdownLines.length && !markdownLines[0].trim()) markdownLines.shift();
-        while (markdownLines.length && !markdownLines[markdownLines.length - 1].trim()) markdownLines.pop();
+        if (closed) {
+          while (markdownLines.length && !markdownLines[markdownLines.length - 1].trim()) markdownLines.pop();
+        }
         markdownLines = markdownLines.filter(line => line.trim());
         if (quotePrefix) out.push(...markdownLines.map(line => quotePrefix + line));
         else out.push(...markdownLines);
-        i = j;
+        i = closed ? j : j - 1;
         continue;
       }
       const id = `@@BLOCKCODE${codeBlocks.length}@@`;
       codeBlocks.push(createCodeBlock(code.join('\n'), lang));
       out.push(quotePrefix + id);
-      i = j;
+      i = closed ? j : j - 1;
     }
     return out.join('\n');
   }
@@ -1256,7 +1257,7 @@
       if(s){
         const parsed = JSON.parse(s);
         chats = parsed.chats || {};
-        chatOrder = parsed.order || [];
+        chatOrder = (parsed.order || []).filter(id => chats[id]);
       }
     }catch(e){}
   }
@@ -1284,18 +1285,6 @@
         try{localStorage.removeItem(ACTIVE_KEY);}catch(e){}
       }
     }
-  }
-
-  loadChats();
-  pruneOldChats();
-
-  const savedActive = localStorage.getItem(ACTIVE_KEY);
-  if(savedActive && chats[savedActive]){
-    currentChatId = savedActive;
-  } else if(chatOrder.length > 0){
-    currentChatId = chatOrder[0];
-  } else {
-    createChat(false);
   }
 
   function saveActiveChat(){
@@ -1724,20 +1713,20 @@
       </div>
     `;
     msgEl.appendChild(b);
-    syncMessagesBottomInset(); // Move spacer after 'b'
+    syncMessagesBottomInset(); // Убеждаемся что спейсер сдвинут в самый низ
 
     const textEl=b.querySelector('.ai-text');
     const actionsEl=b.querySelector('.action-row');
     const m=document.getElementById('messages');
     
     let isTyping=true;
-    let isLocked=true; // Start locked to the bottom
+    let isLocked=true; // Скролл изначально прикреплен к низу
     let isUserInteracting=false;
 
     function checkLock() {
       if(!m) return;
       const dist = m.scrollHeight - m.clientHeight - m.scrollTop;
-      // If user is within 40px of bottom, snap and lock
+      // Если до нижнего края меньше 40px, подхватываем скролл
       if (dist < 40) {
         isLocked = true;
       } else {
@@ -1758,7 +1747,8 @@
     };
 
     if(m){
-      m.style.scrollBehavior = 'auto'; // Disable CSS smooth scroll for frame-by-frame accuracy
+      // Отключаем плавную анимацию браузера для мгновенного следования пиксель в пиксель
+      m.style.scrollBehavior = 'auto'; 
       m.addEventListener('touchstart', onTouchStart, {passive:true});
       m.addEventListener('touchend', onTouchEnd, {passive:true});
       m.addEventListener('mousedown', onTouchStart, {passive:true});
@@ -1772,10 +1762,6 @@
     const startTime=performance.now();
     let lastI=0;
 
-    const pre=document.createElement('span');
-    pre.style.cssText='white-space:pre-wrap;word-break:break-word;font:inherit;color:inherit;';
-    textEl.appendChild(pre);
-
     function type(now){
       const elapsed=now-startTime;
       const progress=Math.min(elapsed/durationMs,1);
@@ -1784,7 +1770,8 @@
 
       if(i>lastI){
         lastI=i;
-        pre.textContent=text.slice(0,i);
+        // Рендерим Markdown на лету
+        textEl.innerHTML=md(text.slice(0,i));
         
         if(isLocked && m){
           m.scrollTop = m.scrollHeight - m.clientHeight;
@@ -1803,7 +1790,7 @@
           m.removeEventListener('mouseup', onTouchEnd);
           m.removeEventListener('wheel', onWheel);
           m.removeEventListener('scroll', onScroll);
-          m.style.scrollBehavior = ''; // Restore CSS smooth scroll
+          m.style.scrollBehavior = ''; // Включаем обратно
           
           if(isLocked){
             syncMessagesBottomInset();
@@ -1924,7 +1911,7 @@
   };
   document.getElementById('menuShare').onclick = () => {
     menuPop.classList.remove('open');
-    const fakeLink = 'https://assistant.app/chat/' + currentChatId;
+    const fakeLink = '[https://assistant.app/chat/](https://assistant.app/chat/)' + currentChatId;
     if(navigator.clipboard) navigator.clipboard.writeText(fakeLink);
     showToast('Ссылка на чат скопирована');
   };
@@ -1932,8 +1919,8 @@
     menuPop.classList.remove('open');
     requestDeleteChat(currentChatId);
   };
-  document.getElementById('newChatBtn').onclick = createChat;
-  document.getElementById('newChatBtn2').onclick = createChat;
+  document.getElementById('newChatBtn').onclick = () => createChat(true);
+  document.getElementById('newChatBtn2').onclick = () => createChat(true);
 
   /* ================= Attachments ================= */
   let pendingFiles = [];
@@ -2298,6 +2285,25 @@
         ${modelEntries.length ? modelEntries.map(([m,c])=>`<div class="a-model-row"><div class="a-model-name">${m}</div><div class="a-model-bar-wrap"><div class="a-model-bar" style="width:${Math.round(c/maxM*100)}%"></div></div><div class="a-model-cnt">${c}</div></div>`).join('') : `<div class="a-empty">Нет активности</div>`}
       </div>`;
   }
+
+  /* ================= Init App ================= */
+  document.addEventListener('DOMContentLoaded', () => {
+    loadChats();
+    pruneOldChats();
+
+    const savedActive = localStorage.getItem(ACTIVE_KEY);
+    if(savedActive && chats[savedActive]){
+      currentChatId = savedActive;
+    } else if(chatOrder.length > 0){
+      currentChatId = chatOrder[0];
+    } else {
+      createChat(false);
+    }
+
+    renderSidebar();
+    renderMessages();
+    syncMessagesBottomInset();
+  });
 
 </script>
 </body>
