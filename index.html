@@ -328,6 +328,24 @@
   .bubble-file{display:flex; align-items:center; gap:7px; background:rgba(128,120,100,0.14); border-radius:10px; padding:7px 10px; max-width:220px;}
   .bubble-file-icon{font-size:20px; flex-shrink:0;}
   .bubble-file-name{font-size:12.5px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  
+  /* Блок AI Файла */
+  .bot-file{
+    max-width:86%; background:var(--bg-elevated); border:1px solid var(--border);
+    border-radius:18px; padding:13px 15px; box-shadow:0 1px 4px rgba(0,0,0,.05);
+    display:flex; align-items:center; gap:12px; cursor:pointer;
+    transition:transform .15s ease; -webkit-tap-highlight-color:transparent; margin-bottom:8px;
+  }
+  .bot-file:active{transform:scale(0.985);}
+  .bot-file-icon{
+    width:38px; height:38px; background:var(--side-active); border-radius:9px;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    font-size:15px; font-weight:700; color:var(--ink-soft); border:1px solid var(--border);
+  }
+  .bot-file-content{flex:1; min-width:0;}
+  .bot-file-name{font-weight:600; font-size:15px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:1px;}
+  .bot-file-meta{font-size:13px; color:var(--ink-soft);}
+
   .lightbox{position:fixed; inset:0; background:rgba(10,9,7,0.86); z-index:80; display:flex; align-items:center; justify-content:center;
     opacity:0; visibility:hidden; transition:opacity .25s, visibility .25s; padding:24px;}
   .lightbox.show{opacity:1; visibility:visible;}
@@ -466,6 +484,8 @@
     .input-card{max-width:760px; margin:0 auto;}
   }
 </style>
+<!-- Подключение Telegram WebApp SDK для аутентификации -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
 <div class="app">
@@ -548,7 +568,7 @@
     <div class="input-area">
       <div class="input-card glass-strong">
         <div class="attach-strip" id="attachStrip"></div>
-        <textarea id="ta" rows="1" placeholder="Написать сообщение…" oninput="resize(this);toggleSend()" onkeydown="onKey(event)"></textarea>
+        <textarea id="ta" rows="1" placeholder="Написать сообщение…" oninput="resize(this);toggleSend()" onkeydown="onKey(event)" disabled></textarea>
         <div class="input-toolbar">
           <button class="pill-plus glass-pill" onclick="openFilePicker()" title="Прикрепить">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -559,10 +579,8 @@
           </button>
           <select class="native-select" id="group-select" onchange="onGroupChange(this)">
             <option value="" disabled selected></option>
-            <option value="chatgpt">ChatGPT</option>
             <option value="gemini">Gemini</option>
             <option value="other">Other Models</option>
-            <option value="council">Совет ИИ-моделей</option>
           </select>
           <select class="native-select" id="model-select" onchange="onModelChange(this)"></select>
           <div class="tool-spacer"></div>
@@ -605,13 +623,11 @@
       </div>
       <div class="a-section-title">Лимиты моделей</div>
       <div class="a-card">
-        <div class="a-row"><div class="a-info"><div class="a-name">ChatGPT</div></div><span class="a-badge approved">Безлимит</span></div>
         <div class="a-row"><div class="a-info"><div class="a-name">Gemini</div></div><span class="a-badge approved">Безлимит</span></div>
         <div class="a-row"><div class="a-info"><div class="a-name">Other Models</div></div><span class="a-badge approved">Безлимит</span></div>
-        <div class="a-row"><div class="a-info"><div class="a-name">Совет ИИ-моделей</div></div><span class="a-badge approved">Безлимит</span></div>
       </div>
       <div class="a-section-title">Управление</div>
-      <div class="a-card">
+      <div class="a-card" id="adminPanelBlock" style="display:none;">
         <div class="a-row" id="openAdmin">
           <div class="a-avatar" style="background:transparent;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="8" r="3"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg>
@@ -640,7 +656,52 @@
 </div>
 
 <script>
-  /* ================= MARKDOWN & LATEX ENGINE (From index.html) ================= */
+  /* ================= GLOBALS & AUTH ================= */
+  let accessGranted = false;
+  let isAdmin = false;
+
+  (function initTelegramAccess(){
+    try{
+      if(window.Telegram&&window.Telegram.WebApp){
+        const tg=window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+      }
+    }catch(e){}
+    const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+    fetch('/api/me',{headers:{'Authorization':'tma '+initData}})
+      .then(r=>{if(!r.ok)return r.json().then(d=>{throw d;}).catch(()=>{throw {message:'Нет доступа.'};});return r.json();})
+      .then(data=>{
+        if(data&&data.ok===true){
+          accessGranted=true;
+          if(data.is_admin){
+            isAdmin=true;
+            document.getElementById('adminPanelBlock').style.display='block';
+          }
+          if(ta) ta.disabled=false;
+          toggleSend();
+        }else{
+          showAccessDenied((data&&data.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.');
+        }
+      })
+      .catch(err=>showAccessDenied((err&&err.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.'));
+  })();
+
+  function showAccessDenied(message){
+    accessGranted=false;
+    if(ta) ta.disabled=true;
+    if(sendBtn) sendBtn.disabled=true;
+    if(document.getElementById('access-overlay')) return;
+    const overlay=document.createElement('div');
+    overlay.id='access-overlay';
+    overlay.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:32px;text-align:center;background:var(--bg);color:var(--ink)';
+    overlay.innerHTML=`<div style="font-size:40px;">🚫</div><div style="font-size:18px;font-weight:600;">Доступ закрыт</div><div style="font-size:14px;color:var(--ink-soft);line-height:1.6;max-width:270px;">${x(message)}</div>`;
+    document.body.appendChild(overlay);
+  }
+
+  function x(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');}
+
+  /* ================= MARKDOWN & LATEX ENGINE ================= */
   function formatMathLaTeX(text) {
     if (!text) return '';
     let res = text;
@@ -710,9 +771,6 @@
   }
   function mdEscapeAttr(value) {
     return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-  function mdEscapeRegExp(value) {
-    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
   function normalizeCodeLang(lang) {
     const value = String(lang || '').trim().toLowerCase();
@@ -1146,9 +1204,6 @@
     return html;
   }
 
-  /* ================= APPLICATION LOGIC ================= */
-  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (/macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
-
   /* ================= Custom modal / toast ================= */
   const modalScrim = document.getElementById('modalScrim');
   const modalCard = document.getElementById('modalCard');
@@ -1195,32 +1250,103 @@
   }
 
   /* ================= Chat store ================= */
-  let chats = {
-    c1: { title:'Новый разговор', when:'today', messages:[] },
-    c2: { title:'Идеи для дизайна интерфейса', when:'today', messages:[
-      {role:'user', text:'Помоги придумать структуру для лендинга.', files:[]},
-      {role:'ai', text:'Начните с **сильного заголовка** и одного чёткого призыва к действию:\n\n* Первое впечатление\n* Четкая структура\n* Простой интерфейс'}
-    ]},
-    c3: { title:'Планирование поездки', when:'earlier', messages:[] },
-    c4: { title:'Разбор технической задачи', when:'earlier', messages:[] },
-    c5: { title:'Рецепт на выходные', when:'earlier', messages:[] },
-  };
-  let chatOrder = ['c1','c2','c3','c4','c5'];
-  let currentChatId = 'c1';
+  const CHATS_KEY = 'oracle_chats_v2';
+  const ACTIVE_KEY = 'oracle_active_chat_v2';
+  const CHAT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  
+  let chats = {};
+  let chatOrder = [];
+  let currentChatId = null;
   let incognitoChat = null;
+
+  function loadChats(){
+    try{
+      const s = localStorage.getItem(CHATS_KEY);
+      if(s){
+        const parsed = JSON.parse(s);
+        chats = parsed.chats || {};
+        chatOrder = parsed.order || [];
+      }
+    }catch(e){}
+  }
+  function saveChats(){
+    try{
+      localStorage.setItem(CHATS_KEY, JSON.stringify({chats, order: chatOrder}));
+    }catch(e){}
+  }
+  function pruneOldChats(){
+    const now = Date.now();
+    let changed = false;
+    for(const id of Object.keys(chats)){
+      const c = chats[id];
+      const t = c.updated || c.created || 0;
+      if((now - t) > CHAT_TTL_MS){
+        delete chats[id];
+        chatOrder = chatOrder.filter(x => x !== id);
+        changed = true;
+      }
+    }
+    if(changed){
+      saveChats();
+      if(currentChatId && !chats[currentChatId]){
+        currentChatId = null;
+        try{localStorage.removeItem(ACTIVE_KEY);}catch(e){}
+      }
+    }
+  }
+
+  loadChats();
+  pruneOldChats();
+
+  const savedActive = localStorage.getItem(ACTIVE_KEY);
+  if(savedActive && chats[savedActive]){
+    currentChatId = savedActive;
+  } else if(chatOrder.length > 0){
+    currentChatId = chatOrder[0];
+  } else {
+    createChat(false); // creates c1 silently without rendering immediately
+  }
+
+  function saveActiveChat(){
+    if(!currentChatId || currentChatId === 'incognito') return;
+    const ch = chats[currentChatId];
+    if(!ch) return;
+    ch.updated = Date.now();
+    saveChats();
+  }
+
   function activeChat(){ return currentChatId === 'incognito' ? incognitoChat : chats[currentChatId]; }
+  function activeHistory(){
+    const ch = activeChat();
+    return ch ? ch.history || [] : [];
+  }
 
   function renderSidebar(){
     const q = (document.getElementById('searchInput').value || '').toLowerCase();
     const mount = document.getElementById('sideListMount');
-    const ids = chatOrder.filter(id => chats[id] && chats[id].title.toLowerCase().includes(q));
-    const today = ids.filter(id => chats[id].when === 'today');
-    const earlier = ids.filter(id => chats[id].when === 'earlier');
+    
+    // Simplistic grouping by today vs earlier
+    const now = new Date();
+    const todayStr = now.toDateString();
+    
+    let today = [];
+    let earlier = [];
+    
+    chatOrder.forEach(id => {
+      const c = chats[id];
+      if(!c) return;
+      if(!c.title.toLowerCase().includes(q)) return;
+      
+      const updatedDate = new Date(c.updated || c.created || Date.now());
+      if(updatedDate.toDateString() === todayStr) today.push(id);
+      else earlier.push(id);
+    });
+
     function group(label, list){
       if(!list.length) return '';
       return `<div class="side-label">${label}</div>` + list.map(id => `
         <div class="side-item${id===currentChatId?' active':''}" data-id="${id}">
-          <span class="t">${chats[id].title}</span>
+          <span class="t">${x(chats[id].title)}</span>
         </div>`).join('');
     }
     mount.innerHTML = group('Сегодня', today) + group('Ранее', earlier) || `<div class="side-empty">Ничего не найдено</div>`;
@@ -1287,6 +1413,7 @@
     if(!chats[id]) return;
     resetIncognitoUI();
     currentChatId = id;
+    try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
     renderMessages(); renderSidebar(); closeSideFn();
   }
 
@@ -1298,9 +1425,15 @@
   function doDeleteChat(id){
     delete chats[id];
     chatOrder = chatOrder.filter(x => x !== id);
+    saveChats();
     if(currentChatId === id){
-      const rest = chatOrder;
-      if(rest.length){ currentChatId = rest[0]; } else { createChat(); return; }
+      if(chatOrder.length){ 
+        currentChatId = chatOrder[0]; 
+        try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
+      } else { 
+        createChat(); 
+        return; 
+      }
     }
     renderMessages(); renderSidebar();
   }
@@ -1312,17 +1445,21 @@
     document.getElementById('incognitoCloseBtn').style.display = 'none';
   }
 
-  function createChat(){
+  function createChat(doRender = true){
     resetIncognitoUI();
     const id = 'c' + Date.now();
-    chats[id] = { title:'Новый разговор', when:'today', messages:[] };
+    chats[id] = { title:'Новый разговор', history:[], created: Date.now(), updated: Date.now() };
     chatOrder.unshift(id);
     currentChatId = id;
-    renderMessages(); renderSidebar(); closeSideFn();
+    saveChats();
+    try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
+    if(doRender){
+      renderMessages(); renderSidebar(); closeSideFn();
+    }
   }
 
   function enterIncognito(){
-    incognitoChat = { messages:[] };
+    incognitoChat = { history:[] };
     currentChatId = 'incognito';
     document.getElementById('topbarTitle').classList.add('show');
     document.getElementById('topActions').style.display = 'none';
@@ -1336,12 +1473,16 @@
   document.getElementById('ghostBtn').onclick = enterIncognito;
   document.getElementById('incognitoCloseBtn').onclick = exitIncognito;
 
+  // Render DOM elements for an active chat
   function renderMessages(){
     const messages = document.getElementById('messages');
     const chat = activeChat();
     const topActions = document.querySelector('.top-actions');
-    if(topActions) topActions.classList.toggle('has-msgs', !!(chat && chat.messages.length));
-    if(!chat || !chat.messages.length){
+    
+    const history = chat ? (chat.history || []) : [];
+    if(topActions) topActions.classList.toggle('has-msgs', history.length > 0);
+    
+    if(!history.length){
       messages.innerHTML = currentChatId === 'incognito' ? `
         <div class="welcome" id="welcome">
           <svg class="ghost-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 20V11a6 6 0 0112 0v9l-2.5-2-2 2-2-2-2 2-2-2z"/><circle cx="9.5" cy="11" r="1.1" fill="var(--bg)"/><circle cx="14.5" cy="11" r="1.1" fill="var(--bg)"/></svg>
@@ -1355,23 +1496,30 @@
       syncMessagesBottomInset();
       return;
     }
+    
     messages.innerHTML = '';
-    chat.messages.forEach(m => {
+    for(const m of history){
       if(m.role === 'user'){
         const row = document.createElement('div');
         row.className = 'row-user';
         if(m.files && m.files.length) row.appendChild(renderAttachmentsBlock(m.files));
-        if(m.text){
+        if(m.content){
           const bubble = document.createElement('div');
           bubble.className = 'bubble-user';
-          bubble.textContent = m.text;
+          bubble.textContent = m.content;
           row.appendChild(bubble);
         }
         messages.appendChild(row);
       } else {
-        messages.appendChild(buildAiBlock(m.text));
+        if(m.is_file && m.file_data){
+           appendBotFile(messages, m.file_data);
+        } else if(m.is_image && m.image_base64) {
+           appendBotImage(messages, m.image_base64, m.content);
+        } else {
+           messages.appendChild(buildAiBlock(m.content || ''));
+        }
       }
-    });
+    }
     scrollElementAboveInput(lastMessageRow(), 18, 0);
   }
 
@@ -1387,12 +1535,13 @@
       } else {
         const chip = document.createElement('div');
         chip.className = 'bubble-file';
-        chip.innerHTML = `<div class="bubble-file-icon">📎</div><div class="bubble-file-name">${f.name}</div>`;
+        chip.innerHTML = `<div class="bubble-file-icon">📎</div><div class="bubble-file-name">${x(f.name)}</div>`;
         wrap.appendChild(chip);
       }
     });
     return wrap;
   }
+  
   function openLightbox(url){ document.getElementById('lightboxImg').src = url; document.getElementById('lightbox').classList.add('show'); }
   document.getElementById('lightbox').onclick = () => document.getElementById('lightbox').classList.remove('show');
 
@@ -1402,18 +1551,14 @@
     aiBlock.innerHTML = `
       <div class="thinking-row">
         <svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-        Думал 4 секунды
+        Ответ сгенерирован
         <span class="chev"></span>
       </div>
-      <div class="thinking-body">Разбираю вопрос, прикидываю формат ответа и проверяю, что учёл все детали запроса.</div>
+      <div class="thinking-body">Ответ успешно обработан моделью.</div>
       <div class="ai-text"></div>
       <div class="action-row">
         <button title="Копировать" data-act="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 012-2h10"/></svg></button>
         <button title="Экспорт" data-act="export"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg></button>
-        <button title="Озвучить" data-act="play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
-        <button title="Нравится" data-act="like"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 22V10M2 13v6a2 2 0 002 2h12.5a2 2 0 002-1.6l1.3-6A2 2 0 0017.8 11H14l1-5.5A1.5 1.5 0 0013.5 4L7 10"/></svg></button>
-        <button title="Не нравится" data-act="dislike"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="transform:scaleY(-1)"><path d="M7 22V10M2 13v6a2 2 0 002 2h12.5a2 2 0 002-1.6l1.3-6A2 2 0 0017.8 11H14l1-5.5A1.5 1.5 0 0013.5 4L7 10"/></svg></button>
-        <button title="Повторить" data-act="retry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 10-3 6.7M21 12v6h-6"/></svg></button>
       </div>
       <div class="disclaimer">
         <svg class="mark" viewBox="0 0 24 24" fill="var(--coral)"><path d="M12 0l1.2 8.1L21 9l-7.8 1.9L12 20l-1.2-9.1L3 9l7.8-.9z"/></svg>
@@ -1434,25 +1579,235 @@
       const a = document.createElement('a'); a.href = url; a.download = 'response.txt'; a.click();
       URL.revokeObjectURL(url);
     };
-    row.querySelector('[data-act="play"]').onclick = (e) => {
-      if(!('speechSynthesis' in window)) return;
-      if(speechSynthesis.speaking){ speechSynthesis.cancel(); e.currentTarget.classList.remove('on'); return; }
-      const u = new SpeechSynthesisUtterance(text); u.lang = 'ru-RU';
-      u.onend = () => e.currentTarget.classList.remove('on');
-      e.currentTarget.classList.add('on'); speechSynthesis.speak(u);
-    };
-    row.querySelector('[data-act="like"]').onclick = (e) => { e.currentTarget.classList.toggle('on'); row.querySelector('[data-act="dislike"]').classList.remove('on'); };
-    row.querySelector('[data-act="dislike"]').onclick = (e) => { e.currentTarget.classList.toggle('on'); row.querySelector('[data-act="like"]').classList.remove('on'); };
-    row.querySelector('[data-act="retry"]').onclick = () => {
-      const newText = replies[Math.floor(Math.random() * replies.length)];
-      block.querySelector('.ai-text').innerHTML = md(newText);
-      wireActionRow(block, newText);
-      const chat = activeChat();
-      const idx = chat.messages.findIndex(m => m.role==='ai' && m.text===text);
-      if(idx > -1) chat.messages[idx].text = newText;
-    };
   }
   function flashBtn(btn){ btn.classList.add('on'); setTimeout(()=>btn.classList.remove('on'), 900); }
+
+  /* ================= Bot file / image rendering ================= */
+  window.__botFiles = window.__botFiles || {};
+  let __botFileCounter = 0;
+
+  function appendBotFile(msgEl, fileData) {
+    const container = document.createElement('div');
+    container.className = 'ai-block';
+    
+    const fileName = fileData.name || 'file.txt';
+    const fileType = fileData.type || 'File';
+    const content = fileData.content || '';
+    const mime = fileData.mime || 'text/plain';
+
+    const fileId = 'bf_' + (++__botFileCounter);
+    window.__botFiles[fileId] = { content, name: fileName, mime };
+
+    container.innerHTML = `
+      <div class="bot-file" onclick="downloadFileFromAI(this)" data-file-id="${fileId}">
+        <div class="bot-file-icon">
+          <span style="font-size:16px;font-weight:700;">&lt;/&gt;</span>
+        </div>
+        <div class="bot-file-content">
+          <div class="bot-file-name">${x(fileName)}</div>
+          <div class="bot-file-meta">${x(fileType)}</div>
+        </div>
+      </div>
+    `;
+
+    msgEl.appendChild(container);
+    scrollElementAboveInput(container, 18);
+  }
+
+  function downloadFileFromAI(el) {
+    const fileId = el.dataset.fileId;
+    const fileData = window.__botFiles?.[fileId];
+    if (!fileData) return;
+
+    const name = fileData.name || 'file.txt';
+    const content = fileData.content || '';
+    const mime = (fileData.mime || 'text/plain') + ';charset=utf-8';
+
+    const blob = new Blob([new TextEncoder().encode(content)], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function appendBotImage(msgEl, base64, caption) {
+    const container = document.createElement('div');
+    container.className = 'ai-block';
+    
+    window.__generatedImages = window.__generatedImages || {};
+    const imgId = 'gen_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    window.__generatedImages[imgId] = base64;
+    const imgUrl = `data:image/png;base64,${base64}`;
+    
+    container.innerHTML = `
+      <div onclick="openGeneratedImage('${imgId}')" style="display:block;max-width:240px;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.14);cursor:pointer;-webkit-tap-highlight-color:transparent; margin-bottom: 8px;">
+        <img src="${imgUrl}" style="width:100%;display:block;" alt="">
+      </div>
+    `;
+    
+    msgEl.appendChild(container);
+    const img = container.querySelector('img');
+    if (img) {
+      img.onload = () => scrollElementAboveInput(container, 18);
+      if (img.complete) setTimeout(() => scrollElementAboveInput(container, 18), 30);
+    } else {
+      scrollElementAboveInput(container, 18);
+    }
+  }
+
+  function b64ToBlob(base64,type='image/png'){
+    const bin=atob(base64);
+    const len=bin.length;
+    const bytes=new Uint8Array(len);
+    for(let i=0;i<len;i++)bytes[i]=bin.charCodeAt(i);
+    return new Blob([bytes],{type});
+  }
+  async function saveGeneratedImage(id){
+    const base64=window.__generatedImages?.[id];
+    if(!base64)return;
+    const blob=b64ToBlob(base64,'image/png');
+    const file=new File([blob],'oracle-image.png',{type:'image/png'});
+
+    try{
+      if(navigator.canShare && navigator.canShare({files:[file]}) && navigator.share){
+        await navigator.share({files:[file],title:'oracle-image.png'});
+        return;
+      }
+    }catch(e){}
+
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download='oracle-image.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1200);
+  }
+  function closeGeneratedImage(){
+    document.getElementById('generated-image-viewer')?.remove();
+  }
+  function openGeneratedImage(id){
+    const base64=window.__generatedImages?.[id];
+    if(!base64)return;
+    closeGeneratedImage();
+    const imgUrl=`data:image/png;base64,${base64}`;
+    const viewer=document.createElement('div');
+    viewer.id='generated-image-viewer';
+    viewer.onclick=(e)=>{if(e.target===viewer)closeGeneratedImage();};
+    viewer.style.cssText='position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;';
+    viewer.innerHTML=`
+      <img src="${imgUrl}" style="max-width:94vw;max-height:78vh;border-radius:14px;display:block;object-fit:contain;box-shadow:0 10px 40px rgba(0,0,0,.35);" alt="">
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button onclick="saveGeneratedImage('${id}')" style="border:none;border-radius:999px;padding:11px 16px;background:#fff;color:#111;font:600 15px -apple-system,BlinkMacSystemFont,'Inter',sans-serif;">Сохранить</button>
+        <button onclick="closeGeneratedImage()" style="border:none;border-radius:999px;padding:11px 16px;background:rgba(255,255,255,.18);color:#fff;font:600 15px -apple-system,BlinkMacSystemFont,'Inter',sans-serif;">Закрыть</button>
+      </div>
+    `;
+    document.body.appendChild(viewer);
+  }
+
+  function appendBotError(msgEl,text){
+    const b=document.createElement('div');
+    b.className='ai-block';
+    b.innerHTML=`<div class="ai-text" style="color:#C25B44">${x(text)}</div>`;
+    msgEl.appendChild(b); scrollElementAboveInput(b, 18);
+  }
+
+  function appendBotTextAnimated(msgEl,text){
+    const b=document.createElement('div');
+    b.className='ai-block';
+    b.innerHTML=`
+      <div class="thinking-row">
+        <svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        Ответ сгенерирован
+        <span class="chev"></span>
+      </div>
+      <div class="thinking-body">Ответ успешно обработан моделью.</div>
+      <div class="ai-text"></div>
+      <div class="action-row" style="display:none">
+        <button title="Копировать" data-act="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 012-2h10"/></svg></button>
+        <button title="Экспорт" data-act="export"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg></button>
+      </div>
+    `;
+    msgEl.appendChild(b);
+
+    const textEl=b.querySelector('.ai-text');
+    const actionsEl=b.querySelector('.action-row');
+    const m=document.getElementById('messages');
+    let isTyping=true;
+    let userHasScrolledUp=false;
+
+    const onWheel = (e) => { if(!isTyping||!m)return; if(e.deltaY < 0) userHasScrolledUp = true; };
+    const onTouchStart = (e) => { if(!isTyping||!m)return; m.dataset.touchStartY = e.touches[0].clientY; };
+    const onTouchMove = (e) => {
+      if(!isTyping||!m)return;
+      const startY = parseFloat(m.dataset.touchStartY || 0);
+      const currentY = e.touches[0].clientY;
+      if (currentY > startY + 2) userHasScrolledUp = true;
+      m.dataset.touchStartY = currentY;
+    };
+    const onScroll = () => {
+      if(!isTyping||!m)return;
+      const isAtBottom=(m.scrollHeight-m.clientHeight-m.scrollTop)<140;
+      if (isAtBottom) userHasScrolledUp = false;
+    };
+
+    if(m){
+      m.addEventListener('wheel',onWheel,{passive:true});
+      m.addEventListener('touchstart',onTouchStart,{passive:true});
+      m.addEventListener('touchmove',onTouchMove,{passive:true});
+      m.addEventListener('scroll',onScroll,{passive:true});
+    }
+
+    function smoothScrollLoop(){
+      if(m&&!userHasScrolledUp)scrollElementAboveInputNow(b,18);
+      if(isTyping)requestAnimationFrame(smoothScrollLoop);
+    }
+    if(m)requestAnimationFrame(smoothScrollLoop);
+
+    const totalChars=text.length;
+    const durationMs=Math.max(totalChars*20, 800);
+    const startTime=performance.now();
+    let lastI=0;
+
+    const pre=document.createElement('span');
+    pre.style.cssText='white-space:pre-wrap;word-break:break-word;font:inherit;color:inherit;';
+    textEl.appendChild(pre);
+
+    function type(now){
+      const elapsed=now-startTime;
+      const progress=Math.min(elapsed/durationMs,1);
+      const eased=1-Math.pow(1-progress,2.5);
+      const i=Math.floor(eased*totalChars);
+
+      if(i>lastI){
+        lastI=i;
+        pre.textContent=text.slice(0,i);
+      }
+
+      if(progress<1){
+        requestAnimationFrame(type);
+      }else{
+        textEl.innerHTML=md(text);
+        isTyping=false;
+        if(m){
+          m.removeEventListener('wheel',onWheel);
+          m.removeEventListener('touchstart',onTouchStart);
+          m.removeEventListener('touchmove',onTouchMove);
+          m.removeEventListener('scroll',onScroll);
+        }
+        if(actionsEl)actionsEl.style.display='flex';
+        b.querySelector('.thinking-row').onclick = (e) => e.currentTarget.classList.toggle('open');
+        wireActionRow(b, text);
+        scrollElementAboveInput(b,18,60);
+      }
+    }
+    requestAnimationFrame(type);
+  }
 
   /* ================= Sidebar toggle ================= */
   const sidebar = document.getElementById('sidebar');
@@ -1555,7 +1910,8 @@
 
   document.getElementById('menuRename').onclick = () => {
     menuPop.classList.remove('open');
-    showRenameModal(chats[currentChatId].title, (val) => { chats[currentChatId].title = val; renderSidebar(); });
+    if(!activeChat()) return;
+    showRenameModal(activeChat().title, (val) => { activeChat().title = val; saveChats(); renderSidebar(); });
   };
   document.getElementById('menuShare').onclick = () => {
     menuPop.classList.remove('open');
@@ -1577,8 +1933,8 @@
   async function onFilesChosen(input){
     for(const file of Array.from(input.files)){
       const isImg = file.type.startsWith('image/');
-      const item = { name:file.name, kind:isImg?'image':'file', dataUrl:null };
-      if(isImg){ try{ item.dataUrl = await readAsDataURL(file); }catch(e){} }
+      const item = { name:file.name, type: file.type || '', kind:isImg?'image':'file', dataUrl:null };
+      try{ item.dataUrl = await readAsDataURL(file); }catch(e){}
       pendingFiles.push(item);
     }
     input.value = ''; renderAttachStrip(); toggleSend();
@@ -1588,21 +1944,28 @@
   function renderAttachStrip(){
     const strip = document.getElementById('attachStrip');
     strip.innerHTML = pendingFiles.map((f,i) => `<div class="attach-thumb">${
-      f.kind==='image' && f.dataUrl ? `<img src="${f.dataUrl}" alt="">` : `<div class="file-icon">📎<div class="file-name">${f.name}</div></div>`
+      f.kind==='image' && f.dataUrl ? `<img src="${f.dataUrl}" alt="">` : `<div class="file-icon">📎<div class="file-name">${x(f.name)}</div></div>`
     }<button class="rm-btn" onclick="removePendingFile(${i})">×</button></div>`).join('');
+    syncMessagesBottomInset();
   }
 
-  /* ================= Model picker ================= */
+  /* ================= Model picker (Synced with Backend IDs) ================= */
   const GROUP_MODELS = {
-    chatgpt: [['gpt-5.5','GPT-5.5'],['gpt-5.4-mini','GPT-5.4 Mini']],
-    gemini:  [['gemini-3.1-flash-lite','Gemini 3.1 Flash Lite'],['gemini-3.5-flash','Gemini 3.5 Flash'],['gemini-3.1-pro','Gemini 3.1 Pro']],
-    other:   [['llama-4','Llama 4'],['glm-5.1','GLM-5.1'],['nemotron-3-super','Nemotron 3 Super']],
-    council: [['ai-council','Совет ИИ-моделей']]
+    gemini:  [
+      ['gemini/gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite'],
+      ['gemini/gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite'],
+      ['gemini/gemini-3.6-flash', 'Gemini 3.6 Flash']
+    ],
+    other:   [
+      ['meta/llama-4-maverick-17b-128e-instruct', 'Llama 4 Maverick 17B'],
+      ['z-ai/glm-5.2', 'GLM-5.2'],
+      ['nvidia/nemotron-3-super-120b-a12b', 'Nemotron 3 Super 120B']
+    ]
   };
-  const GROUP_LABELS = { chatgpt:'ChatGPT', gemini:'Gemini', other:'Other Models', council:'Совет ИИ-моделей' };
+  const GROUP_LABELS = { gemini:'Gemini', other:'Other Models' };
   const ALL_MODEL_NAMES = Object.values(GROUP_MODELS).flat().map(m => m[1]);
 
-  let model = 'gemini-3.1-flash-lite';
+  let model = 'gemini/gemini-3.1-flash-lite';
   const modelLabel = document.getElementById('model-label');
   const groupSelect = document.getElementById('group-select');
   const modelSelect = document.getElementById('model-select');
@@ -1615,7 +1978,6 @@
     sel.style.pointerEvents = 'none';
     const key = sel.value; sel.selectedIndex = 0;
     if(!key) return;
-    if(key === 'council'){ model = 'ai-council'; modelLabel.textContent = 'Совет ИИ-моделей'; return; }
     modelSelect.innerHTML = '<option value="" disabled selected></option>' + GROUP_MODELS[key].map(m=>`<option value="${m[0]}">${m[1]}</option>`).join('');
     modelSelect.style.pointerEvents = 'auto'; modelSelect.focus(); modelSelect.click();
   }
@@ -1652,16 +2014,14 @@
     if(!item) return;
     const action = item.dataset.action;
     if(action === 'group'){
-      const key = item.dataset.key;
-      if(key === 'council'){ model='ai-council'; modelLabel.textContent='Совет ИИ-моделей'; setTimeout(closeSheet,150); }
-      else showGroup(key);
+      showGroup(item.dataset.key);
     } else if(action === 'model'){
       model = item.dataset.id; modelLabel.textContent = item.dataset.label;
       setTimeout(closeSheet, 150);
     } else if(action === 'back'){ showGroups(); }
   });
 
-  /* ================= Composer ================= */
+  /* ================= Composer / Sending ================= */
   const ta = document.getElementById('ta');
   const sendBtn = document.getElementById('send-btn');
   function resize(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,130)+'px'; syncMessagesBottomInset(); }
@@ -1703,19 +2063,26 @@
   function toggleSend(){ sendBtn.disabled = !(ta.value.trim() || pendingFiles.length); }
   function onKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); if(ta.value.trim() || pendingFiles.length) send(); } }
 
-  const replies = [
-    "Хороший вопрос. Вот как я бы к этому подошёл:\n\n1. **Анализ** исходных данных.\n2. **Проектирование** базовой структуры.\n3. **Тестирование** результата.",
-    "Смотрите на это так:\n\n```javascript\nfunction solution() {\n  return 'Баланс между простотой и точностью';\n}\n```",
-    "Разложу по порядку:\n\n| Компонент | Назначение |\n|---|---|\n| UI | Взаимодействие с пользователем |\n| API | Передача данных |\n| DB | Хранение состояния |",
-    "Готово — вот структурированный ответ с использованием LaTeX формулы: $$E = mc^2$$"
-  ];
-
-  function send(){
+  async function send(){
+    if(!accessGranted){showAccessDenied('Нет доступа. Откройте бота в Telegram и отправьте /start.');return;}
+    
     const text = ta.value.trim();
     const files = pendingFiles.slice();
     if(!text && !files.length) return;
+    
+    ta.value=''; resize(ta); clearPendingFiles(); toggleSend();
+    
     const chat = activeChat();
-    chat.messages.push({role:'user', text, files});
+    
+    // Смена заголовка для новых чатов (генерация авто-заголовка)
+    if(chat.history.length === 0 && currentChatId !== 'incognito' && text){
+      chat.title = text.slice(0, 44) + (text.length > 44 ? '…' : '');
+    }
+    
+    // Store original files in local history to re-render attachments immediately
+    chat.history.push({role:'user', content: text, files: files});
+    saveActiveChat();
+    renderSidebar();
 
     const messages = document.getElementById('messages');
     const welcome = document.getElementById('welcome');
@@ -1734,11 +2101,9 @@
     messages.appendChild(row);
     scrollElementAboveInput(row, 18);
 
-    ta.value=''; resize(ta); clearPendingFiles(); toggleSend();
-    renderSidebar();
-
     const thinkBlock = document.createElement('div');
     thinkBlock.className = 'ai-block';
+    thinkBlock.id = 'tr';
     thinkBlock.innerHTML = `
       <div class="thinking-row open">
         <svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
@@ -1749,73 +2114,132 @@
       <div class="ai-text"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
     messages.appendChild(thinkBlock);
     scrollElementAboveInput(thinkBlock, 18);
-    thinkBlock.querySelector('.thinking-row').onclick = (e) => e.currentTarget.classList.toggle('open');
 
-    setTimeout(() => {
-      const reply = replies[Math.floor(Math.random() * replies.length)];
-      chat.messages.push({role:'ai', text:reply});
-      const finalBlock = buildAiBlock(reply);
-      thinkBlock.replaceWith(finalBlock);
-      scrollElementAboveInput(finalBlock, 18);
-    }, 1200 + Math.random() * 600);
+    const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+    
+    // Отправляем на бэкенд
+    try{
+      // Extract history formatted for API (system/user/assistant strictly)
+      const apiHistory = chat.history.slice(0, -1).map(h => ({role: h.role, content: h.content}));
+
+      const resp=await fetch('/api/chat',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
+        body:JSON.stringify({
+          model: model, 
+          history: apiHistory,
+          message: (text || (files.length ? 'Вложения' : '')),
+          attachments: files.map(f => ({
+              name: f.name || '', 
+              type: f.type || '', 
+              dataUrl: f.dataUrl || '', 
+              kind: f.kind || 'file'
+          }))
+        })
+      });
+
+      if(resp.status===401||resp.status===403){
+        const data=await resp.json().catch(()=>({}));
+        document.getElementById('tr')?.remove();
+        appendBotError(messages, data.message || 'Нет доступа. Откройте бота в Telegram и отправьте /start.');
+        return;
+      }
+      if(!resp.ok){
+        const data=await resp.json().catch(()=>({}));
+        document.getElementById('tr')?.remove();
+        appendBotError(messages, data.message || 'Ошибка запроса.');
+        return;
+      }
+      
+      const data=await resp.json();
+      document.getElementById('tr')?.remove();
+
+      if (data.file) {
+        appendBotFile(messages, data.file);
+        chat.history.push({role:'assistant', content:`[Файл отправлен: ${data.file.name}]`, is_file: true, file_data: data.file});
+      } else if(data.intent==='image'){
+        appendBotImage(messages, data.image_base64, data.prompt);
+        chat.history.push({role:'assistant', content: data.prompt, is_image: true, image_base64: data.image_base64});
+      } else {
+        const reply=data.reply||'';
+        appendBotTextAnimated(messages, reply);
+        chat.history.push({role:'assistant', content: reply});
+      }
+
+      saveActiveChat();
+      
+    }catch(e){
+      document.getElementById('tr')?.remove();
+      appendBotError(messages,'Не удалось связаться с сервером. Проверь подключение.');
+    }
   }
 
-  /* ================= Admin panel ================= */
-  const adminUsers = [
-    { user_id: 100482, status:'approved', total:342, day:12, week:58, limits:{},
-      models:[['GPT-5.5',180],['Gemini 3.1 Pro',102],['Llama 4',60]] },
-    { user_id: 100915, status:'pending',  total:0,   day:0,  week:0, limits:{}, models:[] },
-    { user_id: 101207, status:'approved', total:1180,day:40, week:210, limits:{'GPT-5.5':200},
-      models:[['Gemini 3.1 Flash Lite',640],['GPT-5.5',340],['Совет ИИ-моделей',200]] },
-    { user_id: 101339, status:'rejected', total:5,   day:0,  week:0, limits:{}, models:[['GPT-5.4 Mini',5]] },
-    { user_id: 101502, status:'approved', total:76,  day:3,  week:21, limits:{},
-      models:[['GLM-5.1',44],['Nemotron 3 Super',32]] },
-  ];
-  const statusLabel = s => ({approved:'Одобрен', pending:'Ожидает', rejected:'Отклонён'}[s]);
+  /* ================= Admin panel UI ================= */
+  let adminDataUsers = [];
 
   document.getElementById('profileBtn').onclick = () => { closeSideFn(); document.getElementById('profileScreen').classList.add('open'); };
   document.getElementById('closeProfile').onclick = () => { document.getElementById('profileScreen').classList.remove('open'); };
-  document.getElementById('openAdmin').onclick = () => { document.getElementById('adminScreen').classList.add('open'); adminRenderTab('users'); };
+  document.getElementById('openAdmin').onclick = () => { document.getElementById('adminScreen').classList.add('open'); adminLoadUsers(); };
   document.getElementById('closeAdmin').onclick = () => { document.getElementById('adminScreen').classList.remove('open'); };
+  
   document.querySelectorAll('.admin-tab').forEach(t => t.onclick = () => {
     document.querySelectorAll('.admin-tab').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
     adminRenderTab(t.dataset.tab);
   });
 
+  async function adminLoadUsers(){
+    document.getElementById('adminBody').innerHTML = '<div class="a-empty">Загрузка...</div>';
+    try{
+      const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+      const r=await fetch('/api/admin/users', {headers:{'Authorization':'tma '+initData}});
+      const d=await r.json();
+      if(d.ok){
+        adminDataUsers = d.users;
+        adminRenderTab('users');
+      } else {
+        document.getElementById('adminBody').innerHTML = `<div class="a-empty">Ошибка: ${d.error||'Не удалось'}</div>`;
+      }
+    }catch(e){
+      document.getElementById('adminBody').innerHTML = `<div class="a-empty">Сетевая ошибка</div>`;
+    }
+  }
+
   function adminRenderTab(tab){
     const body = document.getElementById('adminBody');
     body.classList.add('switching');
     setTimeout(() => { adminRenderTabInner(tab); body.classList.remove('switching'); }, 160);
   }
+  
+  const statusLabel = s => ({approved:'Одобрен', pending:'Ожидает', rejected:'Отклонён'}[s] || s);
+
   function adminRenderTabInner(tab){
     const body = document.getElementById('adminBody');
     if(tab === 'stats'){
       body.innerHTML = `
-        <div class="a-section-title">Статистика по пользователям — выберите, чтобы посмотреть модели</div>
+        <div class="a-section-title">Пользователи</div>
         <div class="a-card">
-          ${adminUsers.map(u => `
+          ${adminDataUsers.map(u => `
             <div class="a-row" onclick="adminUserDetail(${u.user_id})">
               <div class="a-avatar">${String(u.user_id).slice(-2)}</div>
               <div class="a-info">
                 <div class="a-name">ID ${u.user_id}</div>
                 <div class="a-meta"><span class="a-badge ${u.status}">${statusLabel(u.status)}</span></div>
               </div>
-              <div class="a-req"><b>${u.total}</b> запросов</div>
             </div>`).join('')}
         </div>`;
       return;
     }
-    const list = tab === 'pending' ? adminUsers.filter(u=>u.status==='pending') : adminUsers;
+    const list = tab === 'pending' ? adminDataUsers.filter(u=>u.status==='pending') : adminDataUsers;
     body.innerHTML = `
       <div class="a-section-title">${tab==='pending'?'Ожидают одобрения':'Все пользователи'}</div>
       <div class="a-card">
         ${list.length ? list.map(u=>{
           const actions = u.status==='approved'
-            ? `<button class="a-btn reject" onclick="event.stopPropagation();adminSetStatus(${u.user_id},'rejected')">Отозвать доступ</button>`
+            ? `<button class="a-btn reject" onclick="event.stopPropagation();adminDoAction(${u.user_id},'reject')">Отозвать</button>`
             : u.status==='pending'
-              ? `<button class="a-btn approve" onclick="event.stopPropagation();adminSetStatus(${u.user_id},'approved')">Одобрить</button><button class="a-btn reject" onclick="event.stopPropagation();adminSetStatus(${u.user_id},'rejected')">Отклонить</button>`
-              : `<button class="a-btn approve" onclick="event.stopPropagation();adminSetStatus(${u.user_id},'approved')">Одобрить</button>`;
+              ? `<button class="a-btn approve" onclick="event.stopPropagation();adminDoAction(${u.user_id},'approve')">Одобрить</button><button class="a-btn reject" onclick="event.stopPropagation();adminDoAction(${u.user_id},'reject')">Отклонить</button>`
+              : `<button class="a-btn approve" onclick="event.stopPropagation();adminDoAction(${u.user_id},'approve')">Одобрить</button>`;
           return `<div class="a-row" onclick="adminUserDetail(${u.user_id})">
             <div class="a-avatar">${String(u.user_id).slice(-2)}</div>
             <div class="a-info">
@@ -1828,34 +2252,40 @@
       </div>`;
   }
 
-  function adminSetStatus(userId, status){
-    const u = adminUsers.find(x=>x.user_id===userId);
-    if(!u) return;
-    u.status = status;
-    adminRenderTab(document.querySelector('.admin-tab.active').dataset.tab);
+  async function adminDoAction(userId, action){
+    try{
+      const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+      const r=await fetch('/api/admin/action', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
+        body:JSON.stringify({action, user_id: userId})
+      });
+      const d=await r.json();
+      if(d.ok){
+         const u = adminDataUsers.find(x=>x.user_id===userId);
+         if(u) u.status = action==='approve' ? 'approved' : 'rejected';
+         adminRenderTab(document.querySelector('.admin-tab.active').dataset.tab);
+      }
+    }catch(e){}
   }
 
-  function adminSetModelLimit(userId, model){
-    const u = adminUsers.find(x=>x.user_id===userId);
-    if(!u) return;
-    const input = document.querySelector(`.limitModelInput[data-model="${CSS.escape(model)}"]`);
-    const val = parseInt(input.value, 10);
-    if(isNaN(val) || val <= 0){ delete u.limits[model]; }
-    else { u.limits[model] = val; }
-    adminUserDetail(userId);
-  }
-  function adminClearModelLimit(userId, model){
-    const u = adminUsers.find(x=>x.user_id===userId);
-    if(!u) return;
-    delete u.limits[model];
-    adminUserDetail(userId);
-  }
-
-  function adminUserDetail(userId){
-    const u = adminUsers.find(x=>x.user_id===userId);
+  async function adminUserDetail(userId){
+    const u = adminDataUsers.find(x=>x.user_id===userId);
     if(!u) return;
     const body = document.getElementById('adminBody');
-    const maxM = Math.max(1, ...u.models.map(m=>m[1]));
+    body.innerHTML = `<div class="a-empty">Загрузка статистики...</div>`;
+    
+    let stats={total:0,day:0,week:0,models:{}};
+    try{
+      const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+      const r=await fetch(`/api/admin/users/${userId}/stats`, {headers:{'Authorization':'tma '+initData}});
+      const d=await r.json();
+      if(d.ok) stats=d.stats;
+    }catch(e){}
+
+    const modelEntries=Object.entries(stats.models||{}).sort((a,b)=>b[1]-a[1]);
+    const maxM = Math.max(1, ...(modelEntries.map(m=>m[1])));
+    
     body.innerHTML = `
       <div class="a-back-row" onclick="adminRenderTab(document.querySelector('.admin-tab.active').dataset.tab)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg>
@@ -1869,33 +2299,16 @@
         </div>
       </div>
       <div class="a-stat-grid">
-        <div class="a-stat-box"><div class="a-stat-num">${u.total}</div><div class="a-stat-lbl">Всего запросов</div></div>
-        <div class="a-stat-box"><div class="a-stat-num">${u.day}</div><div class="a-stat-lbl">За сегодня</div></div>
-        <div class="a-stat-box"><div class="a-stat-num">${u.week}</div><div class="a-stat-lbl">За неделю</div></div>
+        <div class="a-stat-box"><div class="a-stat-num">${stats.total||0}</div><div class="a-stat-lbl">Всего запросов</div></div>
+        <div class="a-stat-box"><div class="a-stat-num">${stats.day||0}</div><div class="a-stat-lbl">За сегодня</div></div>
+        <div class="a-stat-box"><div class="a-stat-num">${stats.week||0}</div><div class="a-stat-lbl">За неделю</div></div>
       </div>
-      <div class="a-section-title">Модели, которые использует этот пользователь</div>
+      <div class="a-section-title">Используемые модели</div>
       <div class="a-card" style="padding:6px 14px;">
-        ${u.models.length ? u.models.map(([m,c])=>`<div class="a-model-row"><div class="a-model-name">${m}</div><div class="a-model-bar-wrap"><div class="a-model-bar" style="width:${Math.round(c/maxM*100)}%"></div></div><div class="a-model-cnt">${c}</div></div>`).join('') : `<div class="a-empty">Нет активности</div>`}
-      </div>
-      <div class="a-section-title">Лимиты по моделям (в день)</div>
-      <div class="a-card" style="padding:6px 14px;">
-        ${ALL_MODEL_NAMES.map(m => `
-          <div class="a-model-row" style="gap:8px;">
-            <div class="a-model-name" style="width:auto; flex:1;">${m}</div>
-            <span style="font-size:11.5px; color:var(--ink-faint); flex-shrink:0;">${u.limits[m] ? u.limits[m]+'/день' : 'без лимита'}</span>
-            <input type="number" min="0" class="limitModelInput" data-model="${m}" placeholder="лимит"
-              value="${u.limits[m] || ''}"
-              style="width:74px; flex-shrink:0; border:none; background:rgba(128,120,100,0.12); border-radius:10px; padding:7px 9px; font-size:12.5px; color:var(--ink); font-family:inherit;">
-            <button class="a-btn approve" style="padding:6px 9px; flex-shrink:0;" onclick="adminSetModelLimit(${u.user_id}, '${m}')">✓</button>
-            ${u.limits[m] ? `<button class="a-btn reject" style="padding:6px 9px; flex-shrink:0;" onclick="adminClearModelLimit(${u.user_id}, '${m}')">✕</button>` : ''}
-          </div>`).join('')}
+        ${modelEntries.length ? modelEntries.map(([m,c])=>`<div class="a-model-row"><div class="a-model-name">${m}</div><div class="a-model-bar-wrap"><div class="a-model-bar" style="width:${Math.round(c/maxM*100)}%"></div></div><div class="a-model-cnt">${c}</div></div>`).join('') : `<div class="a-empty">Нет активности</div>`}
       </div>`;
   }
 
-  /* ================= Init ================= */
-  renderSidebar();
-  renderMessages();
-  syncMessagesBottomInset();
 </script>
 </body>
 </html>
