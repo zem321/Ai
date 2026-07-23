@@ -129,21 +129,33 @@
   .pill-group .icon-btn.dk svg{width:14px; height:14px;}
   .pill-group .icon-btn:not(.dk):hover{background:rgba(var(--neutral-rgb),0.06);}
   .pill-group .icon-btn.dk:active{transform:scale(.86);}
-  @media (prefers-color-scheme: light){
+  #menuBtn, #ghostBtn, #incognitoCloseBtn, #pillGroup{
+    background:var(--glass-a-grad);
+    backdrop-filter:var(--glass-a-blur); -webkit-backdrop-filter:var(--glass-a-blur);
+    border:1px solid rgba(0,0,0,.08);
+    box-shadow:0 8px 24px rgba(0,0,0,.12), 0 2px 5px rgba(0,0,0,.06), inset 0 1px 0 rgba(255,255,255,.88);
+  }
+  #menuBtn, #ghostBtn, #incognitoCloseBtn{width:48px; height:48px;}
+  #menuBtn svg{width:23px; height:23px;}
+  #pillGroup{height:48px; padding:5px 7px; gap:4px; border-radius:24px;}
+  #pillGroup .icon-btn, #pillGroup .icon-btn.dk{
+    width:38px; height:38px; background:transparent; color:var(--ink);
+  }
+  #pillGroup .icon-btn.dk svg{width:20px; height:20px;}
+  #pillGroup #moreBtn svg{width:20px; height:20px;}
+  @media (prefers-color-scheme: dark){
     #menuBtn, #ghostBtn, #incognitoCloseBtn, #pillGroup{
-      background:var(--glass-a-grad);
-      backdrop-filter:var(--glass-a-blur); -webkit-backdrop-filter:var(--glass-a-blur);
-      border:1px solid rgba(0,0,0,.055);
-      box-shadow:0 6px 20px rgba(0,0,0,.09), 0 1px 3px rgba(0,0,0,.045), inset 0 1px 0 rgba(255,255,255,.88);
+      border:none; box-shadow:var(--glass-a-shadow);
     }
-    #menuBtn, #ghostBtn, #incognitoCloseBtn{width:48px; height:48px;}
-    #menuBtn svg{width:23px; height:23px;}
-    #pillGroup{height:48px; padding:5px 7px; gap:4px; border-radius:24px;}
-    #pillGroup .icon-btn, #pillGroup .icon-btn.dk{
-      width:38px; height:38px; background:transparent; color:var(--ink);
+    #menuBtn, #ghostBtn, #incognitoCloseBtn{width:38px; height:38px;}
+    #menuBtn svg{width:17px; height:17px;}
+    #pillGroup{height:auto; padding:4px; gap:2px; border-radius:22px;}
+    #pillGroup .icon-btn{width:32px; height:32px;}
+    #pillGroup .icon-btn.dk{
+      width:30px; height:30px; background:var(--ink); color:var(--bg);
     }
-    #pillGroup .icon-btn.dk svg{width:20px; height:20px;}
-    #pillGroup #moreBtn svg{width:20px; height:20px;}
+    #pillGroup .icon-btn.dk svg{width:14px; height:14px;}
+    #pillGroup #moreBtn svg{width:17px; height:17px;}
   }
 
   .menu-pop{position:absolute; top:calc(100% + 8px); right:0; width:200px; border-radius:18px; padding:6px;
