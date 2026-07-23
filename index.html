@@ -129,6 +129,22 @@
   .pill-group .icon-btn.dk svg{width:14px; height:14px;}
   .pill-group .icon-btn:not(.dk):hover{background:rgba(var(--neutral-rgb),0.06);}
   .pill-group .icon-btn.dk:active{transform:scale(.86);}
+  @media (prefers-color-scheme: light){
+    #menuBtn, #ghostBtn, #incognitoCloseBtn, #pillGroup{
+      background:var(--glass-a-grad);
+      backdrop-filter:var(--glass-a-blur); -webkit-backdrop-filter:var(--glass-a-blur);
+      border:1px solid rgba(0,0,0,.055);
+      box-shadow:0 6px 20px rgba(0,0,0,.09), 0 1px 3px rgba(0,0,0,.045), inset 0 1px 0 rgba(255,255,255,.88);
+    }
+    #menuBtn, #ghostBtn, #incognitoCloseBtn{width:48px; height:48px;}
+    #menuBtn svg{width:23px; height:23px;}
+    #pillGroup{height:48px; padding:5px 7px; gap:4px; border-radius:24px;}
+    #pillGroup .icon-btn, #pillGroup .icon-btn.dk{
+      width:38px; height:38px; background:transparent; color:var(--ink);
+    }
+    #pillGroup .icon-btn.dk svg{width:20px; height:20px;}
+    #pillGroup #moreBtn svg{width:20px; height:20px;}
+  }
 
   .menu-pop{position:absolute; top:calc(100% + 8px); right:0; width:200px; border-radius:18px; padding:6px;
     opacity:0; visibility:hidden; transform:translateY(-6px) scale(.97); transform-origin:top right;
@@ -408,7 +424,7 @@
 
     <header class="topbar">
       <button class="icon-btn glass" id="menuBtn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 8h14M5 16h10"/></svg>
       </button>
       <div class="topbar-title" id="topbarTitle">Анонимный чат</div>
       <div class="top-actions" id="topActions">
@@ -417,7 +433,7 @@
         </button>
         <div class="pill-group glass" id="pillGroup">
           <button class="icon-btn dk" id="newChatBtn2" title="Новый чат">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5H7a3 3 0 00-3 3v9a3 3 0 003 3h9a3 3 0 003-3v-6"/><path d="M10 14l.7-3.2 6.1-6.1a1.9 1.9 0 012.7 2.7l-6.1 6.1L10 14z"/></svg>
           </button>
           <button class="icon-btn" id="moreBtn" title="Ещё">
             <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/></svg>
