@@ -570,13 +570,10 @@
           <button class="pill-plus glass-pill" onclick="openFilePicker()" title="Прикрепить">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
-          
-          <!-- ЗДЕСЬ ИСПРАВЛЕНА КНОПКА ВЫБОРА МОДЕЛИ -->
           <button class="pill-model glass-pill" id="model-btn" onclick="openSheet()">
             <span id="model-label">Gemini 3.1 Flash Lite</span>
             <span class="chev"></span>
           </button>
-          
           <div class="tool-spacer"></div>
           <button class="send-btn" id="send-btn" disabled onclick="send()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
@@ -1298,7 +1295,7 @@
   } else if(chatOrder.length > 0){
     currentChatId = chatOrder[0];
   } else {
-    createChat(false); // creates c1 silently without rendering immediately
+    createChat(false);
   }
 
   function saveActiveChat(){
@@ -1319,7 +1316,6 @@
     const q = (document.getElementById('searchInput').value || '').toLowerCase();
     const mount = document.getElementById('sideListMount');
     
-    // Simplistic grouping by today vs earlier
     const now = new Date();
     const todayStr = now.toDateString();
     
@@ -1728,43 +1724,51 @@
       </div>
     `;
     msgEl.appendChild(b);
+    syncMessagesBottomInset(); // Move spacer after 'b'
 
     const textEl=b.querySelector('.ai-text');
     const actionsEl=b.querySelector('.action-row');
     const m=document.getElementById('messages');
+    
     let isTyping=true;
-    let userHasScrolledUp=false;
+    let isLocked=true; // Start locked to the bottom
+    let isUserInteracting=false;
 
-    const onWheel = (e) => { if(!isTyping||!m)return; if(e.deltaY < 0) userHasScrolledUp = true; };
-    const onTouchStart = (e) => { if(!isTyping||!m)return; m.dataset.touchStartY = e.touches[0].clientY; };
-    const onTouchMove = (e) => {
-      if(!isTyping||!m)return;
-      const startY = parseFloat(m.dataset.touchStartY || 0);
-      const currentY = e.touches[0].clientY;
-      if (currentY > startY + 2) userHasScrolledUp = true;
-      m.dataset.touchStartY = currentY;
+    function checkLock() {
+      if(!m) return;
+      const dist = m.scrollHeight - m.clientHeight - m.scrollTop;
+      // If user is within 40px of bottom, snap and lock
+      if (dist < 40) {
+        isLocked = true;
+      } else {
+        isLocked = false;
+      }
+    }
+
+    const onTouchStart = () => { isUserInteracting = true; };
+    const onTouchEnd = () => { isUserInteracting = false; checkLock(); };
+    const onWheel = (e) => { 
+      if(e.deltaY < 0) { isLocked = false; }
+      else { checkLock(); }
     };
     const onScroll = () => {
-      if(!isTyping||!m)return;
-      const isAtBottom=(m.scrollHeight-m.clientHeight-m.scrollTop)<140;
-      if (isAtBottom) userHasScrolledUp = false;
+      if(isUserInteracting) {
+        checkLock();
+      }
     };
 
     if(m){
-      m.addEventListener('wheel',onWheel,{passive:true});
-      m.addEventListener('touchstart',onTouchStart,{passive:true});
-      m.addEventListener('touchmove',onTouchMove,{passive:true});
-      m.addEventListener('scroll',onScroll,{passive:true});
+      m.style.scrollBehavior = 'auto'; // Disable CSS smooth scroll for frame-by-frame accuracy
+      m.addEventListener('touchstart', onTouchStart, {passive:true});
+      m.addEventListener('touchend', onTouchEnd, {passive:true});
+      m.addEventListener('mousedown', onTouchStart, {passive:true});
+      m.addEventListener('mouseup', onTouchEnd, {passive:true});
+      m.addEventListener('wheel', onWheel, {passive:true});
+      m.addEventListener('scroll', onScroll, {passive:true});
     }
-
-    function smoothScrollLoop(){
-      if(m&&!userHasScrolledUp)scrollElementAboveInputNow(b,18);
-      if(isTyping)requestAnimationFrame(smoothScrollLoop);
-    }
-    if(m)requestAnimationFrame(smoothScrollLoop);
 
     const totalChars=text.length;
-    const durationMs=Math.max(totalChars*20, 800);
+    const durationMs=Math.max(totalChars*15, 800);
     const startTime=performance.now();
     let lastI=0;
 
@@ -1781,6 +1785,10 @@
       if(i>lastI){
         lastI=i;
         pre.textContent=text.slice(0,i);
+        
+        if(isLocked && m){
+          m.scrollTop = m.scrollHeight - m.clientHeight;
+        }
       }
 
       if(progress<1){
@@ -1789,15 +1797,22 @@
         textEl.innerHTML=md(text);
         isTyping=false;
         if(m){
-          m.removeEventListener('wheel',onWheel);
-          m.removeEventListener('touchstart',onTouchStart);
-          m.removeEventListener('touchmove',onTouchMove);
-          m.removeEventListener('scroll',onScroll);
+          m.removeEventListener('touchstart', onTouchStart);
+          m.removeEventListener('touchend', onTouchEnd);
+          m.removeEventListener('mousedown', onTouchStart);
+          m.removeEventListener('mouseup', onTouchEnd);
+          m.removeEventListener('wheel', onWheel);
+          m.removeEventListener('scroll', onScroll);
+          m.style.scrollBehavior = ''; // Restore CSS smooth scroll
+          
+          if(isLocked){
+            syncMessagesBottomInset();
+            m.scrollTop = m.scrollHeight - m.clientHeight;
+          }
         }
         if(actionsEl)actionsEl.style.display='flex';
         b.querySelector('.thinking-row').onclick = (e) => e.currentTarget.classList.toggle('open');
         wireActionRow(b, text);
-        scrollElementAboveInput(b,18,60);
       }
     }
     requestAnimationFrame(type);
@@ -1962,7 +1977,6 @@
   let model = 'gemini/gemini-3.1-flash-lite';
   const modelLabel = document.getElementById('model-label');
 
-  // Убираем костыль с native-select. Теперь работает только шторка.
   function openGroupPicker() {
     openSheet();
   }
