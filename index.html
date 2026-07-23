@@ -382,8 +382,6 @@
   .send-btn:disabled{background:rgba(128,120,100,0.16); color:var(--ink-faint); opacity:.8; cursor:default;}
   .send-btn svg{width:17px; height:17px;}
 
-  .native-select{position:absolute; opacity:0; pointer-events:none; width:1px; height:1px;}
-
   /* ---------------- Model sheet ---------------- */
   .sheet-scrim{position:fixed; inset:0; background:transparent; backdrop-filter:none; -webkit-backdrop-filter:none;
     z-index:50; opacity:0; pointer-events:none; transition:opacity .36s var(--ease);}
@@ -484,7 +482,6 @@
     .input-card{max-width:760px; margin:0 auto;}
   }
 </style>
-<!-- Подключение Telegram WebApp SDK для аутентификации -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -573,16 +570,13 @@
           <button class="pill-plus glass-pill" onclick="openFilePicker()" title="Прикрепить">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
-          <button class="pill-model glass-pill" id="model-btn" onclick="openGroupPicker()">
+          
+          <!-- ЗДЕСЬ ИСПРАВЛЕНА КНОПКА ВЫБОРА МОДЕЛИ -->
+          <button class="pill-model glass-pill" id="model-btn" onclick="openSheet()">
             <span id="model-label">Gemini 3.1 Flash Lite</span>
             <span class="chev"></span>
           </button>
-          <select class="native-select" id="group-select" onchange="onGroupChange(this)">
-            <option value="" disabled selected></option>
-            <option value="gemini">Gemini</option>
-            <option value="other">Other Models</option>
-          </select>
-          <select class="native-select" id="model-select" onchange="onModelChange(this)"></select>
+          
           <div class="tool-spacer"></div>
           <button class="send-btn" id="send-btn" disabled onclick="send()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
@@ -1967,24 +1961,10 @@
 
   let model = 'gemini/gemini-3.1-flash-lite';
   const modelLabel = document.getElementById('model-label');
-  const groupSelect = document.getElementById('group-select');
-  const modelSelect = document.getElementById('model-select');
 
-  function openGroupPicker(){
-    if(isIOS){ groupSelect.selectedIndex = 0; groupSelect.style.pointerEvents = 'auto'; groupSelect.focus(); groupSelect.click(); }
-    else { openSheet(); }
-  }
-  function onGroupChange(sel){
-    sel.style.pointerEvents = 'none';
-    const key = sel.value; sel.selectedIndex = 0;
-    if(!key) return;
-    modelSelect.innerHTML = '<option value="" disabled selected></option>' + GROUP_MODELS[key].map(m=>`<option value="${m[0]}">${m[1]}</option>`).join('');
-    modelSelect.style.pointerEvents = 'auto'; modelSelect.focus(); modelSelect.click();
-  }
-  function onModelChange(sel){
-    sel.style.pointerEvents = 'none';
-    if(!sel.value) return;
-    model = sel.value; modelLabel.textContent = sel.options[sel.selectedIndex].text;
+  // Убираем костыль с native-select. Теперь работает только шторка.
+  function openGroupPicker() {
+    openSheet();
   }
 
   const sheet = document.getElementById('sheet');
@@ -2074,12 +2054,10 @@
     
     const chat = activeChat();
     
-    // Смена заголовка для новых чатов (генерация авто-заголовка)
     if(chat.history.length === 0 && currentChatId !== 'incognito' && text){
       chat.title = text.slice(0, 44) + (text.length > 44 ? '…' : '');
     }
     
-    // Store original files in local history to re-render attachments immediately
     chat.history.push({role:'user', content: text, files: files});
     saveActiveChat();
     renderSidebar();
@@ -2117,9 +2095,7 @@
 
     const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
     
-    // Отправляем на бэкенд
     try{
-      // Extract history formatted for API (system/user/assistant strictly)
       const apiHistory = chat.history.slice(0, -1).map(h => ({role: h.role, content: h.content}));
 
       const resp=await fetch('/api/chat',{
