@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Ассистент</title>
-<link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
-<link href="[https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600;700&display=swap](https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600;700&display=swap)" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
     --ease: cubic-bezier(0.22,1,0.36,1);
@@ -482,7 +482,7 @@
     .input-card{max-width:760px; margin:0 auto;}
   }
 </style>
-<script src="[https://telegram.org/js/telegram-web-app.js](https://telegram.org/js/telegram-web-app.js)"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
 <div class="app">
@@ -570,10 +570,12 @@
           <button class="pill-plus glass-pill" onclick="openFilePicker()" title="Прикрепить">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
+          
           <button class="pill-model glass-pill" id="model-btn" onclick="openSheet()">
             <span id="model-label">Gemini 3.1 Flash Lite</span>
             <span class="chev"></span>
           </button>
+          
           <div class="tool-spacer"></div>
           <button class="send-btn" id="send-btn" disabled onclick="send()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
@@ -855,6 +857,11 @@
           break;
         }
         code.push(line);
+      }
+      if (!closed) {
+        out.push(...original);
+        i = j - 1;
+        continue;
       }
       if (normalizeCodeLang(lang) === 'markdown') {
         let markdownLines = code.slice();
@@ -1713,14 +1720,14 @@
       </div>
     `;
     msgEl.appendChild(b);
-    syncMessagesBottomInset(); // Убеждаемся что спейсер сдвинут в самый низ
+    syncMessagesBottomInset();
 
     const textEl=b.querySelector('.ai-text');
     const actionsEl=b.querySelector('.action-row');
     const m=document.getElementById('messages');
     
     let isTyping=true;
-    let isLocked=true; // Скролл изначально прикреплен к низу
+    let isLocked=true; // Start locked to the bottom
     let isUserInteracting=false;
 
     function checkLock() {
@@ -1747,8 +1754,7 @@
     };
 
     if(m){
-      // Отключаем плавную анимацию браузера для мгновенного следования пиксель в пиксель
-      m.style.scrollBehavior = 'auto'; 
+      m.style.scrollBehavior = 'auto'; // Отключаем плавную анимацию для мгновенного следования
       m.addEventListener('touchstart', onTouchStart, {passive:true});
       m.addEventListener('touchend', onTouchEnd, {passive:true});
       m.addEventListener('mousedown', onTouchStart, {passive:true});
@@ -1790,7 +1796,7 @@
           m.removeEventListener('mouseup', onTouchEnd);
           m.removeEventListener('wheel', onWheel);
           m.removeEventListener('scroll', onScroll);
-          m.style.scrollBehavior = ''; // Включаем обратно
+          m.style.scrollBehavior = ''; 
           
           if(isLocked){
             syncMessagesBottomInset();
@@ -1911,7 +1917,7 @@
   };
   document.getElementById('menuShare').onclick = () => {
     menuPop.classList.remove('open');
-    const fakeLink = '[https://assistant.app/chat/](https://assistant.app/chat/)' + currentChatId;
+    const fakeLink = 'https://assistant.app/chat/' + currentChatId;
     if(navigator.clipboard) navigator.clipboard.writeText(fakeLink);
     showToast('Ссылка на чат скопирована');
   };
