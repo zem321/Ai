@@ -154,9 +154,12 @@
   .thinking-body{font-size:13px; color:var(--ink-faint); line-height:1.55; max-height:0; overflow:hidden; transition:max-height .35s var(--spring); padding-left:23px; border-left:1.5px solid var(--border); margin-left:7px;}
   .thinking-row.open + .thinking-body{max-height:200px;}
   .ai-text{font-family:"Source Serif 4", Georgia, serif; font-size:16.5px; line-height:1.65; color:var(--ink); word-break:break-word;}
-  .ai-text.is-streaming{overflow:hidden; contain:paint;}
-  .ai-text .stream-chunk{opacity:0; filter:blur(2.4px); transform:translateY(2px); transition:opacity .22s cubic-bezier(.22,.75,.26,1), filter .22s cubic-bezier(.22,.75,.26,1), transform .22s cubic-bezier(.22,.75,.26,1); will-change:opacity,filter,transform;}
-  .ai-text .stream-chunk.is-visible{opacity:1; filter:blur(0); transform:translateY(0);}
+  .ai-text.is-streaming{
+    --stream-tail:42px;
+    overflow:hidden; contain:paint; will-change:height;
+    -webkit-mask-image:linear-gradient(to bottom,#000 0,#000 calc(100% - var(--stream-tail)),transparent 100%);
+    mask-image:linear-gradient(to bottom,#000 0,#000 calc(100% - var(--stream-tail)),transparent 100%);
+  }
   .typing-dots{display:flex; gap:4px; padding:4px 0;}
   .typing-dots span{width:6px; height:6px; border-radius:50%; background:var(--ink-faint); animation:dot 1.2s infinite;}
   .typing-dots span:nth-child(2){animation-delay:.15s;} .typing-dots span:nth-child(3){animation-delay:.3s;}
@@ -1578,62 +1581,30 @@
 
     textEl.innerHTML = md(text);
     textEl.classList.add('is-streaming');
-
-    const chunks = [];
-    const walker = document.createTreeWalker(
-      textEl,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode(node) {
-          return /\S/.test(node.nodeValue || '')
-            ? NodeFilter.FILTER_ACCEPT
-            : NodeFilter.FILTER_REJECT;
-        }
-      }
-    );
-    const textNodes = [];
-    while (walker.nextNode()) textNodes.push(walker.currentNode);
-
-    textNodes.forEach(node => {
-      const value = node.nodeValue || '';
-      const fragment = document.createDocumentFragment();
-      const parts = value.match(/\s+|\S+\s*/g) || [value];
-      parts.forEach(part => {
-        if (!/\S/.test(part)) {
-          fragment.appendChild(document.createTextNode(part));
-          return;
-        }
-        const span = document.createElement('span');
-        span.className = 'stream-chunk';
-        span.textContent = part;
-        fragment.appendChild(span);
-        chunks.push(span);
-      });
-      node.replaceWith(fragment);
-    });
-
-    const fullHeight = Math.ceil(textEl.scrollHeight);
+    let fullHeight = Math.ceil(textEl.scrollHeight);
     textEl.style.height = '0px';
 
     let isLocked = true;
     let isUserInteracting = false;
 
-    function checkLock() {
+    function updateFollowState() {
       if (!m) return;
       const dist = m.scrollHeight - m.clientHeight - m.scrollTop;
-      isLocked = dist < 44;
+      if (dist <= 56) {
+        isLocked = true;
+      } else if (isUserInteracting) {
+        isLocked = false;
+      }
     }
 
     const onTouchStart = () => { isUserInteracting = true; };
-    const onTouchEnd = () => { isUserInteracting = false; checkLock(); };
+    const onTouchEnd = () => { isUserInteracting = false; updateFollowState(); };
     const onWheel = (e) => { 
       if (e.deltaY < 0) { isLocked = false; }
-      else { checkLock(); }
+      else { requestAnimationFrame(updateFollowState); }
     };
     const onScroll = () => {
-      if (isUserInteracting) {
-        checkLock();
-      }
+      updateFollowState();
     };
 
     if (m) {
@@ -1646,17 +1617,13 @@
       m.addEventListener('scroll', onScroll, {passive:true});
     }
 
-    let totalChars = 0;
-    const revealAt = chunks.map(chunk => {
-      totalChars += chunk.textContent.length;
-      return totalChars;
-    });
-    const charsPerMs = 0.42;
+    const startDelay = 70;
+    const accelerationDuration = 260;
+    const revealSpeed = 0.16;
+    const tailSize = 42;
+    const tailSettleDuration = 380;
     let startTime = null;
     let lastTime = null;
-    let visibleCount = 0;
-    let targetHeight = 0;
-    let animatedHeight = 0;
     let finishedAt = null;
 
     function type(now) {
@@ -1665,54 +1632,52 @@
       const elapsed = now - startTime;
       const dt = Math.min(34, now - lastTime);
       lastTime = now;
-      const targetChars = Math.max(1, Math.floor(elapsed * charsPerMs));
 
-      while (visibleCount < chunks.length && revealAt[visibleCount] <= targetChars) {
-        chunks[visibleCount].classList.add('is-visible');
-        visibleCount++;
+      const measuredHeight = Math.ceil(textEl.scrollHeight);
+      if (measuredHeight > fullHeight) {
+        fullHeight = measuredHeight;
+        finishedAt = null;
       }
 
-      if (visibleCount === 0 && chunks.length) {
-        chunks[0].classList.add('is-visible');
-        visibleCount = 1;
-      }
-
-      if (visibleCount) {
-        const tailRect = chunks[visibleCount - 1].getBoundingClientRect();
-        const textRect = textEl.getBoundingClientRect();
-        targetHeight = Math.min(fullHeight, Math.ceil(tailRect.bottom - textRect.top + 2));
+      const revealElapsed = Math.max(0, elapsed - startDelay);
+      let revealHeight = 0;
+      if (revealElapsed < accelerationDuration) {
+        revealHeight = revealSpeed * revealElapsed * revealElapsed / (2 * accelerationDuration);
       } else {
-        targetHeight = fullHeight;
+        revealHeight = revealSpeed * (revealElapsed - accelerationDuration / 2);
       }
+      revealHeight = Math.min(fullHeight, revealHeight);
+      textEl.style.height = revealHeight + 'px';
 
-      const heightEase = 1 - Math.exp(-dt / 92);
-      animatedHeight += (targetHeight - animatedHeight) * heightEase;
-      if (Math.abs(targetHeight - animatedHeight) < 0.15) animatedHeight = targetHeight;
-      textEl.style.height = Math.min(fullHeight, animatedHeight) + 'px';
+      const revealDone = revealHeight >= fullHeight - 0.1;
+      if (revealDone && !finishedAt) finishedAt = now;
+
+      let tailDone = false;
+      if (finishedAt) {
+        const tailProgress = Math.min(1, (now - finishedAt) / tailSettleDuration);
+        const tailEase = tailProgress * tailProgress * (3 - 2 * tailProgress);
+        const currentTail = tailSize * (1 - tailEase);
+        textEl.style.setProperty('--stream-tail', currentTail + 'px');
+        tailDone = tailProgress >= 1;
+      }
 
       if (isLocked && m) {
         const maxScroll = m.scrollHeight - m.clientHeight;
-        const scrollEase = 1 - Math.exp(-dt / 115);
+        const scrollEase = 1 - Math.exp(-dt / 145);
         const nextScroll = m.scrollTop + (maxScroll - m.scrollTop) * scrollEase;
         m.scrollTop = Math.abs(maxScroll - nextScroll) < 0.15 ? maxScroll : nextScroll;
       }
 
-      const revealDone = visibleCount >= chunks.length;
-      const heightDone = Math.abs(fullHeight - animatedHeight) < 0.5;
       const scrollDone = !isLocked || !m || Math.abs((m.scrollHeight - m.clientHeight) - m.scrollTop) < 0.5;
 
-      if (revealDone && !finishedAt) {
-        finishedAt = now;
-        targetHeight = fullHeight;
-      }
-
-      if (!revealDone || !heightDone || !scrollDone || (finishedAt && now - finishedAt < 230)) {
+      if (!revealDone || !tailDone || !scrollDone) {
         requestAnimationFrame(type);
         return;
       }
 
       textEl.style.height = '';
       textEl.style.overflow = '';
+      textEl.style.removeProperty('--stream-tail');
       textEl.classList.remove('is-streaming');
 
       if (m) {
