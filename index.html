@@ -1551,9 +1551,9 @@
   }
 
   function appendBotTextAnimated(msgEl, text) {
-    const b=document.createElement('div');
-    b.className='ai-block';
-    b.innerHTML=`
+    const b = document.createElement('div');
+    b.className = 'ai-block';
+    b.innerHTML = `
       <div class="thinking-row">
         <svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
         Ответ сгенерирован
@@ -1578,7 +1578,7 @@
     let isUserInteracting = false;
 
     function checkLock() {
-      if(!m) return;
+      if (!m) return;
       const dist = m.scrollHeight - m.clientHeight - m.scrollTop;
       if (dist < 40) {
         isLocked = true;
@@ -1590,16 +1590,16 @@
     const onTouchStart = () => { isUserInteracting = true; };
     const onTouchEnd = () => { isUserInteracting = false; checkLock(); };
     const onWheel = (e) => { 
-      if(e.deltaY < 0) { isLocked = false; }
+      if (e.deltaY < 0) { isLocked = false; }
       else { checkLock(); }
     };
     const onScroll = () => {
-      if(isUserInteracting) {
+      if (isUserInteracting) {
         checkLock();
       }
     };
 
-    if(m) {
+    if (m) {
       m.style.scrollBehavior = 'auto'; 
       m.addEventListener('touchstart', onTouchStart, {passive:true});
       m.addEventListener('touchend', onTouchEnd, {passive:true});
@@ -1638,26 +1638,42 @@
     if (safeIndices.length === 0) safeIndices.push(htmlLen - 1);
 
     const totalChars = safeIndices.length;
-    const durationMs = Math.max(totalChars * 12, 800);
-    const startTime = performance.now();
+    
+    // СКОРОСТЬ КАК В CHATGPT
+    // 0.35 символов в миллисекунду = ~350 символов в секунду (плавный, но быстрый стриминг токенов)
+    const charsPerMs = 0.35; 
+    let startTime = null;
     let lastSafeIdx = -1;
 
     function type(now) {
+      if (!startTime) startTime = now;
       const elapsed = now - startTime;
-      const progress = Math.min(elapsed / durationMs, 1);
       
-      if (progress < 1) {
-          const currentSafeIdx = Math.floor(progress * (totalChars - 1));
-          
-          if (currentSafeIdx > lastSafeIdx) {
-              lastSafeIdx = currentSafeIdx;
-              const htmlIdx = safeIndices[currentSafeIdx];
-              textEl.innerHTML = fullHtml.slice(0, htmlIdx + 1);
-              
-              if (isLocked && m) {
-                  m.scrollTop = m.scrollHeight - m.clientHeight;
-              }
+      let targetIdx = Math.floor(elapsed * charsPerMs);
+      if (targetIdx >= totalChars) targetIdx = totalChars - 1;
+      
+      // Рендер нового текста
+      if (targetIdx > lastSafeIdx) {
+          lastSafeIdx = targetIdx;
+          const htmlIdx = safeIndices[lastSafeIdx];
+          textEl.innerHTML = fullHtml.slice(0, htmlIdx + 1);
+      }
+      
+      // ИДЕАЛЬНО ПЛАВНЫЙ СКРОЛЛИНГ (Lerp)
+      let maxScroll = 0;
+      if (isLocked && m) {
+          maxScroll = m.scrollHeight - m.clientHeight;
+          if (m.scrollTop < maxScroll) {
+              // Интерполяция на коэффициент 0.25 создает эффект мягкого скольжения вниз
+              m.scrollTop += Math.ceil((maxScroll - m.scrollTop) * 0.25);
           }
+      }
+
+      // Цикл продолжается пока либо не вывелся весь текст, либо скролл не догнал дно контейнера
+      const animationDone = lastSafeIdx >= totalChars - 1;
+      const scrollDone = !isLocked || !m || Math.abs(maxScroll - m.scrollTop) <= 1;
+
+      if (!animationDone || !scrollDone) {
           requestAnimationFrame(type);
       } else {
           textEl.innerHTML = fullHtml;
@@ -1683,6 +1699,7 @@
           wireActionRow(b, text);
       }
     }
+    
     requestAnimationFrame(type);
   }
 
