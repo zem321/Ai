@@ -7,168 +7,127 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --ease: cubic-bezier(0.22,1,0.36,1);
-    --spring: cubic-bezier(.32,.72,0,1);
-    --bg: #F6F6F2;
-    --bg-elevated: #F3F3F0;
-    --side-active: #E7E6E1;
-    --ink: #2C2A26;
-    --ink-soft: #8A857C;
-    --ink-faint: #B7B2A6;
-    --bubble-user: #EFEDEA;
-    --coral: #D97757;
-    --border: rgba(44,40,30,0.09);
-    --scrim: rgba(30,28,22,0.20);
-    --sidebar-shadow: 0 20px 50px rgba(44,40,30,0.20);
-    --sidebar-w: min(86vw, 330px);
+  :root{
+    --ease: cubic-bezier(0.22,1,0.36,1); --spring: cubic-bezier(.32,.72,0,1);
+    --bg:#F6F6F2; --bg-elevated:#F3F3F0; --side-active:#E7E6E1;
+    --ink:#2C2A26; --ink-soft:#8A857C; --ink-faint:#B7B2A6;
+    --bubble-user:#EFEDEA; --coral:#D97757; --border:rgba(44,40,30,0.09);
+    --scrim:rgba(30,28,22,0.20); --sidebar-shadow:0 20px 50px rgba(44,40,30,0.20); --sidebar-w:min(86vw, 330px);
     --reveal-tint: rgba(255,255,255,0.45);
-    --glass-a-grad: linear-gradient(160deg, rgba(255,255,254,.94) 0%, rgba(254,253,250,.90) 48%, rgba(255,255,254,.93) 100%);
+    --glass-a-grad: linear-gradient(160deg,rgba(255,255,254,.94) 0%,rgba(254,253,250,.90) 48%,rgba(255,255,254,.93) 100%);
     --glass-a-blur: blur(2px) saturate(102%) brightness(.90);
     --glass-a-shadow: 0 1px 2px rgba(0,0,0,.008), inset 0 1px 0 rgba(255,255,255,.88), inset 0 -0.5px 0 rgba(0,0,0,.010);
-    --glass-b-grad: linear-gradient(160deg, rgba(236,235,231,.90) 0%, rgba(231,230,225,.84) 48%, rgba(237,236,231,.88) 100%);
+    --glass-b-grad: linear-gradient(160deg,rgba(236,235,231,.90) 0%,rgba(231,230,225,.84) 48%,rgba(237,236,231,.88) 100%);
     --glass-b-blur: blur(2px) saturate(102%) brightness(.90);
     --glass-b-shadow: 0 1px 1px rgba(0,0,0,.008), inset 0 1px 0 rgba(255,255,255,.62), inset 0 -0.5px 0 rgba(0,0,0,.010);
-    --ease-drawer: cubic-bezier(0.4, 0.0, 0.2, 1);
-    font-family: "Inter", -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
+    --ease-drawer: cubic-bezier(0.4, 0.0, 0.2, 1); font-family:"Inter", -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #111110;
-      --bg-elevated: #242424;
-      --side-active: #2E2E2E;
-      --ink: #EBEBEB;
-      --ink-soft: #A0A0A0;
-      --ink-faint: #6E6E6E;
-      --bubble-user: #2E2E2E;
-      --coral: #E0876A;
-      --border: rgba(255,255,255,0.09);
-      --scrim: rgba(0,0,0,0.45);
-      --sidebar-shadow: 0 20px 50px rgba(0,0,0,0.55);
-      --reveal-tint: rgba(0,0,0,0.35);
-      --glass-a-grad: linear-gradient(160deg, rgba(42,42,39,.84) 0%, rgba(34,34,32,.76) 48%, rgba(42,42,39,.80) 100%);
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#111110; --bg-elevated:#242424; --side-active:#2E2E2E; --ink:#EBEBEB; --ink-soft:#A0A0A0; --ink-faint:#6E6E6E;
+      --bubble-user:#2E2E2E; --coral:#E0876A; --border:rgba(255,255,255,0.09);
+      --scrim:rgba(0,0,0,0.45); --sidebar-shadow:0 20px 50px rgba(0,0,0,0.55); --reveal-tint: rgba(0,0,0,0.35);
+      --glass-a-grad: linear-gradient(160deg,rgba(42,42,39,.84) 0%,rgba(34,34,32,.76) 48%,rgba(42,42,39,.80) 100%);
       --glass-a-shadow: 0 2px 8px rgba(0,0,0,.45);
-      --glass-b-grad: linear-gradient(160deg, rgba(63,63,59,.82) 0%, rgba(53,53,49,.74) 48%, rgba(63,63,59,.79) 100%);
+      --glass-b-grad: linear-gradient(160deg,rgba(63,63,59,.82) 0%,rgba(53,53,49,.74) 48%,rgba(63,63,59,.79) 100%);
       --glass-b-shadow: 0 2px 8px rgba(0,0,0,.45);
     }
   }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); overflow: hidden; }
-  @media (prefers-reduced-motion: reduce) { * { animation-duration: .001ms !important; transition-duration: .001ms !important; } }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%; margin:0; background:var(--bg); color:var(--ink); overflow:hidden;}
+  @media (prefers-reduced-motion: reduce){ *{animation-duration:.001ms !important; transition-duration:.001ms !important;} }
+  .glass, .glass-strong{background:var(--glass-a-grad); backdrop-filter:var(--glass-a-blur); -webkit-backdrop-filter:var(--glass-a-blur); border:none; box-shadow:var(--glass-a-shadow); position:relative; overflow:hidden;}
+  .glass-pill{background:var(--glass-b-grad); backdrop-filter:var(--glass-b-blur); -webkit-backdrop-filter:var(--glass-b-blur); border:none; box-shadow:var(--glass-b-shadow); position:relative; overflow:hidden;}
+  @supports not (backdrop-filter: blur(1px)){ .glass, .glass-strong{background:var(--bg-elevated);} .glass-pill{background:#F0EFE0;} }
+  .app{position:relative; height:100vh; overflow:hidden; background:var(--bg-elevated);}
+  .main-veil{position:absolute; inset:0; z-index:25; background:transparent; backdrop-filter:blur(0.8px); -webkit-backdrop-filter:blur(0.8px); opacity:0; visibility:hidden; transition:opacity .4s var(--ease-drawer), visibility .4s, background .9s var(--ease); pointer-events:none;}
+  .main-veil.show{opacity:1; visibility:visible; pointer-events:auto;}
+  .main-veil.dragging{transition:none !important;}
+  .main-veil.ctx-dim{background:rgba(20,18,14,0.16);}
 
-  .glass, .glass-strong { background: var(--glass-a-grad); backdrop-filter: var(--glass-a-blur); -webkit-backdrop-filter: var(--glass-a-blur); border: none; box-shadow: var(--glass-a-shadow); position: relative; overflow: hidden; }
-  .glass-pill { background: var(--glass-b-grad); backdrop-filter: var(--glass-b-blur); -webkit-backdrop-filter: var(--glass-b-blur); border: none; box-shadow: var(--glass-b-shadow); position: relative; overflow: hidden; }
-  @supports not (backdrop-filter: blur(1px)) { .glass, .glass-strong { background: var(--bg-elevated); } .glass-pill { background: #F0EFE0; } }
+  /* Sidebar */
+  .sidebar{position:fixed; top:0; left:0; height:100%; width:var(--sidebar-w); background:var(--bg-elevated); z-index:5; display:flex; flex-direction:column; padding:env(safe-area-inset-top,18px) 0 env(safe-area-inset-bottom,14px) 0;}
+  .sidebar-top{display:flex; align-items:center; justify-content:space-between; padding:8px 18px 18px;}
+  .mark{width:26px; height:26px; color:var(--coral); display:flex; align-items:center; justify-content:center;}
+  .side-scroll{flex:1; overflow-y:auto; padding:0 10px 92px;}
+  .side-scroll::-webkit-scrollbar{width:0;}
+  .side-search{margin:2px 10px 14px; position:relative;}
+  .side-search input{width:100%; border:none; outline:none; background:var(--bg-elevated); border-radius:14px; padding:11px 14px 11px 36px; font-size:14.5px; color:var(--ink); font-family:inherit; box-shadow:0 2px 8px rgba(0,0,0,0.06);}
+  .side-search input::placeholder{color:var(--ink-faint);}
+  .side-search svg{position:absolute; left:12px; top:50%; transform:translateY(-50%); width:15px; height:15px; color:var(--ink-faint);}
+  .side-label{font-size:12px; color:var(--ink-faint); padding:14px 12px 6px; letter-spacing:.2px;}
+  .side-item{position:relative; display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:12px; font-size:14.5px; color:var(--ink); cursor:pointer; overflow:hidden; transition:background .3s var(--ease), transform .6s var(--ease), opacity .6s var(--ease); user-select:none;}
+  .side-item:hover{background:rgba(128,120,100,0.10);} .side-item.active{background:var(--side-active); font-weight:500;}
+  .side-item .t{flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:transform .25s var(--ease);}
+  .side-item.pressed{background:var(--bg); transform:scale(1.035); z-index:22; box-shadow:0 6px 18px rgba(0,0,0,0.12);}
+  .side-dim-overlay{position:absolute; inset:0; z-index:9; pointer-events:none; background:transparent; transition:background .9s var(--ease);}
+  .sidebar.ctx-active .side-dim-overlay{background:rgba(20,18,14,0.16);}
+  .side-empty{padding:20px 12px; color:var(--ink-faint); font-size:13.5px;}
+  .side-fade{position:absolute; left:0; right:0; bottom:0; height:104px; pointer-events:none; z-index:1; background:linear-gradient(to bottom, transparent 0%, var(--bg-elevated) 100%);}
+  .sidebar-bottom{position:absolute; left:0; right:0; bottom:0; background:transparent; z-index:2; display:flex; flex-direction:column; gap:8px; padding:14px 16px calc(env(safe-area-inset-bottom,2px) + 2px);}
+  .sidebar-bottom-row{display:flex; align-items:center; gap:10px;}
+  .avatar-circle{width:32px; height:32px; border-radius:50%; background:var(--bubble-user); color:var(--ink); display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:600; flex-shrink:0;}
+  .account-chevron{color:var(--ink-faint); flex-shrink:0;}
+  .new-chat-pill{margin-left:auto; display:flex; align-items:center; gap:6px; background:var(--ink); color:var(--bg); border:none; border-radius:22px; padding:11px 18px; font-size:14.5px; font-weight:600; cursor:pointer; transition:transform .2s var(--spring); font-family:inherit;}
+  .new-chat-pill:active{transform:scale(.94);}
+  .profile-btn{display:flex; align-items:center; gap:8px; background:none; border:none; cursor:pointer; padding:0; font-family:inherit;}
 
-  .app { position: relative; height: 100vh; overflow: hidden; background: var(--bg-elevated); }
-  .main-veil { position: absolute; inset: 0; z-index: 25; background: transparent; backdrop-filter: blur(0.8px); -webkit-backdrop-filter: blur(0.8px); opacity: 0; visibility: hidden; transition: opacity .4s var(--ease-drawer), visibility .4s, background .9s var(--ease); pointer-events: none; }
-  .main-veil.show { opacity: 1; visibility: visible; pointer-events: auto; }
-  .main-veil.dragging { transition: none !important; }
-  .main-veil.ctx-dim { background: rgba(20,18,14,0.16); }
+  /* Main chat */
+  .main{position:relative; height:100%; z-index:10; background:var(--bg); transition:transform .4s var(--ease-drawer), border-radius .4s var(--ease-drawer);}
+  .main.dragging{transition:none !important;} .main.pushed{transform:translateX(var(--sidebar-w)); border-radius:26px 0 0 26px;}
+  .topbar{position:absolute; top:0; left:0; right:0; z-index:8; display:flex; align-items:center; justify-content:space-between; padding:calc(env(safe-area-inset-top,10px) + 8px) 16px 16px; pointer-events:none;}
+  .topbar > *{pointer-events:auto;}
+  .icon-btn{width:38px; height:38px; border-radius:50%; border:none; color:var(--ink); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; transition:transform .2s var(--spring);}
+  .icon-btn svg{width:17px; height:17px; z-index:1;} .icon-btn:active{transform:scale(.88);}
+  .top-actions{display:flex; align-items:center; gap:8px; position:relative;}
+  .topbar-title{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:15px; font-weight:500; color:var(--ink); opacity:0; visibility:hidden; transition:opacity .3s var(--ease); pointer-events:none; white-space:nowrap;}
+  .topbar-title.show{opacity:1; visibility:visible;}
+  .welcome .ghost-icon{width:44px; height:44px; color:var(--ink);} .welcome .incog-text{margin:0; color:var(--ink-soft); font-size:13.5px; line-height:1.5; max-width:320px;}
+  .ghost-btn, #pillGroup{transition:opacity .32s var(--ease), transform .32s var(--ease); }
+  .top-actions.has-msgs .ghost-btn{opacity:0; transform:scale(.85); pointer-events:none; position:absolute; right:0;}
+  .top-actions:not(.has-msgs) #pillGroup{opacity:0; transform:scale(.85); pointer-events:none; position:absolute; right:0;}
+  .pill-group{display:flex; align-items:center; gap:2px; border-radius:22px; padding:4px;}
+  .pill-group .icon-btn{width:32px; height:32px;} .pill-group .icon-btn.dk{background:var(--ink); color:var(--bg); width:30px; height:30px; z-index:1;}
+  .pill-group .icon-btn.dk svg{width:14px; height:14px;} .pill-group .icon-btn:not(.dk):hover{background:rgba(128,120,100,0.06);} .pill-group .icon-btn.dk:active{transform:scale(.86);}
+  .menu-pop{position:absolute; top:calc(100% + 8px); right:0; width:200px; border-radius:18px; padding:6px; opacity:0; visibility:hidden; transform:translateY(-6px) scale(.97); transform-origin:top right; transition:opacity .2s, transform .2s var(--spring), visibility .2s; z-index:12;}
+  .menu-pop.open{opacity:1; visibility:visible; transform:translateY(0) scale(1);}
+  .menu-item{display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; cursor:pointer; font-size:14px; color:var(--ink); transition:background .15s;}
+  .menu-item:hover{background:rgba(128,120,100,0.14);} .menu-item svg{width:16px; height:16px; color:var(--ink-soft); flex-shrink:0;}
+  .menu-item.danger{color:#B4442E;} .menu-item.danger svg{color:#B4442E;} .menu-sep{height:1px; background:var(--border); margin:4px 8px;}
 
-  /* ---------------- Sidebar ---------------- */
-  .sidebar { position: fixed; top: 0; left: 0; height: 100%; width: var(--sidebar-w); background: var(--bg-elevated); z-index: 5; display: flex; flex-direction: column; padding: env(safe-area-inset-top,18px) 0 env(safe-area-inset-bottom,14px) 0; }
-  .sidebar-top { display: flex; align-items: center; justify-content: space-between; padding: 8px 18px 18px; }
-  .mark { width: 26px; height: 26px; color: var(--coral); display: flex; align-items: center; justify-content: center; }
-  .side-scroll { flex: 1; overflow-y: auto; padding: 0 10px 92px; }
-  .side-scroll::-webkit-scrollbar { width: 0; }
-  .side-search { margin: 2px 10px 14px; position: relative; }
-  .side-search input { width: 100%; border: none; outline: none; background: var(--bg-elevated); border-radius: 14px; padding: 11px 14px 11px 36px; font-size: 14.5px; color: var(--ink); font-family: inherit; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-  .side-search input::placeholder { color: var(--ink-faint); }
-  .side-search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--ink-faint); }
-  .side-label { font-size: 12px; color: var(--ink-faint); padding: 14px 12px 6px; letter-spacing: .2px; }
-  .side-item { position: relative; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; font-size: 14.5px; color: var(--ink); cursor: pointer; overflow: hidden; transition: background .3s var(--ease), transform .6s var(--ease), opacity .6s var(--ease); user-select: none; }
-  .side-item:hover { background: rgba(128,120,100,0.10); }
-  .side-item.active { background: var(--side-active); font-weight: 500; }
-  .side-item .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: transform .25s var(--ease); }
-  .side-item.pressed { background: var(--bg); transform: scale(1.035); z-index: 22; box-shadow: 0 6px 18px rgba(0,0,0,0.12); }
-  .side-dim-overlay { position: absolute; inset: 0; z-index: 9; pointer-events: none; background: transparent; transition: background .9s var(--ease); }
-  .sidebar.ctx-active .side-dim-overlay { background: rgba(20,18,14,0.16); }
-  .side-empty { padding: 20px 12px; color: var(--ink-faint); font-size: 13.5px; }
+  /* Messages */
+  .messages{position:absolute; inset:0; overflow-y:auto; padding:calc(env(safe-area-inset-top,10px) + 76px) 18px 0; padding-bottom:0 !important; scroll-padding-bottom:var(--messages-bottom-inset, 130px); display:flex; flex-direction:column; gap:26px;}
+  .messages::-webkit-scrollbar{width:0;}
+  #scroll-spacer{flex-shrink:0; width:100%;}
+  .welcome{margin:auto; text-align:center; display:flex; flex-direction:column; align-items:center; gap:10px; padding:0 24px; animation:fadeUp .55s var(--spring);}
+  .welcome .mark-big{width:40px; height:40px; color:var(--coral);}
+  .welcome h1{font-size:21px; font-weight:600; margin:6px 0 0; font-family:"Source Serif 4", Georgia, serif;}
+  .welcome p{margin:0; color:var(--ink-soft); font-size:14px; max-width:300px;}
+  @keyframes fadeUp{from{opacity:0; transform:translateY(12px);} to{opacity:1; transform:translateY(0);}}
+  @keyframes msgIn{from{opacity:0; transform:translateY(10px) scale(.985);} to{opacity:1; transform:translateY(0) scale(1);}}
+  .row-user{display:flex; flex-direction:column; align-items:flex-end; gap:8px; animation:msgIn .38s var(--spring);}
+  .bubble-user{background:var(--bubble-user); color:var(--ink); padding:12px 16px; border-radius:20px; font-size:15px; line-height:1.5; max-width:82%; word-wrap:break-word;}
+  .ai-block{display:flex; flex-direction:column; gap:10px; animation:msgIn .42s var(--spring);}
+  .thinking-row{display:flex; align-items:center; gap:8px; color:var(--ink-faint); font-size:14px; cursor:pointer; user-select:none;}
+  .thinking-row svg.clock{width:15px; height:15px; flex-shrink:0;}
+  .thinking-row .chev{margin-left:auto; width:8px; height:8px; border-right:1.5px solid var(--ink-faint); border-bottom:1.5px solid var(--ink-faint); transform:rotate(-45deg); transition:transform .3s var(--spring);}
+  .thinking-row.open .chev{transform:rotate(45deg);}
+  .thinking-body{font-size:13px; color:var(--ink-faint); line-height:1.55; max-height:0; overflow:hidden; transition:max-height .35s var(--spring); padding-left:23px; border-left:1.5px solid var(--border); margin-left:7px;}
+  .thinking-row.open + .thinking-body{max-height:200px;}
+  .ai-text{font-family:"Source Serif 4", Georgia, serif; font-size:16.5px; line-height:1.65; color:var(--ink); word-break:break-word;}
+  .typing-dots{display:flex; gap:4px; padding:4px 0;}
+  .typing-dots span{width:6px; height:6px; border-radius:50%; background:var(--ink-faint); animation:dot 1.2s infinite;}
+  .typing-dots span:nth-child(2){animation-delay:.15s;} .typing-dots span:nth-child(3){animation-delay:.3s;}
+  @keyframes dot{0%,80%,100%{transform:translateY(0); opacity:.4;} 40%{transform:translateY(-5px); opacity:1;}}
+  .action-row{display:flex; align-items:center; gap:14px; color:var(--ink-faint); padding-top:2px;}
+  .action-row button{background:none; border:none; color:var(--ink-faint); cursor:pointer; padding:4px; display:flex; transition:color .15s, transform .2s var(--spring);}
+  .action-row button:hover{color:var(--ink);} .action-row button.on{color:var(--coral);} .action-row button:active{transform:scale(.85);}
+  .action-row svg{width:16px; height:16px;}
+  .disclaimer{display:flex; align-items:flex-start; gap:10px; padding-top:4px;}
+  .disclaimer .mark{width:20px; height:20px; margin-top:1px; flex-shrink:0;}
+  .disclaimer p{margin:0; font-size:12px; color:var(--ink-faint); line-height:1.5;}
 
-  .side-fade { position: absolute; left: 0; right: 0; bottom: 0; height: 104px; pointer-events: none; z-index: 1; background: linear-gradient(to bottom, transparent 0%, var(--bg-elevated) 100%); }
-  .sidebar-bottom { position: absolute; left: 0; right: 0; bottom: 0; background: transparent; z-index: 2; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px calc(env(safe-area-inset-bottom,2px) + 2px); }
-  .sidebar-bottom-row { display: flex; align-items: center; gap: 10px; }
-  .avatar-circle { width: 32px; height: 32px; border-radius: 50%; background: var(--bubble-user); color: var(--ink); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0; }
-  .account-chevron { color: var(--ink-faint); flex-shrink: 0; }
-  .new-chat-pill { margin-left: auto; display: flex; align-items: center; gap: 6px; background: var(--ink); color: var(--bg); border: none; border-radius: 22px; padding: 11px 18px; font-size: 14.5px; font-weight: 600; cursor: pointer; transition: transform .2s var(--spring); font-family: inherit; }
-  .new-chat-pill:active { transform: scale(.94); }
-  .profile-btn { display: flex; align-items: center; gap: 8px; background: none; border: none; cursor: pointer; padding: 0; font-family: inherit; }
-
-  /* ---------------- Main chat area ---------------- */
-  .main { position: relative; height: 100%; z-index: 10; background: var(--bg); transition: transform .4s var(--ease-drawer), border-radius .4s var(--ease-drawer); }
-  .main.dragging { transition: none !important; }
-  .main.pushed { transform: translateX(var(--sidebar-w)); border-radius: 26px 0 0 26px; }
-  .topbar { position: absolute; top: 0; left: 0; right: 0; z-index: 8; display: flex; align-items: center; justify-content: space-between; padding: calc(env(safe-area-inset-top,10px) + 8px) 16px 16px; pointer-events: none; }
-  .topbar > * { pointer-events: auto; }
-  .icon-btn { width: 38px; height: 38px; border-radius: 50%; border: none; color: var(--ink); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: transform .2s var(--spring); }
-  .icon-btn svg { width: 17px; height: 17px; z-index: 1; }
-  .icon-btn:active { transform: scale(.88); }
-  .top-actions { display: flex; align-items: center; gap: 8px; position: relative; }
-  .topbar-title { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); font-size: 15px; font-weight: 500; color: var(--ink); opacity: 0; visibility: hidden; transition: opacity .3s var(--ease); pointer-events: none; white-space: nowrap; }
-  .topbar-title.show { opacity: 1; visibility: visible; }
-  .welcome .ghost-icon { width: 44px; height: 44px; color: var(--ink); }
-  .welcome .incog-text { margin: 0; color: var(--ink-soft); font-size: 13.5px; line-height: 1.5; max-width: 320px; }
-  .ghost-btn, #pillGroup { transition: opacity .32s var(--ease), transform .32s var(--ease); }
-  .top-actions.has-msgs .ghost-btn { opacity: 0; transform: scale(.85); pointer-events: none; position: absolute; right: 0; }
-  .top-actions:not(.has-msgs) #pillGroup { opacity: 0; transform: scale(.85); pointer-events: none; position: absolute; right: 0; }
-  .pill-group { display: flex; align-items: center; gap: 2px; border-radius: 22px; padding: 4px; }
-  .pill-group .icon-btn { width: 32px; height: 32px; }
-  .pill-group .icon-btn.dk { background: var(--ink); color: var(--bg); width: 30px; height: 30px; z-index: 1; }
-  .pill-group .icon-btn.dk svg { width: 14px; height: 14px; }
-  .pill-group .icon-btn:not(.dk):hover { background: rgba(128,120,100,0.06); }
-  .pill-group .icon-btn.dk:active { transform: scale(.86); }
-
-  .menu-pop { position: absolute; top: calc(100% + 8px); right: 0; width: 200px; border-radius: 18px; padding: 6px; opacity: 0; visibility: hidden; transform: translateY(-6px) scale(.97); transform-origin: top right; transition: opacity .2s, transform .2s var(--spring), visibility .2s; z-index: 12; }
-  .menu-pop.open { opacity: 1; visibility: visible; transform: translateY(0) scale(1); }
-  .menu-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; cursor: pointer; font-size: 14px; color: var(--ink); transition: background .15s; }
-  .menu-item:hover { background: rgba(128,120,100,0.14); }
-  .menu-item svg { width: 16px; height: 16px; color: var(--ink-soft); flex-shrink: 0; }
-  .menu-item.danger { color: #B4442E; }
-  .menu-item.danger svg { color: #B4442E; }
-  .menu-sep { height: 1px; background: var(--border); margin: 4px 8px; }
-
-  /* ---------------- Messages ---------------- */
-  .messages { position: absolute; inset: 0; overflow-y: auto; padding: calc(env(safe-area-inset-top,10px) + 76px) 18px 0; padding-bottom: 0 !important; scroll-padding-bottom: var(--messages-bottom-inset, 130px); display: flex; flex-direction: column; gap: 26px; }
-  .messages::-webkit-scrollbar { width: 0; }
-  #scroll-spacer { flex-shrink: 0; width: 100%; }
-  .welcome { margin: auto; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0 24px; animation: fadeUp .55s var(--spring); }
-  .welcome .mark-big { width: 40px; height: 40px; color: var(--coral); }
-  .welcome h1 { font-size: 21px; font-weight: 600; margin: 6px 0 0; font-family: "Source Serif 4", Georgia, serif; }
-  .welcome p { margin: 0; color: var(--ink-soft); font-size: 14px; max-width: 300px; }
-  
-  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-  @keyframes msgIn { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
-  
-  .row-user { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; animation: msgIn .38s var(--spring); }
-  .bubble-user { background: var(--bubble-user); color: var(--ink); padding: 12px 16px; border-radius: 20px; font-size: 15px; line-height: 1.5; max-width: 82%; word-wrap: break-word; }
-  .ai-block { display: flex; flex-direction: column; gap: 10px; animation: msgIn .42s var(--spring); }
-  .thinking-row { display: flex; align-items: center; gap: 8px; color: var(--ink-faint); font-size: 14px; cursor: pointer; user-select: none; }
-  .thinking-row svg.clock { width: 15px; height: 15px; flex-shrink: 0; }
-  .thinking-row .chev { margin-left: auto; width: 8px; height: 8px; border-right: 1.5px solid var(--ink-faint); border-bottom: 1.5px solid var(--ink-faint); transform: rotate(-45deg); transition: transform .3s var(--spring); }
-  .thinking-row.open .chev { transform: rotate(45deg); }
-  .thinking-body { font-size: 13px; color: var(--ink-faint); line-height: 1.55; max-height: 0; overflow: hidden; transition: max-height .35s var(--spring); padding-left: 23px; border-left: 1.5px solid var(--border); margin-left: 7px; }
-  .thinking-row.open + .thinking-body { max-height: 200px; }
-  .ai-text { font-family: "Source Serif 4", Georgia, serif; font-size: 16.5px; line-height: 1.65; color: var(--ink); word-break: break-word; }
-  
-  .typing-dots { display: flex; gap: 4px; padding: 4px 0; }
-  .typing-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-faint); animation: dot 1.2s infinite; }
-  .typing-dots span:nth-child(2) { animation-delay: .15s; }
-  .typing-dots span:nth-child(3) { animation-delay: .3s; }
-  @keyframes dot { 0%,80%,100% { transform: translateY(0); opacity: .4; } 40% { transform: translateY(-5px); opacity: 1; } }
-  
-  .action-row { display: flex; align-items: center; gap: 14px; color: var(--ink-faint); padding-top: 2px; }
-  .action-row button { background: none; border: none; color: var(--ink-faint); cursor: pointer; padding: 4px; display: flex; transition: color .15s, transform .2s var(--spring); }
-  .action-row button:hover { color: var(--ink); }
-  .action-row button.on { color: var(--coral); }
-  .action-row button:active { transform: scale(.85); }
-  .action-row svg { width: 16px; height: 16px; }
-  
-  .disclaimer { display: flex; align-items: flex-start; gap: 10px; padding-top: 4px; }
-  .disclaimer .mark { width: 20px; height: 20px; margin-top: 1px; flex-shrink: 0; }
-  .disclaimer p { margin: 0; font-size: 12px; color: var(--ink-faint); line-height: 1.5; }
-
-  /* ---------------- Markdown Styling ---------------- */
+  /* Markdown Styling */
   .ai-text code { font-family: 'Courier New', Courier, monospace; background-color: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 14px; color: var(--coral); }
   .ai-text pre.code-block { font-family: 'Courier New', Courier, monospace; background-color: rgba(0,0,0,0.04); padding: 12px; border-radius: 8px; font-size: 14px; overflow-x: auto; margin: 8px 0; border: 1px solid var(--border); }
   .ai-text pre.code-block code { background-color: transparent; padding: 0; border-radius: 0; color: var(--ink); }
@@ -200,146 +159,114 @@
   .ai-text .code-token.value { color: #2F7D52; }
   .ai-text h1, .ai-text h2, .ai-text h3 { margin-top: 12px; margin-bottom: 6px; font-weight: 600; color: var(--ink); }
 
-  /* ---------------- Attachments ---------------- */
-  .attach-strip { display: flex; gap: 8px; flex-wrap: wrap; }
-  .attach-strip:empty { display: none; }
-  .attach-thumb { position: relative; width: 52px; height: 52px; border-radius: 12px; overflow: hidden; flex-shrink: 0; background: rgba(128,120,100,0.12); }
-  .attach-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .attach-thumb .file-icon { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 18px; gap: 1px; padding: 3px; }
-  .attach-thumb .file-name { font-size: 7.5px; color: var(--ink-soft); max-width: 46px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .attach-thumb .rm-btn { position: absolute; top: 1px; right: 1px; width: 16px; height: 16px; border-radius: 50%; border: none; background: rgba(20,18,14,0.55); color: #fff; font-size: 11px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-  
-  .bubble-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 2px; }
-  .row-user .bubble-attachments { justify-content: flex-end; }
-  .bubble-img { width: 100%; max-width: 68px; border-radius: 10px; object-fit: cover; cursor: zoom-in; display: block; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
-  .bubble-file { display: flex; align-items: center; gap: 7px; background: rgba(128,120,100,0.14); border-radius: 10px; padding: 7px 10px; max-width: 220px; }
-  .bubble-file-icon { font-size: 20px; flex-shrink: 0; }
-  .bubble-file-name { font-size: 12.5px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  
-  /* Блок AI Файла */
-  .bot-file { max-width: 86%; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 18px; padding: 13px 15px; box-shadow: 0 1px 4px rgba(0,0,0,.05); display: flex; align-items: center; gap: 12px; cursor: pointer; transition: transform .15s ease; -webkit-tap-highlight-color: transparent; margin-bottom: 8px; }
-  .bot-file:active { transform: scale(0.985); }
-  .bot-file-icon { width: 38px; height: 38px; background: var(--side-active); border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px; font-weight: 700; color: var(--ink-soft); border: 1px solid var(--border); }
-  .bot-file-content { flex: 1; min-width: 0; }
-  .bot-file-name { font-weight: 600; font-size: 15px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 1px; }
-  .bot-file-meta { font-size: 13px; color: var(--ink-soft); }
+  /* Attachments */
+  .attach-strip{display:flex; gap:8px; flex-wrap:wrap;} .attach-strip:empty{display:none;}
+  .attach-thumb{position:relative; width:52px; height:52px; border-radius:12px; overflow:hidden; flex-shrink:0; background:rgba(128,120,100,0.12);}
+  .attach-thumb img{width:100%; height:100%; object-fit:cover; display:block;}
+  .attach-thumb .file-icon{width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:18px; gap:1px; padding:3px;}
+  .attach-thumb .file-name{font-size:7.5px; color:var(--ink-soft); max-width:46px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .attach-thumb .rm-btn{position:absolute; top:1px; right:1px; width:16px; height:16px; border-radius:50%; border:none; background:rgba(20,18,14,0.55); color:#fff; font-size:11px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;}
+  .bubble-attachments{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:2px;} .row-user .bubble-attachments{justify-content:flex-end;}
+  .bubble-img{width:100%; max-width:68px; border-radius:10px; object-fit:cover; cursor:zoom-in; display:block; box-shadow:0 1px 3px rgba(0,0,0,.12);}
+  .bubble-file{display:flex; align-items:center; gap:7px; background:rgba(128,120,100,0.14); border-radius:10px; padding:7px 10px; max-width:220px;}
+  .bubble-file-icon{font-size:20px; flex-shrink:0;} .bubble-file-name{font-size:12.5px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .bot-file{max-width:86%; background:var(--bg-elevated); border:1px solid var(--border); border-radius:18px; padding:13px 15px; box-shadow:0 1px 4px rgba(0,0,0,.05); display:flex; align-items:center; gap:12px; cursor:pointer; transition:transform .15s ease; -webkit-tap-highlight-color:transparent; margin-bottom:8px;}
+  .bot-file:active{transform:scale(0.985);}
+  .bot-file-icon{width:38px; height:38px; background:var(--side-active); border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:15px; font-weight:700; color:var(--ink-soft); border:1px solid var(--border);}
+  .bot-file-content{flex:1; min-width:0;}
+  .bot-file-name{font-weight:600; font-size:15px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:1px;}
+  .bot-file-meta{font-size:13px; color:var(--ink-soft);}
+  .lightbox{position:fixed; inset:0; background:rgba(10,9,7,0.86); z-index:80; display:flex; align-items:center; justify-content:center; opacity:0; visibility:hidden; transition:opacity .25s, visibility .25s; padding:24px;}
+  .lightbox.show{opacity:1; visibility:visible;}
+  .lightbox img{max-width:94vw; max-height:86vh; border-radius:14px; box-shadow:0 10px 40px rgba(0,0,0,.5); object-fit:contain;}
 
-  .lightbox { position: fixed; inset: 0; background: rgba(10,9,7,0.86); z-index: 80; display: flex; align-items: center; justify-content: center; opacity: 0; visibility: hidden; transition: opacity .25s, visibility .25s; padding: 24px; }
-  .lightbox.show { opacity: 1; visibility: visible; }
-  .lightbox img { max-width: 94vw; max-height: 86vh; border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,.5); object-fit: contain; }
+  /* Composer */
+  .input-area{position:absolute; bottom:0; left:0; right:0; z-index:8; padding:7px 15px calc(max(env(safe-area-inset-bottom,10px), 10px) + 12px); background:transparent; pointer-events:none;}
+  .input-card{pointer-events:auto; position:relative; overflow:hidden; border-radius:29px; padding:13px 13px 11px 18px; display:flex; flex-direction:column; gap:9px; transition:background .58s var(--ease), box-shadow .58s var(--ease);}
+  textarea{width:100%; background:transparent; border:none; outline:none !important; box-shadow:none !important; -webkit-appearance:none; appearance:none; color:var(--ink); font-family:inherit; font-size:16px; line-height:1.45; letter-spacing:-.01em; resize:none; min-height:26px; max-height:132px; display:block; padding:0; margin:0; caret-color:var(--coral); -webkit-text-size-adjust:100%;}
+  textarea::placeholder{color:var(--ink-faint);}
+  .input-toolbar{display:flex; align-items:center; gap:9px; min-height:35px;}
+  .pill-plus{width:35px; height:35px; padding:0; flex-shrink:0; color:var(--ink); border:none; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit; transition:transform .5s var(--ease);}
+  .pill-plus:active{transform:scale(.88);} .pill-plus svg{width:18px; height:18px; position:relative; z-index:1;}
+  .pill-model{height:35px; padding:0 15px; font-size:12.1px; font-weight:500; color:var(--ink-soft); flex-shrink:1; min-width:0; border:none; border-radius:999px; display:flex; align-items:center; gap:5px; justify-content:center; font-family:inherit; cursor:pointer; transition:transform .3s var(--ease); max-width:52vw;}
+  .pill-model:active{transform:scale(.96);} .pill-model span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; position:relative; z-index:1;}
+  .pill-model .chev{width:5px; height:5px; border-right:1.3px solid var(--ink-faint); border-bottom:1.3px solid var(--ink-faint); transform:rotate(45deg); flex-shrink:0; position:relative; z-index:1;}
+  .tool-spacer{flex:1;}
+  .send-btn{width:35px; height:35px; min-width:35px; border-radius:50%; background:var(--ink); color:var(--bg); flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; border:none; padding:0; margin:0; transition:opacity .42s var(--ease), background .42s var(--ease), color .42s var(--ease), transform .3s var(--ease);}
+  .send-btn:active{transform:scale(.92);} .send-btn:disabled{background:rgba(128,120,100,0.16); color:var(--ink-faint); opacity:.8; cursor:default;}
+  .send-btn svg{width:17px; height:17px;}
 
-  /* ---------------- Composer ---------------- */
-  .input-area { position: absolute; bottom: 0; left: 0; right: 0; z-index: 8; padding: 7px 15px calc(max(env(safe-area-inset-bottom,10px), 10px) + 12px); background: transparent; pointer-events: none; }
-  .input-card { pointer-events: auto; position: relative; overflow: hidden; border-radius: 29px; padding: 13px 13px 11px 18px; display: flex; flex-direction: column; gap: 9px; transition: background .58s var(--ease), box-shadow .58s var(--ease); }
-  textarea { width: 100%; background: transparent; border: none; outline: none !important; box-shadow: none !important; -webkit-appearance: none; appearance: none; color: var(--ink); font-family: inherit; font-size: 16px; line-height: 1.45; letter-spacing: -.01em; resize: none; min-height: 26px; max-height: 132px; display: block; padding: 0; margin: 0; caret-color: var(--coral); -webkit-text-size-adjust: 100%; }
-  textarea::placeholder { color: var(--ink-faint); }
-  .input-toolbar { display: flex; align-items: center; gap: 9px; min-height: 35px; }
-  .pill-plus { width: 35px; height: 35px; padding: 0; flex-shrink: 0; color: var(--ink); border: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-family: inherit; transition: transform .5s var(--ease); }
-  .pill-plus:active { transform: scale(.88); }
-  .pill-plus svg { width: 18px; height: 18px; position: relative; z-index: 1; }
-  
-  .pill-model { height: 35px; padding: 0 15px; font-size: 12.1px; font-weight: 500; color: var(--ink-soft); flex-shrink: 1; min-width: 0; border: none; border-radius: 999px; display: flex; align-items: center; gap: 5px; justify-content: center; font-family: inherit; cursor: pointer; transition: transform .3s var(--ease); max-width: 52vw; }
-  .pill-model:active { transform: scale(.96); }
-  .pill-model span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; z-index: 1; }
-  .pill-model .chev { width: 5px; height: 5px; border-right: 1.3px solid var(--ink-faint); border-bottom: 1.3px solid var(--ink-faint); transform: rotate(45deg); flex-shrink: 0; position: relative; z-index: 1; }
-  
-  .tool-spacer { flex: 1; }
-  .send-btn { width: 35px; height: 35px; min-width: 35px; border-radius: 50%; background: var(--ink); color: var(--bg); flex-shrink: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; border: none; padding: 0; margin: 0; transition: opacity .42s var(--ease), background .42s var(--ease), color .42s var(--ease), transform .3s var(--ease); }
-  .send-btn:active { transform: scale(.92); }
-  .send-btn:disabled { background: rgba(128,120,100,0.16); color: var(--ink-faint); opacity: .8; cursor: default; }
-  .send-btn svg { width: 17px; height: 17px; }
+  /* Model sheet */
+  .sheet-scrim{position:fixed; inset:0; background:transparent; backdrop-filter:none; -webkit-backdrop-filter:none; z-index:50; opacity:0; pointer-events:none; transition:opacity .36s var(--ease);}
+  .sheet-scrim.show{opacity:1; pointer-events:all;}
+  .sheet{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 28px); z-index:60; width:min(82%, 318px); max-width:318px; height:228px; margin:0; padding:6px 0; transform:translate(-50%, 18px) scale(.972); transform-origin:bottom center; opacity:0; border-radius:24px; pointer-events:none; overflow:hidden; will-change:transform, opacity; transition:opacity .76s var(--ease), transform .76s var(--ease); display:flex; flex-direction:column;}
+  .sheet.open{opacity:1; transform:translate(-50%, 0) scale(1); pointer-events:all;}
+  .sheet-scroll{flex:1; display:flex; flex-direction:column; overflow:hidden; position:relative; z-index:2;}
+  .ms-item{flex:1 1 0; display:flex; align-items:center; gap:10px; padding:0 16px; cursor:pointer; min-height:0; transition:background .2s var(--ease);}
+  .ms-item:active{background:rgba(128,120,100,0.12);} .ms-item.active .ms-info b{color:var(--coral);}
+  .ms-info{flex:1; min-width:0;} .ms-info b{font-size:14.5px; font-weight:500; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:color .2s var(--ease);}
+  .ms-arrow{color:var(--ink-faint); font-size:16px; flex-shrink:0;}
+  .ms-check{width:16px; height:16px; color:var(--coral); opacity:0; flex-shrink:0;} .ms-item.active .ms-check{opacity:1;}
+  .ms-back{color:var(--ink-soft); font-weight:600; font-size:13px; gap:8px;}
+  .ms-sep{height:1px; background:var(--border); margin:0 16px; flex-shrink:0;}
 
-  /* ---------------- Model sheet ---------------- */
-  .sheet-scrim { position: fixed; inset: 0; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; z-index: 50; opacity: 0; pointer-events: none; transition: opacity .36s var(--ease); }
-  .sheet-scrim.show { opacity: 1; pointer-events: all; }
-  .sheet { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom,0px) + 28px); z-index: 60; width: min(82%, 318px); max-width: 318px; height: 228px; margin: 0; padding: 6px 0; transform: translate(-50%, 18px) scale(.972); transform-origin: bottom center; opacity: 0; border-radius: 24px; pointer-events: none; overflow: hidden; will-change: transform, opacity; transition: opacity .76s var(--ease), transform .76s var(--ease); display: flex; flex-direction: column; }
-  .sheet.open { opacity: 1; transform: translate(-50%, 0) scale(1); pointer-events: all; }
-  .sheet-scroll { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; z-index: 2; }
-  .ms-item { flex: 1 1 0; display: flex; align-items: center; gap: 10px; padding: 0 16px; cursor: pointer; min-height: 0; transition: background .2s var(--ease); }
-  .ms-item:active { background: rgba(128,120,100,0.12); }
-  .ms-item.active .ms-info b { color: var(--coral); }
-  .ms-info { flex: 1; min-width: 0; }
-  .ms-info b { font-size: 14.5px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .2s var(--ease); }
-  .ms-arrow { color: var(--ink-faint); font-size: 16px; flex-shrink: 0; }
-  .ms-check { width: 16px; height: 16px; color: var(--coral); opacity: 0; flex-shrink: 0; }
-  .ms-item.active .ms-check { opacity: 1; }
-  .ms-back { color: var(--ink-soft); font-weight: 600; font-size: 13px; gap: 8px; }
-  .ms-sep { height: 1px; background: var(--border); margin: 0 16px; flex-shrink: 0; }
+  /* Custom modal */
+  .modal-scrim{position:fixed; inset:0; background:var(--scrim); backdrop-filter:blur(3px); z-index:70; opacity:0; visibility:hidden; transition:opacity .25s, visibility .25s; display:flex; align-items:center; justify-content:center; padding:24px;}
+  .modal-scrim.show{opacity:1; visibility:visible;}
+  .modal-card{width:100%; max-width:340px; border-radius:24px; padding:22px; background:var(--bg-elevated); box-shadow:0 20px 60px rgba(0,0,0,0.25); transform:scale(.92) translateY(10px); transition:transform .3s var(--spring);}
+  .modal-scrim.show .modal-card{transform:scale(1) translateY(0);}
+  .modal-title{font-family:"Source Serif 4", Georgia, serif; font-size:18px; font-weight:600; margin:0 0 6px;}
+  .modal-msg{font-size:14px; color:var(--ink-soft); line-height:1.5; margin:0 0 14px;}
+  .modal-input{width:100%; border:none; background:rgba(128,120,100,0.12); border-radius:14px; padding:12px 14px; font-size:15px; color:var(--ink); font-family:inherit; margin-bottom:16px; outline:none;}
+  .modal-actions{display:flex; gap:10px;}
+  .modal-btn{flex:1; padding:12px; border-radius:14px; border:none; font-size:14.5px; font-weight:600; cursor:pointer; font-family:inherit;}
+  .modal-btn.cancel{background:rgba(128,120,100,0.12); color:var(--ink);} .modal-btn.primary{background:var(--ink); color:var(--bg);} .modal-btn.danger{background:#C0503A; color:#fff;}
+  .toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); z-index:90; background:var(--ink); color:var(--bg); padding:12px 20px; border-radius:16px; font-size:14px; opacity:0; visibility:hidden; transition:opacity .25s, transform .25s;}
+  .toast.show{opacity:1; visibility:visible; transform:translateX(-50%) translateY(0);}
 
-  /* ---------------- Custom modal ---------------- */
-  .modal-scrim { position: fixed; inset: 0; background: var(--scrim); backdrop-filter: blur(3px); z-index: 70; opacity: 0; visibility: hidden; transition: opacity .25s, visibility .25s; display: flex; align-items: center; justify-content: center; padding: 24px; }
-  .modal-scrim.show { opacity: 1; visibility: visible; }
-  .modal-card { width: 100%; max-width: 340px; border-radius: 24px; padding: 22px; background: var(--bg-elevated); box-shadow: 0 20px 60px rgba(0,0,0,0.25); transform: scale(.92) translateY(10px); transition: transform .3s var(--spring); }
-  .modal-scrim.show .modal-card { transform: scale(1) translateY(0); }
-  .modal-title { font-family: "Source Serif 4", Georgia, serif; font-size: 18px; font-weight: 600; margin: 0 0 6px; }
-  .modal-msg { font-size: 14px; color: var(--ink-soft); line-height: 1.5; margin: 0 0 14px; }
-  .modal-input { width: 100%; border: none; background: rgba(128,120,100,0.12); border-radius: 14px; padding: 12px 14px; font-size: 15px; color: var(--ink); font-family: inherit; margin-bottom: 16px; outline: none; }
-  .modal-actions { display: flex; gap: 10px; }
-  .modal-btn { flex: 1; padding: 12px; border-radius: 14px; border: none; font-size: 14.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
-  .modal-btn.cancel { background: rgba(128,120,100,0.12); color: var(--ink); }
-  .modal-btn.primary { background: var(--ink); color: var(--bg); }
-  .modal-btn.danger { background: #C0503A; color: #fff; }
-  
-  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); z-index: 90; background: var(--ink); color: var(--bg); padding: 12px 20px; border-radius: 16px; font-size: 14px; opacity: 0; visibility: hidden; transition: opacity .25s, transform .25s; }
-  .toast.show { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+  /* Admin panel */
+  .admin-screen{position:fixed; inset:0; z-index:60; background:var(--bg); display:flex; flex-direction:column; opacity:0; visibility:hidden; transform:translateY(14px); transition:opacity .32s var(--ease), transform .32s var(--ease), visibility .32s;}
+  .admin-screen.open{opacity:1; visibility:visible; transform:translateY(0);}
+  .admin-top{display:flex; align-items:center; gap:12px; padding:calc(env(safe-area-inset-top,10px) + 10px) 16px 14px;}
+  .admin-top h2{font-size:17px; font-weight:600; font-family:"Source Serif 4", Georgia, serif; margin:0;}
+  .admin-tabs{display:flex; gap:6px; padding:0 16px 14px;}
+  .admin-tab{padding:8px 14px; border-radius:14px; font-size:13.5px; color:var(--ink-soft); cursor:pointer; background:var(--bg-elevated);}
+  .admin-tab.active{background:var(--ink); color:var(--bg); font-weight:600;}
+  .admin-body{flex:1; overflow-y:auto; padding:0 16px 24px; transition:opacity .28s var(--ease), transform .28s var(--ease);}
+  .admin-body.switching{opacity:0; transform:translateY(6px);}
+  .a-stat-grid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:18px;}
+  .a-stat-box{background:var(--bg-elevated); border-radius:16px; padding:14px 10px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.05);}
+  .a-stat-num{font-size:20px; font-weight:700; font-family:"Source Serif 4", Georgia, serif;}
+  .a-stat-lbl{font-size:11px; color:var(--ink-faint); margin-top:2px;}
+  .a-section-title{font-size:12px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.3px; padding:10px 4px 8px;}
+  .a-card{background:var(--bg-elevated); border-radius:18px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.05);}
+  .a-row{display:flex; align-items:center; gap:12px; padding:13px 14px; border-bottom:1px solid var(--border); cursor:pointer;}
+  .a-row:last-child{border-bottom:none;}
+  .a-row:hover{background:rgba(128,120,100,0.06);}
+  .a-avatar{width:34px; height:34px; border-radius:50%; background:var(--bubble-user); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0;}
+  .a-info{flex:1; min-width:0;} .a-name{font-size:14px; font-weight:500;} .a-meta{margin-top:2px;}
+  .a-badge{font-size:11px; padding:2px 8px; border-radius:8px; font-weight:600;}
+  .a-badge.approved{background:rgba(76,140,74,0.16); color:#5CA45A;} .a-badge.pending{background:rgba(232,176,75,0.20); color:#D9A23E;} .a-badge.rejected{background:rgba(180,68,46,0.15); color:#C25B44;}
+  .a-req{font-size:13px; color:var(--ink-faint); flex-shrink:0;} .a-req b{color:var(--ink); font-weight:600;}
+  .a-actions{display:flex; gap:6px; flex-shrink:0;}
+  .a-btn{border:none; border-radius:10px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit;}
+  .a-btn.approve{background:rgba(76,140,74,0.16); color:#5CA45A;} .a-btn.reject{background:rgba(180,68,46,0.15); color:#C25B44;}
+  .a-model-row{display:flex; align-items:center; gap:10px; padding:9px 2px;}
+  .a-model-name{width:130px; font-size:13px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .a-model-bar-wrap{flex:1; height:6px; background:rgba(128,120,100,0.16); border-radius:4px; overflow:hidden;}
+  .a-model-bar{height:100%; background:var(--coral); border-radius:4px; transition:width .5s var(--spring);}
+  .a-model-cnt{font-size:12px; color:var(--ink-faint); width:28px; text-align:right; flex-shrink:0;}
+  .a-empty{padding:30px 10px; text-align:center; color:var(--ink-faint); font-size:14px;}
+  .a-back-row{display:flex; align-items:center; gap:10px; margin-bottom:12px; cursor:pointer;}
+  .a-back-row svg{width:16px; height:16px; color:var(--ink-soft);} .a-back-row span{font-size:14px; color:var(--ink-soft);}
+  .a-detail-head{display:flex; align-items:center; gap:12px; margin-bottom:16px;}
+  .a-detail-head .a-avatar{width:44px; height:44px; font-size:15px;}
+  .a-detail-title{font-size:16px; font-weight:600; font-family:"Source Serif 4", Georgia, serif;}
 
-  /* ---------------- Admin panel ---------------- */
-  .admin-screen { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: flex; flex-direction: column; opacity: 0; visibility: hidden; transform: translateY(14px); transition: opacity .32s var(--ease), transform .32s var(--ease), visibility .32s; }
-  .admin-screen.open { opacity: 1; visibility: visible; transform: translateY(0); }
-  .admin-top { display: flex; align-items: center; gap: 12px; padding: calc(env(safe-area-inset-top,10px) + 10px) 16px 14px; }
-  .admin-top h2 { font-size: 17px; font-weight: 600; font-family: "Source Serif 4", Georgia, serif; margin: 0; }
-  .admin-tabs { display: flex; gap: 6px; padding: 0 16px 14px; }
-  .admin-tab { padding: 8px 14px; border-radius: 14px; font-size: 13.5px; color: var(--ink-soft); cursor: pointer; background: var(--bg-elevated); }
-  .admin-tab.active { background: var(--ink); color: var(--bg); font-weight: 600; }
-  .admin-body { flex: 1; overflow-y: auto; padding: 0 16px 24px; transition: opacity .28s var(--ease), transform .28s var(--ease); }
-  .admin-body.switching { opacity: 0; transform: translateY(6px); }
-  
-  .a-stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 18px; }
-  .a-stat-box { background: var(--bg-elevated); border-radius: 16px; padding: 14px 10px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-  .a-stat-num { font-size: 20px; font-weight: 700; font-family: "Source Serif 4", Georgia, serif; }
-  .a-stat-lbl { font-size: 11px; color: var(--ink-faint); margin-top: 2px; }
-  .a-section-title { font-size: 12px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .3px; padding: 10px 4px 8px; }
-  .a-card { background: var(--bg-elevated); border-radius: 18px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-  .a-row { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }
-  .a-row:last-child { border-bottom: none; }
-  .a-row:hover { background: rgba(128,120,100,0.06); }
-  .a-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--bubble-user); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
-  .a-info { flex: 1; min-width: 0; }
-  .a-name { font-size: 14px; font-weight: 500; }
-  .a-meta { margin-top: 2px; }
-  
-  .a-badge { font-size: 11px; padding: 2px 8px; border-radius: 8px; font-weight: 600; }
-  .a-badge.approved { background: rgba(76,140,74,0.16); color: #5CA45A; }
-  .a-badge.pending { background: rgba(232,176,75,0.20); color: #D9A23E; }
-  .a-badge.rejected { background: rgba(180,68,46,0.15); color: #C25B44; }
-  
-  .a-req { font-size: 13px; color: var(--ink-faint); flex-shrink: 0; }
-  .a-req b { color: var(--ink); font-weight: 600; }
-  .a-actions { display: flex; gap: 6px; flex-shrink: 0; }
-  .a-btn { border: none; border-radius: 10px; padding: 6px 10px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
-  .a-btn.approve { background: rgba(76,140,74,0.16); color: #5CA45A; }
-  .a-btn.reject { background: rgba(180,68,46,0.15); color: #C25B44; }
-  
-  .a-model-row { display: flex; align-items: center; gap: 10px; padding: 9px 2px; }
-  .a-model-name { width: 130px; font-size: 13px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .a-model-bar-wrap { flex: 1; height: 6px; background: rgba(128,120,100,0.16); border-radius: 4px; overflow: hidden; }
-  .a-model-bar { height: 100%; background: var(--coral); border-radius: 4px; transition: width .5s var(--spring); }
-  .a-model-cnt { font-size: 12px; color: var(--ink-faint); width: 28px; text-align: right; flex-shrink: 0; }
-  .a-empty { padding: 30px 10px; text-align: center; color: var(--ink-faint); font-size: 14px; }
-  .a-back-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; cursor: pointer; }
-  .a-back-row svg { width: 16px; height: 16px; color: var(--ink-soft); }
-  .a-back-row span { font-size: 14px; color: var(--ink-soft); }
-  
-  .a-detail-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-  .a-detail-head .a-avatar { width: 44px; height: 44px; font-size: 15px; }
-  .a-detail-title { font-size: 16px; font-weight: 600; font-family: "Source Serif 4", Georgia, serif; }
-
-  @media (min-width: 900px) {
-    :root { --sidebar-w: 300px; }
-    .messages { padding-left: 60px; padding-right: 60px; }
-    .topbar { padding-left: 24px; padding-right: 24px; }
-    .input-area { padding-left: 60px; padding-right: 60px; }
-    .input-card { max-width: 760px; margin: 0 auto; }
+  @media (min-width: 900px){
+    :root{--sidebar-w:300px;}
+    .messages{padding-left:60px; padding-right:60px;} .topbar{padding-left:24px; padding-right:24px;}
+    .input-area{padding-left:60px; padding-right:60px;} .input-card{max-width:760px; margin:0 auto;}
   }
 </style>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -403,17 +330,14 @@
         </div>
         <div class="menu-pop glass-strong" id="menuPop">
           <div class="menu-item" id="menuRename">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>
-            Переименовать
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg> Переименовать
           </div>
           <div class="menu-item" id="menuShare">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>
-            Поделиться
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg> Поделиться
           </div>
           <div class="menu-sep"></div>
           <div class="menu-item danger" id="menuDelete">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6"/></svg>
-            Удалить чат
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6"/></svg> Удалить чат
           </div>
         </div>
       </div>
@@ -430,12 +354,9 @@
           <button class="pill-plus glass-pill" onclick="openFilePicker()" title="Прикрепить">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
-          
           <button class="pill-model glass-pill" id="model-btn" onclick="openSheet()">
-            <span id="model-label">Gemini 3.1 Flash Lite</span>
-            <span class="chev"></span>
+            <span id="model-label">Gemini 3.1 Flash Lite</span><span class="chev"></span>
           </button>
-          
           <div class="tool-spacer"></div>
           <button class="send-btn" id="send-btn" disabled onclick="send()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
@@ -446,30 +367,21 @@
   </main>
 
   <input id="file-input" type="file" multiple accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="display:none" onchange="onFilesChosen(this)">
-
   <div class="sheet-scrim" id="sheetScrim"></div>
-  <div class="sheet glass-strong" id="sheet">
-    <div class="sheet-scroll" id="sheetScroll"></div>
-  </div>
-
+  <div class="sheet glass-strong" id="sheet"><div class="sheet-scroll" id="sheetScroll"></div></div>
   <div class="lightbox" id="lightbox"><img id="lightboxImg" alt=""></div>
   <div class="modal-scrim" id="modalScrim"><div class="modal-card" id="modalCard"></div></div>
   <div class="toast" id="toast"></div>
 
   <div class="admin-screen" id="profileScreen">
     <div class="admin-top">
-      <button class="icon-btn" id="closeProfile" style="background:var(--bg-elevated);">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg>
-      </button>
+      <button class="icon-btn" id="closeProfile" style="background:var(--bg-elevated);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>
       <h2>Профиль</h2>
     </div>
     <div class="admin-body">
       <div class="a-detail-head">
         <div class="a-avatar" style="width:52px; height:52px; font-size:18px;">U</div>
-        <div>
-          <div class="a-detail-title">Пользователь</div>
-          <span style="font-size:13px; color:var(--ink-soft);">Личный аккаунт</span>
-        </div>
+        <div><div class="a-detail-title">Пользователь</div><span style="font-size:13px; color:var(--ink-soft);">Личный аккаунт</span></div>
       </div>
       <div class="a-section-title">Лимиты моделей</div>
       <div class="a-card">
@@ -479,9 +391,7 @@
       <div class="a-section-title">Управление</div>
       <div class="a-card" id="adminPanelBlock" style="display:none;">
         <div class="a-row" id="openAdmin">
-          <div class="a-avatar" style="background:transparent;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="8" r="3"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg>
-          </div>
+          <div class="a-avatar" style="background:transparent;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="8" r="3"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg></div>
           <div class="a-info"><div class="a-name">Админ панель</div></div>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="color:var(--ink-faint);"><path d="M9 6l6 6-6 6"/></svg>
         </div>
@@ -491,9 +401,7 @@
 
   <div class="admin-screen" id="adminScreen">
     <div class="admin-top">
-      <button class="icon-btn" id="closeAdmin" style="background:var(--bg-elevated);">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg>
-      </button>
+      <button class="icon-btn" id="closeAdmin" style="background:var(--bg-elevated);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg></button>
       <h2>Админ панель</h2>
     </div>
     <div class="admin-tabs">
@@ -506,44 +414,26 @@
 </div>
 
 <script>
-  /* ================= GLOBALS & AUTH ================= */
-  let accessGranted = false;
-  let isAdmin = false;
-
+  let accessGranted = false; let isAdmin = false;
   (function initTelegramAccess(){
-    try{
-      if(window.Telegram&&window.Telegram.WebApp){
-        const tg=window.Telegram.WebApp;
-        tg.ready();
-        tg.expand();
-      }
-    }catch(e){}
+    try{if(window.Telegram&&window.Telegram.WebApp){const tg=window.Telegram.WebApp;tg.ready();tg.expand();}}catch(e){}
     const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
     fetch('/api/me',{headers:{'Authorization':'tma '+initData}})
       .then(r=>{if(!r.ok)return r.json().then(d=>{throw d;}).catch(()=>{throw {message:'Нет доступа.'};});return r.json();})
       .then(data=>{
         if(data&&data.ok===true){
           accessGranted=true;
-          if(data.is_admin){
-            isAdmin=true;
-            document.getElementById('adminPanelBlock').style.display='block';
-          }
-          if(ta) ta.disabled=false;
-          toggleSend();
-        }else{
-          showAccessDenied((data&&data.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.');
-        }
+          if(data.is_admin){ isAdmin=true; document.getElementById('adminPanelBlock').style.display='block'; }
+          if(ta) ta.disabled=false; toggleSend();
+        }else{ showAccessDenied((data&&data.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.'); }
       })
       .catch(err=>showAccessDenied((err&&err.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.'));
   })();
 
   function showAccessDenied(message){
-    accessGranted=false;
-    if(ta) ta.disabled=true;
-    if(sendBtn) sendBtn.disabled=true;
+    accessGranted=false; if(ta) ta.disabled=true; if(sendBtn) sendBtn.disabled=true;
     if(document.getElementById('access-overlay')) return;
-    const overlay=document.createElement('div');
-    overlay.id='access-overlay';
+    const overlay=document.createElement('div'); overlay.id='access-overlay';
     overlay.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:32px;text-align:center;background:var(--bg);color:var(--ink)';
     overlay.innerHTML=`<div style="font-size:40px;">🚫</div><div style="font-size:18px;font-weight:600;">Доступ закрыт</div><div style="font-size:14px;color:var(--ink-soft);line-height:1.6;max-width:270px;">${x(message)}</div>`;
     document.body.appendChild(overlay);
@@ -551,7 +441,6 @@
 
   function x(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');}
 
-  /* ================= MARKDOWN & LATEX ENGINE ================= */
   function formatMathLaTeX(text) {
     if (!text) return ''; let res = text;
     res = res.replace(/\\begin\{pmatrix\}([\s\S]*?)\\end\{pmatrix\}/g, (match, contents) => {
@@ -638,7 +527,7 @@
   function formatInlineMarkdown(t) {
     let h = replaceEmoji(String(t || ''));
     h = h.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, a, u) => `<img src="${sanitizeMarkdownUrl(u)}" alt="${mdEscapeAttr(a)}" class="markdown-image">`);
-    h = h.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, l, u) => `<a href="${sanitizeMarkdownUrl(u)}" target="_blank" class="markdown-link">${l}</a>`);
+    h = h.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, l, u) => `<a href="${sanitizeMarkdownUrl(u)}" target="_blank" class="markdown-link">${label}</a>`);
     h = h.replace(/~~([\s\S]+?)~~/g, '<del>$1</del>'); h = h.replace(/\*\*\*([\s\S]+?)\*\*\*/g, '<strong><em>$1</em></strong>'); h = h.replace(/___([\s\S]+?)___/g, '<strong><em>$1</em></strong>');
     h = h.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>'); h = h.replace(/__([\s\S]+?)__/g, '<strong>$1</strong>'); h = h.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>'); h = h.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
     return h;
@@ -772,6 +661,7 @@
   function exitIncognito(){ createChat(); }
   document.getElementById('ghostBtn').onclick = enterIncognito; document.getElementById('incognitoCloseBtn').onclick = exitIncognito;
 
+  // Render DOM elements for an active chat
   function renderMessages(){
     const msgs = document.getElementById('messages'); const chat = activeChat(); const topActions = document.querySelector('.top-actions');
     const hist = chat ? (chat.history || []) : [];
@@ -790,7 +680,13 @@
       } else {
         if(m.is_file && m.file_data) appendBotFile(msgs, m.file_data);
         else if(m.is_image && m.image_base64) appendBotImage(msgs, m.image_base64, m.content);
-        else msgs.appendChild(buildAiBlock(m.content || ''));
+        else {
+          const b = document.createElement('div'); b.className = 'ai-block';
+          b.innerHTML = `<div class="thinking-row"><svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Ответ сгенерирован <span class="chev"></span></div><div class="thinking-body">Ответ успешно обработан моделью.</div><div class="ai-text">${md(m.content || '')}</div><div class="action-row"><button title="Копировать" data-act="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 012-2h10"/></svg></button><button title="Экспорт" data-act="export"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg></button></div><div class="disclaimer"><svg class="mark" viewBox="0 0 24 24" fill="var(--coral)"><path d="M12 0l1.2 8.1L21 9l-7.8 1.9L12 20l-1.2-9.1L3 9l7.8-.9z"/></svg><p>ИИ может ошибаться. Проверяйте важные факты самостоятельно.</p></div>`;
+          b.querySelector('.thinking-row').onclick = (e) => e.currentTarget.classList.toggle('open');
+          wireActionRow(b, m.content || '');
+          msgs.appendChild(b);
+        }
       }
     }
     scrollElementAboveInput(lastMessageRow(), 18, 0);
@@ -806,13 +702,6 @@
   function openLightbox(url){ document.getElementById('lightboxImg').src = url; document.getElementById('lightbox').classList.add('show'); }
   document.getElementById('lightbox').onclick = () => document.getElementById('lightbox').classList.remove('show');
 
-  function buildAiBlock(text){
-    const b = document.createElement('div'); b.className = 'ai-block';
-    b.innerHTML = `<div class="thinking-row"><svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Ответ сгенерирован <span class="chev"></span></div><div class="thinking-body">Ответ успешно обработан моделью.</div><div class="ai-text"></div><div class="action-row"><button title="Копировать" data-act="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 012-2h10"/></svg></button><button title="Экспорт" data-act="export"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg></button></div><div class="disclaimer"><svg class="mark" viewBox="0 0 24 24" fill="var(--coral)"><path d="M12 0l1.2 8.1L21 9l-7.8 1.9L12 20l-1.2-9.1L3 9l7.8-.9z"/></svg><p>ИИ может ошибаться. Проверяйте важные факты самостоятельно.</p></div>`;
-    b.querySelector('.ai-text').innerHTML = md(text);
-    b.querySelector('.thinking-row').onclick = (e) => e.currentTarget.classList.toggle('open');
-    wireActionRow(b, text); return b;
-  }
   function wireActionRow(b, t){
     const r = b.querySelector('.action-row');
     r.querySelector('[data-act="copy"]').onclick = (e) => { navigator.clipboard && navigator.clipboard.writeText(t); flashBtn(e.currentTarget); showToast('Скопировано'); };
@@ -857,21 +746,27 @@
 
   function appendBotError(el, t){ const b=document.createElement('div'); b.className='ai-block'; b.innerHTML=`<div class="ai-text" style="color:#C25B44">${x(t)}</div>`; el.appendChild(b); scrollElementAboveInput(b, 18); }
 
+  /* ================== DOM-Typewriter Animated Output ================== */
   function appendBotTextAnimated(el, t) {
-    const b=document.createElement('div'); b.className='ai-block';
-    b.innerHTML=`<div class="thinking-row"><svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Ответ сгенерирован <span class="chev"></span></div><div class="thinking-body">Ответ успешно обработан моделью.</div><div class="ai-text"></div><div class="action-row" style="display:none"><button title="Копировать" data-act="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 012-2h10"/></svg></button><button title="Экспорт" data-act="export"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg></button></div>`;
+    const b = document.createElement('div'); b.className = 'ai-block';
+    b.innerHTML = `<div class="thinking-row"><svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Ответ сгенерирован <span class="chev"></span></div><div class="thinking-body">Ответ успешно обработан моделью.</div><div class="ai-text"></div><div class="action-row" style="display:none"><button title="Копировать" data-act="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 012-2h10"/></svg></button><button title="Экспорт" data-act="export"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg></button></div>`;
     el.appendChild(b); syncMessagesBottomInset();
-    const txtEl = b.querySelector('.ai-text'); const actEl = b.querySelector('.action-row'); const m = document.getElementById('messages');
-    let typ = true, lck = true, usr = false;
     
-    function chk() { 
-      if(!m)return; 
-      const dist = m.scrollHeight - m.clientHeight - m.scrollTop;
-      lck = dist < 40;
-    }
+    const txtEl = b.querySelector('.ai-text');
+    const actEl = b.querySelector('.action-row');
+    const m = document.getElementById('messages');
     
-    const ts = () => { usr = true; }; const te = () => { usr = false; chk(); };
-    const tw = (e) => { if(e.deltaY < 0) lck = false; else chk(); }; const sc = () => { if(usr) chk(); };
+    let lck = true, usr = false;
+    function chk() { if(!m)return; if (m.scrollHeight - m.clientHeight - m.scrollTop < 40) lck = true; else lck = false; }
+    
+    const ts = () => { usr = true; lck = false; }; 
+    const te = () => { usr = false; chk(); };
+    const tw = (e) => { 
+      if(e.deltaY < 0) { lck = false; usr = true; clearTimeout(m.wT); m.wT = setTimeout(()=>usr=false, 100); } 
+      else { chk(); } 
+    }; 
+    const sc = () => { if(!usr) chk(); };
+    
     if(m) { 
       m.style.scrollBehavior = 'auto'; 
       m.addEventListener('touchstart', ts, {passive:true}); 
@@ -882,36 +777,30 @@
       m.addEventListener('scroll', sc, {passive:true}); 
     }
     
-    const fh = md(t); const fl = fh.length; const si = [];
-    let it = false, ie = false, elen = 0;
-    for (let j = 0; j < fl; j++) {
-        if (fh[j] === '<') it = true;
-        if (!it && fh[j] === '&') { ie = true; elen = 0; }
-        if (!it && !ie) si.push(j);
-        else if (ie) { elen++; if (fh[j] === ';' || elen > 8) { ie = false; si.push(j); } }
-        if (fh[j] === '>') { it = false; si.push(j); }
-    }
-    if (si.length === 0) si.push(fl - 1);
+    txtEl.innerHTML = md(t);
     
-    const tc = si.length; const dur = Math.max(tc * 12, 800); const st = performance.now(); let lsi = -1;
+    const tNs = []; const w = document.createTreeWalker(txtEl, NodeFilter.SHOW_TEXT, null, false); let n; let tot = 0;
+    while ((n = w.nextNode())) { 
+      if (n.nodeValue) { tNs.push({ n: n, t: n.nodeValue, l: n.nodeValue.length }); tot += n.nodeValue.length; n.nodeValue = ''; } 
+    }
+    
+    const dur = Math.max(tot * 12, 800); const st = performance.now(); let lsi = -1;
     function run(now) {
       const p = Math.min((now - st) / dur, 1);
       if (p < 1) {
-          const csi = Math.floor(p * (tc - 1));
+          const csi = Math.floor(p * tot);
           if (csi > lsi) { 
-            lsi = csi; 
-            txtEl.innerHTML = fh.slice(0, si[csi] + 1); 
-            if (lck && m) m.scrollTop = m.scrollHeight - m.clientHeight; 
-          }
-          requestAnimationFrame(run);
+            lsi = csi; let cl = csi;
+            for (const tn of tNs) { if (cl >= tn.l) { tn.n.nodeValue = tn.t; cl -= tn.l; } else { tn.n.nodeValue = tn.t.slice(0, cl); cl = 0; } }
+            if (lck && m && !usr) m.scrollTop = m.scrollHeight - m.clientHeight; 
+          } requestAnimationFrame(run);
       } else {
-          txtEl.innerHTML = fh; typ = false;
+          for (const tn of tNs) tn.n.nodeValue = tn.t;
           if (m) { 
             m.removeEventListener('touchstart', ts); m.removeEventListener('touchend', te); 
             m.removeEventListener('mousedown', ts); m.removeEventListener('mouseup', te); 
             m.removeEventListener('wheel', tw); m.removeEventListener('scroll', sc); 
-            m.style.scrollBehavior = ''; 
-            if (lck) { syncMessagesBottomInset(); m.scrollTop = m.scrollHeight - m.clientHeight; } 
+            m.style.scrollBehavior = ''; if (lck) { syncMessagesBottomInset(); m.scrollTop = m.scrollHeight - m.clientHeight; } 
           }
           if (actEl) actEl.style.display = 'flex'; 
           b.querySelector('.thinking-row').onclick = (e) => e.currentTarget.classList.toggle('open'); 
@@ -1006,8 +895,8 @@
 
   /* ================= Model picker (Synced with Backend IDs) ================= */
   const GROUP_MODELS = {
-    gemini:  [['gemini/gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite'], ['gemini/gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite'], ['gemini/gemini-3.6-flash', 'Gemini 3.6 Flash']],
-    other:   [['meta/llama-4-maverick-17b-128e-instruct', 'Llama 4 Maverick 17B'], ['z-ai/glm-5.2', 'GLM-5.2'], ['nvidia/nemotron-3-super-120b-a12b', 'Nemotron 3 Super 120B']]
+    gemini: [['gemini/gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite'], ['gemini/gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite'], ['gemini/gemini-3.6-flash', 'Gemini 3.6 Flash']],
+    other: [['meta/llama-4-maverick-17b-128e-instruct', 'Llama 4 Maverick 17B'], ['z-ai/glm-5.2', 'GLM-5.2'], ['nvidia/nemotron-3-super-120b-a12b', 'Nemotron 3 Super 120B']]
   };
   const GROUP_LABELS = { gemini:'Gemini', other:'Other Models' };
   const ALL_MODEL_NAMES = Object.values(GROUP_MODELS).flat().map(m => m[1]);
@@ -1017,62 +906,47 @@
   function openSheet(){ showGroups(); sheet.classList.add('open'); sheetScrim.classList.add('show'); }
   function closeSheet(){ sheet.classList.remove('open'); sheetScrim.classList.remove('show'); }
   sheetScrim.onclick = closeSheet;
-  function showGroups(){ sheetScroll.innerHTML = Object.keys(GROUP_MODELS).map((key,i)=>{ return `${i?'<div class="ms-sep"></div>':''}<div class="ms-item" data-action="group" data-key="${key}"><div class="ms-info"><b>${GROUP_LABELS[key]}</b></div><span class="ms-arrow">›</span></div>`; }).join(''); }
-  function showGroup(key){ sheetScroll.innerHTML = `<div class="ms-item ms-back" data-action="back"><span>‹</span> ${GROUP_LABELS[key]}</div>` + GROUP_MODELS[key].map((m,i)=>`${i?'<div class="ms-sep"></div>':''}<div class="ms-item${model===m[0]?' active':''}" data-action="model" data-id="${m[0]}" data-label="${m[1]}"><div class="ms-info"><b>${m[1]}</b></div><svg class="ms-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6L9 17l-5-5"/></svg></div>`).join(''); }
+  function showGroups(){ sheetScroll.innerHTML = Object.keys(GROUP_MODELS).map((k,i)=>`${i?'<div class="ms-sep"></div>':''}<div class="ms-item" data-action="group" data-key="${k}"><div class="ms-info"><b>${GROUP_LABELS[k]}</b></div><span class="ms-arrow">›</span></div>`).join(''); }
+  function showGroup(k){ sheetScroll.innerHTML = `<div class="ms-item ms-back" data-action="back"><span>‹</span> ${GROUP_LABELS[k]}</div>` + GROUP_MODELS[k].map((m,i)=>`${i?'<div class="ms-sep"></div>':''}<div class="ms-item${model===m[0]?' active':''}" data-action="model" data-id="${m[0]}" data-label="${m[1]}"><div class="ms-info"><b>${m[1]}</b></div><svg class="ms-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6L9 17l-5-5"/></svg></div>`).join(''); }
   sheetScroll.addEventListener('click', (e) => {
-    const item = e.target.closest('[data-action]'); if(!item) return; const action = item.dataset.action;
-    if(action === 'group'){ showGroup(item.dataset.key); } else if(action === 'model'){ model = item.dataset.id; modelLabel.textContent = item.dataset.label; setTimeout(closeSheet, 150); } else if(action === 'back'){ showGroups(); }
+    const i = e.target.closest('[data-action]'); if(!i) return; const a = i.dataset.action;
+    if(a === 'group') showGroup(i.dataset.key); else if(a === 'model'){ model = i.dataset.id; modelLabel.textContent = i.dataset.label; setTimeout(closeSheet, 150); } else if(a === 'back') showGroups();
   });
 
   /* ================= Composer / Sending ================= */
   const ta = document.getElementById('ta'); const sendBtn = document.getElementById('send-btn');
   function resize(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,130)+'px'; syncMessagesBottomInset(); }
-  function syncMessagesBottomInset(){
-    const m = document.getElementById('messages'); if(!m) return 0;
-    const input = document.querySelector('.input-area'); const inputH = Math.ceil(input?.offsetHeight || 110); const gap = 18; const inset = inputH + gap;
-    m.style.setProperty('--messages-bottom-inset', inset + 'px');
-    let sp = document.getElementById('scroll-spacer'); if(!sp){ sp = document.createElement('div'); sp.id = 'scroll-spacer'; }
-    sp.style.height = inset + 'px'; if(sp.parentNode !== m || sp.nextSibling){ m.appendChild(sp); } return inset;
-  }
+  function syncMessagesBottomInset(){ const m = document.getElementById('messages'); if(!m) return 0; const input = document.querySelector('.input-area'); const ih = Math.ceil(input?.offsetHeight || 110); const ins = ih + 18; m.style.setProperty('--messages-bottom-inset', ins + 'px'); let sp = document.getElementById('scroll-spacer'); if(!sp){ sp = document.createElement('div'); sp.id = 'scroll-spacer'; } sp.style.height = ins + 'px'; if(sp.parentNode !== m || sp.nextSibling) m.appendChild(sp); return ins; }
   function maxScrollTop(m){ return Math.max(0, m.scrollHeight - m.clientHeight); }
-  function lastMessageRow(){ const m = document.getElementById('messages'); if(!m) return null; const rows = [...m.children].filter(el => el.id !== 'scroll-spacer'); return rows[rows.length - 1] || null; }
-  function scrollElementAboveInputNow(el, gap=18){
-    const m = document.getElementById('messages'); if(!m || !el) return; syncMessagesBottomInset();
-    const input = document.querySelector('.input-area'); const inputH = input?.offsetHeight || 110;
-    const mRect = m.getBoundingClientRect(); const eRect = el.getBoundingClientRect(); const targetBottom = mRect.bottom - inputH - gap; const diff = eRect.bottom - targetBottom;
-    if(diff > 0){ m.scrollTop = Math.min(maxScrollTop(m), m.scrollTop + diff); }
-  }
+  function lastMessageRow(){ const m = document.getElementById('messages'); if(!m) return null; const r = [...m.children].filter(el => el.id !== 'scroll-spacer'); return r[r.length - 1] || null; }
+  function scrollElementAboveInputNow(el, gap=18){ const m = document.getElementById('messages'); if(!m || !el) return; syncMessagesBottomInset(); const ih = document.querySelector('.input-area')?.offsetHeight || 110; const diff = el.getBoundingClientRect().bottom - (m.getBoundingClientRect().bottom - ih - gap); if(diff > 0) m.scrollTop = Math.min(maxScrollTop(m), m.scrollTop + diff); }
   function scrollElementAboveInput(el, gap=18, delay=30){ setTimeout(() => scrollElementAboveInputNow(el, gap), delay); }
   window.addEventListener('resize', syncMessagesBottomInset);
   function toggleSend(){ sendBtn.disabled = !(ta.value.trim() || pendingFiles.length); }
   function onKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); if(ta.value.trim() || pendingFiles.length) send(); } }
 
   async function send(){
-    if(!accessGranted){showAccessDenied('Нет доступа. Откройте бота в Telegram и отправьте /start.');return;}
+    if(!accessGranted){showAccessDenied('Нет доступа.');return;}
     const text = ta.value.trim(); const files = pendingFiles.slice(); if(!text && !files.length) return;
     ta.value=''; resize(ta); clearPendingFiles(); toggleSend();
     const chat = activeChat();
-    if(chat.history.length === 0 && currentChatId !== 'incognito' && text){ chat.title = text.slice(0, 44) + (text.length > 44 ? '…' : ''); }
+    if(chat.history.length === 0 && currentChatId !== 'incognito' && text) chat.title = text.slice(0, 44) + (text.length > 44 ? '…' : '');
     chat.history.push({role:'user', content: text, files: files}); saveActiveChat(); renderSidebar();
-    const messages = document.getElementById('messages'); const welcome = document.getElementById('welcome'); if(welcome) welcome.remove(); document.querySelector('.top-actions')?.classList.add('has-msgs');
-    const row = document.createElement('div'); row.className = 'row-user'; if(files.length) row.appendChild(renderAttachmentsBlock(files));
-    if(text){ const bubble = document.createElement('div'); bubble.className = 'bubble-user'; bubble.textContent = text; row.appendChild(bubble); }
-    messages.appendChild(row); scrollElementAboveInput(row, 18);
-    const thinkBlock = document.createElement('div'); thinkBlock.className = 'ai-block'; thinkBlock.id = 'tr';
-    thinkBlock.innerHTML = `<div class="thinking-row open"><svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Думает <span class="chev"></span></div><div class="thinking-body">Разбираю вопрос, прикидываю формат ответа и проверяю, что учёл все детали запроса.</div><div class="ai-text"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
-    messages.appendChild(thinkBlock); scrollElementAboveInput(thinkBlock, 18);
-    const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+    const msgs = document.getElementById('messages'); document.getElementById('welcome')?.remove(); document.querySelector('.top-actions')?.classList.add('has-msgs');
+    const r = document.createElement('div'); r.className = 'row-user'; if(files.length) r.appendChild(renderAttachmentsBlock(files)); if(text){ const b = document.createElement('div'); b.className = 'bubble-user'; b.textContent = text; r.appendChild(b); } msgs.appendChild(r); scrollElementAboveInput(r, 18);
+    const tr = document.createElement('div'); tr.className = 'ai-block'; tr.id = 'tr'; tr.innerHTML = `<div class="thinking-row open"><svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Думает <span class="chev"></span></div><div class="thinking-body">Разбираю вопрос, прикидываю формат ответа и проверяю, что учёл все детали запроса.</div><div class="ai-text"><div class="typing-dots"><span></span><span></span><span></span></div></div>`; msgs.appendChild(tr); scrollElementAboveInput(tr, 18);
     try{
-      const apiHistory = chat.history.slice(0, -1).map(h => ({role: h.role, content: h.content}));
-      const resp=await fetch('/api/chat',{ method:'POST', headers:{'Content-Type':'application/json','Authorization':'tma '+initData}, body:JSON.stringify({ model: model, history: apiHistory, message: (text || (files.length ? 'Вложения' : '')), attachments: files.map(f => ({ name: f.name || '', type: f.type || '', dataUrl: f.dataUrl || '', kind: f.kind || 'file' })) }) });
-      if(resp.status===401||resp.status===403){ const data=await resp.json().catch(()=>({})); document.getElementById('tr')?.remove(); appendBotError(messages, data.message || 'Нет доступа. Откройте бота в Telegram и отправьте /start.'); return; }
-      if(!resp.ok){ const data=await resp.json().catch(()=>({})); document.getElementById('tr')?.remove(); appendBotError(messages, data.message || 'Ошибка запроса.'); return; }
+      const apiH = chat.history.slice(0, -1).map(h => ({role: h.role, content: h.content}));
+      const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+      const resp=await fetch('/api/chat',{ method:'POST', headers:{'Content-Type':'application/json','Authorization':'tma '+initData}, body:JSON.stringify({ model: model, history: apiH, message: (text || (files.length ? 'Вложения' : '')), attachments: files.map(f => ({ name: f.name || '', type: f.type || '', dataUrl: f.dataUrl || '', kind: f.kind || 'file' })) }) });
+      if(resp.status===401||resp.status===403){ const d=await resp.json().catch(()=>({})); document.getElementById('tr')?.remove(); appendBotError(msgs, d.message || 'Нет доступа.'); return; }
+      if(!resp.ok){ const d=await resp.json().catch(()=>({})); document.getElementById('tr')?.remove(); appendBotError(msgs, d.message || 'Ошибка запроса.'); return; }
       const data=await resp.json(); document.getElementById('tr')?.remove();
-      if (data.file) { appendBotFile(messages, data.file); chat.history.push({role:'assistant', content:`[Файл отправлен: ${data.file.name}]`, is_file: true, file_data: data.file}); }
-      else if(data.intent==='image'){ appendBotImage(messages, data.image_base64, data.prompt); chat.history.push({role:'assistant', content: data.prompt, is_image: true, image_base64: data.image_base64}); }
-      else { const reply=data.reply||''; appendBotTextAnimated(messages, reply); chat.history.push({role:'assistant', content: reply}); }
+      if (data.file) { appendBotFile(msgs, data.file); chat.history.push({role:'assistant', content:`[Файл отправлен: ${data.file.name}]`, is_file: true, file_data: data.file}); }
+      else if(data.intent==='image') { appendBotImage(msgs, data.image_base64, data.prompt); chat.history.push({role:'assistant', content: data.prompt, is_image: true, image_base64: data.image_base64}); }
+      else { appendBotTextAnimated(msgs, data.reply||''); chat.history.push({role:'assistant', content: data.reply||''}); }
       saveActiveChat();
-    }catch(e){ document.getElementById('tr')?.remove(); appendBotError(messages,'Не удалось связаться с сервером. Проверь подключение.'); }
+    }catch(e){ document.getElementById('tr')?.remove(); appendBotError(msgs,'Сетевая ошибка.'); }
   }
 
   /* ================= Admin panel UI ================= */
@@ -1087,73 +961,57 @@
     document.getElementById('adminBody').innerHTML = '<div class="a-empty">Загрузка...</div>';
     try{
       const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
-      const r=await fetch('/api/admin/users', {headers:{'Authorization':'tma '+initData}});
-      const d=await r.json();
+      const r=await fetch('/api/admin/users', {headers:{'Authorization':'tma '+initData}}); const d=await r.json();
       if(d.ok){ adminDataUsers = d.users; adminRenderTab('users'); } else { document.getElementById('adminBody').innerHTML = `<div class="a-empty">Ошибка: ${d.error||'Не удалось'}</div>`; }
     }catch(e){ document.getElementById('adminBody').innerHTML = `<div class="a-empty">Сетевая ошибка</div>`; }
   }
 
-  function adminRenderTab(tab){ const body = document.getElementById('adminBody'); body.classList.add('switching'); setTimeout(() => { adminRenderTabInner(tab); body.classList.remove('switching'); }, 160); }
+  function adminRenderTab(tab){ const b = document.getElementById('adminBody'); b.classList.add('switching'); setTimeout(() => { adminRenderTabInner(tab); b.classList.remove('switching'); }, 160); }
   const statusLabel = s => ({approved:'Одобрен', pending:'Ожидает', rejected:'Отклонён'}[s] || s);
 
   function adminRenderTabInner(tab){
-    const body = document.getElementById('adminBody');
+    const b = document.getElementById('adminBody');
     if(tab === 'stats'){
-      body.innerHTML = `<div class="a-section-title">Пользователи</div><div class="a-card">${adminDataUsers.map(u => `<div class="a-row" onclick="adminUserDetail(${u.user_id})"><div class="a-avatar">${String(u.user_id).slice(-2)}</div><div class="a-info"><div class="a-name">ID ${u.user_id}</div><div class="a-meta"><span class="a-badge ${u.status}">${statusLabel(u.status)}</span></div></div></div>`).join('')}</div>`;
-      return;
+      b.innerHTML = `<div class="a-section-title">Пользователи</div><div class="a-card">${adminDataUsers.map(u => `<div class="a-row" onclick="adminUserDetail(${u.user_id})"><div class="a-avatar">${String(u.user_id).slice(-2)}</div><div class="a-info"><div class="a-name">ID ${u.user_id}</div><div class="a-meta"><span class="a-badge ${u.status}">${statusLabel(u.status)}</span></div></div></div>`).join('')}</div>`; return;
     }
     const list = tab === 'pending' ? adminDataUsers.filter(u=>u.status==='pending') : adminDataUsers;
-    body.innerHTML = `<div class="a-section-title">${tab==='pending'?'Ожидают одобрения':'Все пользователи'}</div><div class="a-card">${list.length ? list.map(u=>{
-      const actions = u.status==='approved' ? `<button class="a-btn reject" onclick="event.stopPropagation();adminDoAction(${u.user_id},'reject')">Отозвать</button>` : u.status==='pending' ? `<button class="a-btn approve" onclick="event.stopPropagation();adminDoAction(${u.user_id},'approve')">Одобрить</button><button class="a-btn reject" onclick="event.stopPropagation();adminDoAction(${u.user_id},'reject')">Отклонить</button>` : `<button class="a-btn approve" onclick="event.stopPropagation();adminDoAction(${u.user_id},'approve')">Одобрить</button>`;
-      return `<div class="a-row" onclick="adminUserDetail(${u.user_id})"><div class="a-avatar">${String(u.user_id).slice(-2)}</div><div class="a-info"><div class="a-name">ID ${u.user_id}</div><div class="a-meta"><span class="a-badge ${u.status}">${statusLabel(u.status)}</span></div></div><div class="a-actions">${actions}</div></div>`;
+    b.innerHTML = `<div class="a-section-title">${tab==='pending'?'Ожидают одобрения':'Все пользователи'}</div><div class="a-card">${list.length ? list.map(u=>{
+      const acts = u.status==='approved' ? `<button class="a-btn reject" onclick="event.stopPropagation();adminDoAction(${u.user_id},'reject')">Отозвать</button>` : u.status==='pending' ? `<button class="a-btn approve" onclick="event.stopPropagation();adminDoAction(${u.user_id},'approve')">Одобрить</button><button class="a-btn reject" onclick="event.stopPropagation();adminDoAction(${u.user_id},'reject')">Отклонить</button>` : `<button class="a-btn approve" onclick="event.stopPropagation();adminDoAction(${u.user_id},'approve')">Одобрить</button>`;
+      return `<div class="a-row" onclick="adminUserDetail(${u.user_id})"><div class="a-avatar">${String(u.user_id).slice(-2)}</div><div class="a-info"><div class="a-name">ID ${u.user_id}</div><div class="a-meta"><span class="a-badge ${u.status}">${statusLabel(u.status)}</span></div></div><div class="a-actions">${acts}</div></div>`;
     }).join('') : `<div class="a-empty">Нет записей</div>`}</div>`;
   }
 
-  async function adminDoAction(userId, action){
+  async function adminDoAction(uid, act){
     try{
       const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
-      const r=await fetch('/api/admin/action', { method:'POST', headers:{'Content-Type':'application/json','Authorization':'tma '+initData}, body:JSON.stringify({action, user_id: userId}) });
-      const d=await r.json();
-      if(d.ok){ const u = adminDataUsers.find(x=>x.user_id===userId); if(u) u.status = action==='approve' ? 'approved' : 'rejected'; adminRenderTab(document.querySelector('.admin-tab.active').dataset.tab); }
+      const r=await fetch('/api/admin/action', { method:'POST', headers:{'Content-Type':'application/json','Authorization':'tma '+initData}, body:JSON.stringify({action: act, user_id: uid}) }); const d=await r.json();
+      if(d.ok){ const u = adminDataUsers.find(x=>x.user_id===uid); if(u) u.status = act==='approve' ? 'approved' : 'rejected'; adminRenderTab(document.querySelector('.admin-tab.active').dataset.tab); }
     }catch(e){}
   }
 
-  function adminSetModelLimit(userId, model){
-    const u = adminDataUsers.find(x=>x.user_id===userId); if(!u) return;
-    const input = document.querySelector(`.limitModelInput[data-model="${CSS.escape(model)}"]`); const val = parseInt(input.value, 10);
-    if (!u.limits) u.limits = {}; if(isNaN(val) || val <= 0){ delete u.limits[model]; } else { u.limits[model] = val; } adminUserDetail(userId);
+  function adminSetModelLimit(uid, m){
+    const u = adminDataUsers.find(x=>x.user_id===uid); if(!u) return;
+    const i = document.querySelector(`.limitModelInput[data-model="${CSS.escape(m)}"]`); const v = parseInt(i.value, 10);
+    if (!u.limits) u.limits = {}; if(isNaN(v) || v <= 0){ delete u.limits[m]; } else { u.limits[m] = v; } adminUserDetail(uid);
   }
-  function adminClearModelLimit(userId, model){ const u = adminDataUsers.find(x=>x.user_id===userId); if(!u) return; if (u.limits) delete u.limits[model]; adminUserDetail(userId); }
+  function adminClearModelLimit(uid, m){ const u = adminDataUsers.find(x=>x.user_id===uid); if(!u) return; if (u.limits) delete u.limits[m]; adminUserDetail(uid); }
 
-  async function adminUserDetail(userId){
-    const u = adminDataUsers.find(x=>x.user_id===userId); if(!u) return;
-    const body = document.getElementById('adminBody'); body.innerHTML = `<div class="a-empty">Загрузка статистики...</div>`;
-    let stats={total:0,day:0,week:0,models:{}};
-    try{ const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:''; const r=await fetch(`/api/admin/users/${userId}/stats`, {headers:{'Authorization':'tma '+initData}}); const d=await r.json(); if(d.ok) stats=d.stats; }catch(e){}
-    const modelEntries=Object.entries(stats.models||{}).sort((a,b)=>b[1]-a[1]); const maxM = Math.max(1, ...(modelEntries.map(m=>m[1]))); if(!u.limits) u.limits = {};
-    body.innerHTML = `
-      <div class="a-back-row" onclick="adminRenderTab(document.querySelector('.admin-tab.active').dataset.tab)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg><span>Назад</span></div>
-      <div class="a-detail-head"><div class="a-avatar">${String(u.user_id).slice(-2)}</div><div><div class="a-detail-title">ID ${u.user_id}</div><span class="a-badge ${u.status}">${statusLabel(u.status)}</span></div></div>
-      <div class="a-stat-grid"><div class="a-stat-box"><div class="a-stat-num">${stats.total||0}</div><div class="a-stat-lbl">Всего запросов</div></div><div class="a-stat-box"><div class="a-stat-num">${stats.day||0}</div><div class="a-stat-lbl">За сегодня</div></div><div class="a-stat-box"><div class="a-stat-num">${stats.week||0}</div><div class="a-stat-lbl">За неделю</div></div></div>
-      <div class="a-section-title">Используемые модели</div>
-      <div class="a-card" style="padding:6px 14px;">${modelEntries.length ? modelEntries.map(([m,c])=>`<div class="a-model-row"><div class="a-model-name">${m}</div><div class="a-model-bar-wrap"><div class="a-model-bar" style="width:${Math.round(c/maxM*100)}%"></div></div><div class="a-model-cnt">${c}</div></div>`).join('') : `<div class="a-empty">Нет активности</div>`}</div>
-      <div class="a-section-title">Лимиты по моделям (в день)</div>
-      <div class="a-card" style="padding:6px 14px;">
-        ${ALL_MODEL_NAMES.map(m => `<div class="a-model-row" style="gap:8px;"><div class="a-model-name" style="width:auto; flex:1;">${m}</div><span style="font-size:11.5px; color:var(--ink-faint); flex-shrink:0;">${u.limits && u.limits[m] ? u.limits[m]+'/день' : 'без лимита'}</span><input type="number" min="0" class="limitModelInput" data-model="${m}" placeholder="лимит" value="${u.limits && u.limits[m] ? u.limits[m] : ''}" style="width:74px; flex-shrink:0; border:none; background:rgba(128,120,100,0.12); border-radius:10px; padding:7px 9px; font-size:12.5px; color:var(--ink); font-family:inherit;"><button class="a-btn approve" style="padding:6px 9px; flex-shrink:0;" onclick="adminSetModelLimit(${u.user_id}, '${m}')">✓</button>${u.limits && u.limits[m] ? `<button class="a-btn reject" style="padding:6px 9px; flex-shrink:0;" onclick="adminClearModelLimit(${u.user_id}, '${m}')">✕</button>` : ''}</div>`).join('')}
-      </div>`;
+  async function adminUserDetail(uid){
+    const u = adminDataUsers.find(x=>x.user_id===uid); if(!u) return; const b = document.getElementById('adminBody'); b.innerHTML = `<div class="a-empty">Загрузка статистики...</div>`;
+    let s={total:0,day:0,week:0,models:{}};
+    try{ const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:''; const r=await fetch(`/api/admin/users/${uid}/stats`, {headers:{'Authorization':'tma '+initData}}); const d=await r.json(); if(d.ok) s=d.stats; }catch(e){}
+    const ms=Object.entries(s.models||{}).sort((a,b)=>b[1]-a[1]); const mx = Math.max(1, ...(ms.map(x=>x[1]))); if(!u.limits) u.limits = {};
+    b.innerHTML = `<div class="a-back-row" onclick="adminRenderTab(document.querySelector('.admin-tab.active').dataset.tab)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg><span>Назад</span></div><div class="a-detail-head"><div class="a-avatar">${String(u.user_id).slice(-2)}</div><div><div class="a-detail-title">ID ${u.user_id}</div><span class="a-badge ${u.status}">${statusLabel(u.status)}</span></div></div><div class="a-stat-grid"><div class="a-stat-box"><div class="a-stat-num">${s.total||0}</div><div class="a-stat-lbl">Всего запросов</div></div><div class="a-stat-box"><div class="a-stat-num">${s.day||0}</div><div class="a-stat-lbl">За сегодня</div></div><div class="a-stat-box"><div class="a-stat-num">${s.week||0}</div><div class="a-stat-lbl">За неделю</div></div></div><div class="a-section-title">Используемые модели</div><div class="a-card" style="padding:6px 14px;">${ms.length ? ms.map(([m,c])=>`<div class="a-model-row"><div class="a-model-name">${m}</div><div class="a-model-bar-wrap"><div class="a-model-bar" style="width:${Math.round(c/mx*100)}%"></div></div><div class="a-model-cnt">${c}</div></div>`).join('') : `<div class="a-empty">Нет активности</div>`}</div><div class="a-section-title">Лимиты по моделям (в день)</div><div class="a-card" style="padding:6px 14px;">${ALL_MODEL_NAMES.map(m => `<div class="a-model-row" style="gap:8px;"><div class="a-model-name" style="width:auto; flex:1;">${m}</div><span style="font-size:11.5px; color:var(--ink-faint); flex-shrink:0;">${u.limits && u.limits[m] ? u.limits[m]+'/день' : 'без лимита'}</span><input type="number" min="0" class="limitModelInput" data-model="${m}" placeholder="лимит" value="${u.limits && u.limits[m] ? u.limits[m] : ''}" style="width:74px; flex-shrink:0; border:none; background:rgba(128,120,100,0.12); border-radius:10px; padding:7px 9px; font-size:12.5px; color:var(--ink); font-family:inherit;"><button class="a-btn approve" style="padding:6px 9px; flex-shrink:0;" onclick="adminSetModelLimit(${u.user_id}, '${m}')">✓</button>${u.limits && u.limits[m] ? `<button class="a-btn reject" style="padding:6px 9px; flex-shrink:0;" onclick="adminClearModelLimit(${u.user_id}, '${m}')">✕</button>` : ''}</div>`).join('')}</div>`;
   }
 
   /* ================= Init App ================= */
   document.addEventListener('DOMContentLoaded', () => {
-    loadChats();
-    pruneOldChats();
-    const savedActive = localStorage.getItem(ACTIVE_KEY);
-    if(savedActive && chats[savedActive]) { currentChatId = savedActive; } 
-    else if(chatOrder.length > 0) { currentChatId = chatOrder[0]; } 
-    else { createChat(false); }
-    renderSidebar();
-    renderMessages();
-    syncMessagesBottomInset();
+    loadChats(); pruneOldChats();
+    const sa = localStorage.getItem(ACTIVE_KEY);
+    if(sa && chats[sa]) currentChatId = sa;
+    else if(chatOrder.length > 0) currentChatId = chatOrder[0];
+    else createChat(false);
+    renderSidebar(); renderMessages(); syncMessagesBottomInset();
   });
 </script>
 </body>
