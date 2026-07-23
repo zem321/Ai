@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Ассистент</title>
-<link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
-<link href="[https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600;700&display=swap](https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600;700&display=swap)" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
     --ease: cubic-bezier(0.22,1,0.36,1);
@@ -18,7 +18,6 @@
     --coral:#D97757; --border:rgba(44,40,30,0.09);
     --scrim:rgba(30,28,22,0.20); --sidebar-shadow:0 20px 50px rgba(44,40,30,0.20); --sidebar-w:min(86vw, 330px);
     --reveal-tint: rgba(255,255,255,0.45);
-
     --glass-a-grad: linear-gradient(160deg,rgba(255,255,254,.94) 0%,rgba(254,253,250,.90) 48%,rgba(255,255,254,.93) 100%);
     --glass-a-blur: blur(2px) saturate(102%) brightness(.90);
     --glass-a-shadow: 0 1px 2px rgba(0,0,0,.008), inset 0 1px 0 rgba(255,255,255,.88), inset 0 -0.5px 0 rgba(0,0,0,.010);
@@ -34,7 +33,6 @@
       --bubble-user:#2E2E2E; --coral:#E0876A; --border:rgba(255,255,255,0.09);
       --scrim:rgba(0,0,0,0.45); --sidebar-shadow:0 20px 50px rgba(0,0,0,0.55);
       --reveal-tint: rgba(0,0,0,0.35);
-
       --glass-a-grad: linear-gradient(160deg,rgba(42,42,39,.84) 0%,rgba(34,34,32,.76) 48%,rgba(42,42,39,.80) 100%);
       --glass-a-blur: blur(2px) saturate(102%) brightness(.90);
       --glass-a-shadow: 0 2px 8px rgba(0,0,0,.45);
@@ -47,25 +45,21 @@
   html,body{height:100%; margin:0; background:var(--bg); color:var(--ink); overflow:hidden;}
   @media (prefers-reduced-motion: reduce){ *{animation-duration:.001ms !important; transition-duration:.001ms !important;} }
 
-  .glass{background:var(--glass-a-grad); backdrop-filter:var(--glass-a-blur); -webkit-backdrop-filter:var(--glass-a-blur);
-    border:none; box-shadow:var(--glass-a-shadow); position:relative; overflow:hidden;}
-  .glass-strong{background:var(--glass-a-grad); backdrop-filter:var(--glass-a-blur); -webkit-backdrop-filter:var(--glass-a-blur);
+  .glass, .glass-strong{background:var(--glass-a-grad); backdrop-filter:var(--glass-a-blur); -webkit-backdrop-filter:var(--glass-a-blur);
     border:none; box-shadow:var(--glass-a-shadow); position:relative; overflow:hidden;}
   .glass-pill{background:var(--glass-b-grad); backdrop-filter:var(--glass-b-blur); -webkit-backdrop-filter:var(--glass-b-blur);
     border:none; box-shadow:var(--glass-b-shadow); position:relative; overflow:hidden;}
   @supports not (backdrop-filter: blur(1px)){ .glass, .glass-strong{background:var(--bg-elevated);} .glass-pill{background:#F0EFE0;} }
 
   .app{position:relative; height:100vh; overflow:hidden; background:var(--bg-elevated);}
-  .main-veil{position:absolute; inset:0; z-index:25; background:transparent;
-    backdrop-filter:blur(0.8px); -webkit-backdrop-filter:blur(0.8px);
+  .main-veil{position:absolute; inset:0; z-index:25; background:transparent; backdrop-filter:blur(0.8px); -webkit-backdrop-filter:blur(0.8px);
     opacity:0; visibility:hidden; transition:opacity .4s var(--ease-drawer), visibility .4s, background .9s var(--ease); pointer-events:none;}
   .main-veil.show{opacity:1; visibility:visible; pointer-events:auto;}
   .main-veil.dragging{transition:none !important;}
   .main-veil.ctx-dim{background:rgba(20,18,14,0.16);}
 
   /* ---------------- Sidebar ---------------- */
-  .sidebar{position:fixed; top:0; left:0; height:100%; width:var(--sidebar-w); background:var(--bg-elevated);
-    z-index:5;
+  .sidebar{position:fixed; top:0; left:0; height:100%; width:var(--sidebar-w); background:var(--bg-elevated); z-index:5;
     display:flex; flex-direction:column; padding:env(safe-area-inset-top,18px) 0 env(safe-area-inset-bottom,14px) 0;}
   .sidebar-top{display:flex; align-items:center; justify-content:space-between; padding:8px 18px 18px;}
   .mark{width:26px; height:26px; color:var(--coral); display:flex; align-items:center; justify-content:center;}
@@ -79,8 +73,7 @@
   .side-label{font-size:12px; color:var(--ink-faint); padding:14px 12px 6px; letter-spacing:.2px;}
   .side-item{position:relative; display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:12px;
     font-size:14.5px; color:var(--ink); cursor:pointer; overflow:hidden;
-    transition:background .3s var(--ease), transform .6s var(--ease), opacity .6s var(--ease);
-    -webkit-user-select:none; user-select:none;}
+    transition:background .3s var(--ease), transform .6s var(--ease), opacity .6s var(--ease); user-select:none;}
   .side-item:hover{background:rgba(128,120,100,0.10);}
   .side-item.active{background:var(--side-active); font-weight:500;}
   .side-item .t{flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:transform .25s var(--ease);}
@@ -108,12 +101,10 @@
     transition:transform .4s var(--ease-drawer), border-radius .4s var(--ease-drawer);}
   .main.dragging{transition:none !important;}
   .main.pushed{transform:translateX(var(--sidebar-w)); border-radius:26px 0 0 26px;}
-  .topbar{position:absolute; top:0; left:0; right:0; z-index:8;
-    display:flex; align-items:center; justify-content:space-between;
+  .topbar{position:absolute; top:0; left:0; right:0; z-index:8; display:flex; align-items:center; justify-content:space-between;
     padding:calc(env(safe-area-inset-top,10px) + 8px) 16px 16px; pointer-events:none;}
   .topbar > *{pointer-events:auto;}
-  .icon-btn{width:38px; height:38px; border-radius:50%; border:none; color:var(--ink);
-    display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; transition:transform .2s var(--spring);}
+  .icon-btn{width:38px; height:38px; border-radius:50%; border:none; color:var(--ink); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; transition:transform .2s var(--spring);}
   .icon-btn svg{width:17px; height:17px; z-index:1;}
   .icon-btn:active{transform:scale(.88);}
   .top-actions{display:flex; align-items:center; gap:8px; position:relative;}
@@ -136,19 +127,15 @@
     opacity:0; visibility:hidden; transform:translateY(-6px) scale(.97); transform-origin:top right;
     transition:opacity .2s, transform .2s var(--spring), visibility .2s; z-index:12;}
   .menu-pop.open{opacity:1; visibility:visible; transform:translateY(0) scale(1);}
-  .menu-item{display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; cursor:pointer;
-    font-size:14px; color:var(--ink); transition:background .15s;}
+  .menu-item{display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; cursor:pointer; font-size:14px; color:var(--ink); transition:background .15s;}
   .menu-item:hover{background:rgba(128,120,100,0.14);}
   .menu-item svg{width:16px; height:16px; color:var(--ink-soft); flex-shrink:0;}
   .menu-item.danger{color:#B4442E;} .menu-item.danger svg{color:#B4442E;}
   .menu-sep{height:1px; background:var(--border); margin:4px 8px;}
 
   /* ---------------- Messages ---------------- */
-  .messages{position:absolute; inset:0; overflow-y:auto;
-    padding:calc(env(safe-area-inset-top,10px) + 76px) 18px 0;
-    padding-bottom:0 !important;
-    scroll-padding-bottom:var(--messages-bottom-inset, 130px);
-    display:flex; flex-direction:column; gap:26px;}
+  .messages{position:absolute; inset:0; overflow-y:auto; padding:calc(env(safe-area-inset-top,10px) + 76px) 18px 0;
+    padding-bottom:0 !important; scroll-padding-bottom:var(--messages-bottom-inset, 130px); display:flex; flex-direction:column; gap:26px;}
   .messages::-webkit-scrollbar{width:0;}
   #scroll-spacer{flex-shrink:0; width:100%;}
   .welcome{margin:auto; text-align:center; display:flex; flex-direction:column; align-items:center; gap:10px; padding:0 24px; animation:fadeUp .55s var(--spring);}
@@ -158,16 +145,13 @@
   @keyframes fadeUp{from{opacity:0; transform:translateY(12px);} to{opacity:1; transform:translateY(0);}}
   @keyframes msgIn{from{opacity:0; transform:translateY(10px) scale(.985);} to{opacity:1; transform:translateY(0) scale(1);}}
   .row-user{display:flex; flex-direction:column; align-items:flex-end; gap:8px; animation:msgIn .38s var(--spring);}
-  .bubble-user{background:var(--bubble-user); color:var(--ink); padding:12px 16px; border-radius:20px;
-    font-size:15px; line-height:1.5; max-width:82%;}
+  .bubble-user{background:var(--bubble-user); color:var(--ink); padding:12px 16px; border-radius:20px; font-size:15px; line-height:1.5; max-width:82%;}
   .ai-block{display:flex; flex-direction:column; gap:10px; animation:msgIn .42s var(--spring);}
   .thinking-row{display:flex; align-items:center; gap:8px; color:var(--ink-faint); font-size:14px; cursor:pointer; user-select:none;}
   .thinking-row svg.clock{width:15px; height:15px; flex-shrink:0;}
-  .thinking-row .chev{margin-left:auto; width:8px; height:8px; border-right:1.5px solid var(--ink-faint); border-bottom:1.5px solid var(--ink-faint);
-    transform:rotate(-45deg); transition:transform .3s var(--spring);}
+  .thinking-row .chev{margin-left:auto; width:8px; height:8px; border-right:1.5px solid var(--ink-faint); border-bottom:1.5px solid var(--ink-faint); transform:rotate(-45deg); transition:transform .3s var(--spring);}
   .thinking-row.open .chev{transform:rotate(45deg);}
-  .thinking-body{font-size:13px; color:var(--ink-faint); line-height:1.55; max-height:0; overflow:hidden;
-    transition:max-height .35s var(--spring); padding-left:23px; border-left:1.5px solid var(--border); margin-left:7px;}
+  .thinking-body{font-size:13px; color:var(--ink-faint); line-height:1.55; max-height:0; overflow:hidden; transition:max-height .35s var(--spring); padding-left:23px; border-left:1.5px solid var(--border); margin-left:7px;}
   .thinking-row.open + .thinking-body{max-height:200px;}
   .ai-text{font-family:"Source Serif 4", Georgia, serif; font-size:16.5px; line-height:1.65; color:var(--ink); word-break:break-word;}
   .typing-dots{display:flex; gap:4px; padding:4px 0;}
@@ -175,128 +159,34 @@
   .typing-dots span:nth-child(2){animation-delay:.15s;} .typing-dots span:nth-child(3){animation-delay:.3s;}
   @keyframes dot{0%,80%,100%{transform:translateY(0); opacity:.4;} 40%{transform:translateY(-5px); opacity:1;}}
   .action-row{display:flex; align-items:center; gap:14px; color:var(--ink-faint); padding-top:2px;}
-  .action-row button{background:none; border:none; color:var(--ink-faint); cursor:pointer; padding:4px; display:flex;
-    transition:color .15s, transform .2s var(--spring);}
-  .action-row button:hover{color:var(--ink);}
-  .action-row button.on{color:var(--coral);}
-  .action-row button:active{transform:scale(.85);}
+  .action-row button{background:none; border:none; color:var(--ink-faint); cursor:pointer; padding:4px; display:flex; transition:color .15s, transform .2s var(--spring);}
+  .action-row button:hover{color:var(--ink);} .action-row button.on{color:var(--coral);} .action-row button:active{transform:scale(.85);}
   .action-row svg{width:16px; height:16px;}
   .disclaimer{display:flex; align-items:flex-start; gap:10px; padding-top:4px;}
   .disclaimer .mark{width:20px; height:20px; margin-top:1px; flex-shrink:0;}
   .disclaimer p{margin:0; font-size:12px; color:var(--ink-faint); line-height:1.5;}
 
   /* ---------------- Markdown Styling ---------------- */
-  .ai-text code {
-    font-family: 'Courier New', Courier, monospace;
-    background-color: rgba(0, 0, 0, 0.05);
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 14px;
-    color: var(--coral);
-  }
-  .ai-text pre.code-block {
-    font-family: 'Courier New', Courier, monospace;
-    background-color: rgba(0, 0, 0, 0.04);
-    padding: 12px;
-    border-radius: 8px;
-    font-size: 14px;
-    overflow-x: auto;
-    margin: 8px 0;
-    border: 1px solid var(--border);
-  }
-  .ai-text pre.code-block code {
-    background-color: transparent;
-    padding: 0;
-    border-radius: 0;
-    color: var(--ink);
-  }
-  .ai-text .markdown-link {
-    color: var(--coral);
-    text-decoration: underline;
-    font-weight: 500;
-  }
-  .ai-text .formula-block {
-    text-align: center;
-    font-size: 17px;
-    margin: 12px 0;
-    padding: 10px;
-    background-color: rgba(0, 0, 0, 0.02);
-    border-radius: 8px;
-    line-height: 1.5;
-  }
-  .ai-text .formula-inline {
-    font-size: 16px;
-    padding: 0 2px;
-  }
-  .ai-text ul, .ai-text ol {
-    margin: 6px 0 6px 20px;
-    padding-left: 18px;
-  }
-  .ai-text ul ul, .ai-text ol ol, .ai-text ul ol, .ai-text ol ul {
-    margin-top: 4px;
-    margin-bottom: 4px;
-  }
-  .ai-text li {
-    margin-bottom: 4px;
-  }
-  .ai-text .task-list-item {
-    list-style: none;
-    margin-left: -18px;
-  }
-  .ai-text .task-list-item input[type="checkbox"] {
-    width: 15px;
-    height: 15px;
-    margin: 0 7px 0 0;
-    vertical-align: -2px;
-    accent-color: var(--coral);
-  }
-  .ai-text blockquote {
-    margin: 8px 0;
-    padding: 8px 12px;
-    border-left: 3px solid var(--coral);
-    background: rgba(0, 0, 0, 0.025);
-    border-radius: 0 8px 8px 0;
-    color: var(--ink);
-  }
-  .ai-text blockquote pre.code-block {
-    margin: 6px 0;
-  }
-  .ai-text table.markdown-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 10px 0;
-    font-size: 14px;
-    overflow: hidden;
-    border-radius: 8px;
-  }
-  .ai-text table.markdown-table th, .ai-text table.markdown-table td {
-    border: 1px solid var(--border);
-    padding: 7px 9px;
-    text-align: left;
-    vertical-align: top;
-  }
-  .ai-text table.markdown-table th {
-    background: rgba(0, 0, 0, 0.035);
-    font-weight: 600;
-    color: var(--ink);
-  }
-  .ai-text table.markdown-table tr:nth-child(even) td {
-    background: rgba(0, 0, 0, 0.015);
-  }
-  .ai-text del {
-    color: var(--ink-soft);
-  }
-  .ai-text .markdown-image {
-    max-width: 100%;
-    border-radius: 10px;
-    display: block;
-    margin: 8px 0;
-  }
-  .ai-text hr {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: 12px 0;
-  }
+  .ai-text code { font-family: 'Courier New', Courier, monospace; background-color: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; font-size: 14px; color: var(--coral); }
+  .ai-text pre.code-block { font-family: 'Courier New', Courier, monospace; background-color: rgba(0,0,0,0.04); padding: 12px; border-radius: 8px; font-size: 14px; overflow-x: auto; margin: 8px 0; border: 1px solid var(--border); }
+  .ai-text pre.code-block code { background-color: transparent; padding: 0; border-radius: 0; color: var(--ink); }
+  .ai-text .markdown-link { color: var(--coral); text-decoration: underline; font-weight: 500; }
+  .ai-text .formula-block { text-align: center; font-size: 17px; margin: 12px 0; padding: 10px; background-color: rgba(0,0,0,0.02); border-radius: 8px; line-height: 1.5; }
+  .ai-text .formula-inline { font-size: 16px; padding: 0 2px; }
+  .ai-text ul, .ai-text ol { margin: 6px 0 6px 20px; padding-left: 18px; }
+  .ai-text ul ul, .ai-text ol ol, .ai-text ul ol, .ai-text ol ul { margin-top: 4px; margin-bottom: 4px; }
+  .ai-text li { margin-bottom: 4px; }
+  .ai-text .task-list-item { list-style: none; margin-left: -18px; }
+  .ai-text .task-list-item input[type="checkbox"] { width: 15px; height: 15px; margin: 0 7px 0 0; vertical-align: -2px; accent-color: var(--coral); }
+  .ai-text blockquote { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--coral); background: rgba(0,0,0,0.025); border-radius: 0 8px 8px 0; color: var(--ink); }
+  .ai-text blockquote pre.code-block { margin: 6px 0; }
+  .ai-text table.markdown-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; overflow: hidden; border-radius: 8px; }
+  .ai-text table.markdown-table th, .ai-text table.markdown-table td { border: 1px solid var(--border); padding: 7px 9px; text-align: left; vertical-align: top; }
+  .ai-text table.markdown-table th { background: rgba(0,0,0,0.035); font-weight: 600; color: var(--ink); }
+  .ai-text table.markdown-table tr:nth-child(even) td { background: rgba(0,0,0,0.015); }
+  .ai-text del { color: var(--ink-soft); }
+  .ai-text .markdown-image { max-width: 100%; border-radius: 10px; display: block; margin: 8px 0; }
+  .ai-text hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
   .ai-text .code-token.comment { color: #7A7A72; font-style: italic; }
   .ai-text .code-token.keyword { color: #B85A2E; font-weight: 600; }
   .ai-text .code-token.string { color: #2F7D52; }
@@ -306,12 +196,7 @@
   .ai-text .code-token.tag { color: #B85A2E; }
   .ai-text .code-token.attr { color: #8A63D2; }
   .ai-text .code-token.value { color: #2F7D52; }
-  .ai-text h1, .ai-text h2, .ai-text h3 {
-    margin-top: 12px;
-    margin-bottom: 6px;
-    font-weight: 600;
-    color: var(--ink);
-  }
+  .ai-text h1, .ai-text h2, .ai-text h3 { margin-top: 12px; margin-bottom: 6px; font-weight: 600; color: var(--ink); }
 
   /* ---------------- Attachments ---------------- */
   .attach-strip{display:flex; gap:8px; flex-wrap:wrap;}
@@ -329,73 +214,43 @@
   .bubble-file-icon{font-size:20px; flex-shrink:0;}
   .bubble-file-name{font-size:12.5px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   
-  /* Блок AI Файла */
-  .bot-file{
-    max-width:86%; background:var(--bg-elevated); border:1px solid var(--border);
-    border-radius:18px; padding:13px 15px; box-shadow:0 1px 4px rgba(0,0,0,.05);
-    display:flex; align-items:center; gap:12px; cursor:pointer;
-    transition:transform .15s ease; -webkit-tap-highlight-color:transparent; margin-bottom:8px;
-  }
+  .bot-file{max-width:86%; background:var(--bg-elevated); border:1px solid var(--border); border-radius:18px; padding:13px 15px; box-shadow:0 1px 4px rgba(0,0,0,.05); display:flex; align-items:center; gap:12px; cursor:pointer; transition:transform .15s ease; -webkit-tap-highlight-color:transparent; margin-bottom:8px;}
   .bot-file:active{transform:scale(0.985);}
-  .bot-file-icon{
-    width:38px; height:38px; background:var(--side-active); border-radius:9px;
-    display:flex; align-items:center; justify-content:center; flex-shrink:0;
-    font-size:15px; font-weight:700; color:var(--ink-soft); border:1px solid var(--border);
-  }
+  .bot-file-icon{width:38px; height:38px; background:var(--side-active); border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:15px; font-weight:700; color:var(--ink-soft); border:1px solid var(--border);}
   .bot-file-content{flex:1; min-width:0;}
   .bot-file-name{font-weight:600; font-size:15px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:1px;}
   .bot-file-meta{font-size:13px; color:var(--ink-soft);}
 
-  .lightbox{position:fixed; inset:0; background:rgba(10,9,7,0.86); z-index:80; display:flex; align-items:center; justify-content:center;
-    opacity:0; visibility:hidden; transition:opacity .25s, visibility .25s; padding:24px;}
+  .lightbox{position:fixed; inset:0; background:rgba(10,9,7,0.86); z-index:80; display:flex; align-items:center; justify-content:center; opacity:0; visibility:hidden; transition:opacity .25s, visibility .25s; padding:24px;}
   .lightbox.show{opacity:1; visibility:visible;}
   .lightbox img{max-width:94vw; max-height:86vh; border-radius:14px; box-shadow:0 10px 40px rgba(0,0,0,.5); object-fit:contain;}
 
   /* ---------------- Composer ---------------- */
-  .input-area{position:absolute; bottom:0; left:0; right:0; z-index:8;
-    padding:7px 15px calc(max(env(safe-area-inset-bottom,10px), 10px) + 12px); background:transparent; pointer-events:none;}
-  .input-card{pointer-events:auto; position:relative; overflow:hidden; border-radius:29px;
-    padding:13px 13px 11px 18px; display:flex; flex-direction:column; gap:9px;
-    transition:background .58s var(--ease), box-shadow .58s var(--ease);}
-  textarea{width:100%; background:transparent; border:none; outline:none !important; box-shadow:none !important;
-    -webkit-appearance:none; appearance:none; color:var(--ink); font-family:inherit;
-    font-size:16px; line-height:1.45; letter-spacing:-.01em; resize:none; min-height:26px; max-height:132px;
-    display:block; padding:0; margin:0; caret-color:var(--coral); -webkit-text-size-adjust:100%;}
+  .input-area{position:absolute; bottom:0; left:0; right:0; z-index:8; padding:7px 15px calc(max(env(safe-area-inset-bottom,10px), 10px) + 12px); background:transparent; pointer-events:none;}
+  .input-card{pointer-events:auto; position:relative; overflow:hidden; border-radius:29px; padding:13px 13px 11px 18px; display:flex; flex-direction:column; gap:9px; transition:background .58s var(--ease), box-shadow .58s var(--ease);}
+  textarea{width:100%; background:transparent; border:none; outline:none !important; box-shadow:none !important; -webkit-appearance:none; appearance:none; color:var(--ink); font-family:inherit; font-size:16px; line-height:1.45; letter-spacing:-.01em; resize:none; min-height:26px; max-height:132px; display:block; padding:0; margin:0; caret-color:var(--coral); -webkit-text-size-adjust:100%;}
   textarea::placeholder{color:var(--ink-faint);}
   .input-toolbar{display:flex; align-items:center; gap:9px; min-height:35px;}
-  .pill-plus{width:35px; height:35px; padding:0; flex-shrink:0; color:var(--ink);
-    border:none; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer;
-    font-family:inherit; transition:transform .5s var(--ease);}
+  .pill-plus{width:35px; height:35px; padding:0; flex-shrink:0; color:var(--ink); border:none; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit; transition:transform .5s var(--ease);}
   .pill-plus:active{transform:scale(.88);}
   .pill-plus svg{width:18px; height:18px; position:relative; z-index:1;}
-  .pill-model{height:35px; padding:0 15px; font-size:12.1px; font-weight:500; color:var(--ink-soft); flex-shrink:1; min-width:0;
-    border:none; border-radius:999px; display:flex; align-items:center; gap:5px; justify-content:center;
-    font-family:inherit; cursor:pointer; transition:transform .3s var(--ease); max-width:52vw;}
+  .pill-model{height:35px; padding:0 15px; font-size:12.1px; font-weight:500; color:var(--ink-soft); flex-shrink:1; min-width:0; border:none; border-radius:999px; display:flex; align-items:center; gap:5px; justify-content:center; font-family:inherit; cursor:pointer; transition:transform .3s var(--ease); max-width:52vw;}
   .pill-model:active{transform:scale(.96);}
   .pill-model span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; position:relative; z-index:1;}
   .pill-model .chev{width:5px; height:5px; border-right:1.3px solid var(--ink-faint); border-bottom:1.3px solid var(--ink-faint); transform:rotate(45deg); flex-shrink:0; position:relative; z-index:1;}
   .tool-spacer{flex:1;}
-  .send-btn{width:35px; height:35px; min-width:35px; border-radius:50%; background:var(--ink); color:var(--bg); flex-shrink:0;
-    display:flex; align-items:center; justify-content:center; cursor:pointer; border:none; padding:0; margin:0;
-    transition:opacity .42s var(--ease), background .42s var(--ease), color .42s var(--ease), transform .3s var(--ease);}
+  .send-btn{width:35px; height:35px; min-width:35px; border-radius:50%; background:var(--ink); color:var(--bg); flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; border:none; padding:0; margin:0; transition:opacity .42s var(--ease), background .42s var(--ease), color .42s var(--ease), transform .3s var(--ease);}
   .send-btn:active{transform:scale(.92);}
   .send-btn:disabled{background:rgba(128,120,100,0.16); color:var(--ink-faint); opacity:.8; cursor:default;}
   .send-btn svg{width:17px; height:17px;}
 
   /* ---------------- Model sheet ---------------- */
-  .sheet-scrim{position:fixed; inset:0; background:transparent; backdrop-filter:none; -webkit-backdrop-filter:none;
-    z-index:50; opacity:0; pointer-events:none; transition:opacity .36s var(--ease);}
+  .sheet-scrim{position:fixed; inset:0; background:transparent; backdrop-filter:none; -webkit-backdrop-filter:none; z-index:50; opacity:0; pointer-events:none; transition:opacity .36s var(--ease);}
   .sheet-scrim.show{opacity:1; pointer-events:all;}
-  .sheet{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 28px); z-index:60;
-    width:min(82%, 318px); max-width:318px; height:228px; margin:0; padding:6px 0;
-    transform:translate(-50%, 18px) scale(.972); transform-origin:bottom center;
-    opacity:0; border-radius:24px; pointer-events:none; overflow:hidden; will-change:transform, opacity;
-    transition:opacity .76s var(--ease), transform .76s var(--ease);
-    display:flex; flex-direction:column;}
+  .sheet{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 28px); z-index:60; width:min(82%, 318px); max-width:318px; height:228px; margin:0; padding:6px 0; transform:translate(-50%, 18px) scale(.972); transform-origin:bottom center; opacity:0; border-radius:24px; pointer-events:none; overflow:hidden; will-change:transform, opacity; transition:opacity .76s var(--ease), transform .76s var(--ease); display:flex; flex-direction:column;}
   .sheet.open{opacity:1; transform:translate(-50%, 0) scale(1); pointer-events:all;}
   .sheet-scroll{flex:1; display:flex; flex-direction:column; overflow:hidden; position:relative; z-index:2;}
-  .ms-item{flex:1 1 0; display:flex; align-items:center; gap:10px; padding:0 16px; cursor:pointer; min-height:0;
-    transition:background .2s var(--ease);}
+  .ms-item{flex:1 1 0; display:flex; align-items:center; gap:10px; padding:0 16px; cursor:pointer; min-height:0; transition:background .2s var(--ease);}
   .ms-item:active{background:rgba(128,120,100,0.12);}
   .ms-item.active .ms-info b{color:var(--coral);}
   .ms-info{flex:1; min-width:0;}
@@ -407,29 +262,23 @@
   .ms-sep{height:1px; background:var(--border); margin:0 16px; flex-shrink:0;}
 
   /* ---------------- Custom modal ---------------- */
-  .modal-scrim{position:fixed; inset:0; background:var(--scrim); backdrop-filter:blur(3px); z-index:70;
-    opacity:0; visibility:hidden; transition:opacity .25s, visibility .25s; display:flex; align-items:center; justify-content:center; padding:24px;}
+  .modal-scrim{position:fixed; inset:0; background:var(--scrim); backdrop-filter:blur(3px); z-index:70; opacity:0; visibility:hidden; transition:opacity .25s, visibility .25s; display:flex; align-items:center; justify-content:center; padding:24px;}
   .modal-scrim.show{opacity:1; visibility:visible;}
-  .modal-card{width:100%; max-width:340px; border-radius:24px; padding:22px; background:var(--bg-elevated);
-    box-shadow:0 20px 60px rgba(0,0,0,0.25); transform:scale(.92) translateY(10px); transition:transform .3s var(--spring);}
+  .modal-card{width:100%; max-width:340px; border-radius:24px; padding:22px; background:var(--bg-elevated); box-shadow:0 20px 60px rgba(0,0,0,0.25); transform:scale(.92) translateY(10px); transition:transform .3s var(--spring);}
   .modal-scrim.show .modal-card{transform:scale(1) translateY(0);}
   .modal-title{font-family:"Source Serif 4", Georgia, serif; font-size:18px; font-weight:600; margin:0 0 6px;}
   .modal-msg{font-size:14px; color:var(--ink-soft); line-height:1.5; margin:0 0 14px;}
-  .modal-input{width:100%; border:none; background:rgba(128,120,100,0.12); border-radius:14px; padding:12px 14px;
-    font-size:15px; color:var(--ink); font-family:inherit; margin-bottom:16px; outline:none;}
+  .modal-input{width:100%; border:none; background:rgba(128,120,100,0.12); border-radius:14px; padding:12px 14px; font-size:15px; color:var(--ink); font-family:inherit; margin-bottom:16px; outline:none;}
   .modal-actions{display:flex; gap:10px;}
   .modal-btn{flex:1; padding:12px; border-radius:14px; border:none; font-size:14.5px; font-weight:600; cursor:pointer; font-family:inherit;}
   .modal-btn.cancel{background:rgba(128,120,100,0.12); color:var(--ink);}
   .modal-btn.primary{background:var(--ink); color:var(--bg);}
   .modal-btn.danger{background:#C0503A; color:#fff;}
-  .toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); z-index:90;
-    background:var(--ink); color:var(--bg); padding:12px 20px; border-radius:16px; font-size:14px;
-    opacity:0; visibility:hidden; transition:opacity .25s, transform .25s;}
+  .toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); z-index:90; background:var(--ink); color:var(--bg); padding:12px 20px; border-radius:16px; font-size:14px; opacity:0; visibility:hidden; transition:opacity .25s, transform .25s;}
   .toast.show{opacity:1; visibility:visible; transform:translateX(-50%) translateY(0);}
 
   /* ---------------- Admin panel ---------------- */
-  .admin-screen{position:fixed; inset:0; z-index:60; background:var(--bg); display:flex; flex-direction:column;
-    opacity:0; visibility:hidden; transform:translateY(14px); transition:opacity .32s var(--ease), transform .32s var(--ease), visibility .32s;}
+  .admin-screen{position:fixed; inset:0; z-index:60; background:var(--bg); display:flex; flex-direction:column; opacity:0; visibility:hidden; transform:translateY(14px); transition:opacity .32s var(--ease), transform .32s var(--ease), visibility .32s;}
   .admin-screen.open{opacity:1; visibility:visible; transform:translateY(0);}
   .admin-top{display:flex; align-items:center; gap:12px; padding:calc(env(safe-area-inset-top,10px) + 10px) 16px 14px;}
   .admin-top h2{font-size:17px; font-weight:600; font-family:"Source Serif 4", Georgia, serif; margin:0;}
@@ -482,7 +331,7 @@
     .input-card{max-width:760px; margin:0 auto;}
   }
 </style>
-<script src="[https://telegram.org/js/telegram-web-app.js](https://telegram.org/js/telegram-web-app.js)"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
 <div class="app">
@@ -1731,7 +1580,6 @@
     function checkLock() {
       if(!m) return;
       const dist = m.scrollHeight - m.clientHeight - m.scrollTop;
-      // Если до низа меньше 40px, скролл привязывается к низу
       if (dist < 40) {
         isLocked = true;
       } else {
@@ -1761,12 +1609,10 @@
       m.addEventListener('scroll', onScroll, {passive:true});
     }
 
-    // Предварительно парсим весь текст в готовый HTML
     const fullHtml = md(text);
     const htmlLen = fullHtml.length;
     const safeIndices = [];
     
-    // Ищем безопасные точки для среза (вне HTML-тегов и спецсимволов)
     let inTag = false;
     let inEntity = false;
     let entityLen = 0;
@@ -1779,13 +1625,15 @@
             safeIndices.push(j);
         } else if (inEntity) {
             entityLen++;
-            // Если дошли до конца спецсимвола или он оказался просто текстом
             if (fullHtml[j] === ';' || entityLen > 8) {
                 inEntity = false;
                 safeIndices.push(j);
             }
         }
-        if (fullHtml[j] === '>') inTag = false;
+        if (fullHtml[j] === '>') {
+            inTag = false;
+            safeIndices.push(j); 
+        }
     }
     if (safeIndices.length === 0) safeIndices.push(htmlLen - 1);
 
@@ -1804,7 +1652,6 @@
           if (currentSafeIdx > lastSafeIdx) {
               lastSafeIdx = currentSafeIdx;
               const htmlIdx = safeIndices[currentSafeIdx];
-              // Браузер сам закроет незакрытые теги в срезанном HTML
               textEl.innerHTML = fullHtml.slice(0, htmlIdx + 1);
               
               if (isLocked && m) {
@@ -1908,4 +1755,468 @@
       const x = e.touches[0].clientX, y = e.touches[0].clientY;
       const dx = x - startX, dy = y - startY;
       if(axisLocked === null && (Math.abs(dx) > 6 || Math.abs(dy) > 6)){
-        axisLocked = Math.
+        axisLocked = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      }
+      if(axisLocked === 'y'){ dragging = false; endDrag(mainEl.classList.contains('pushed') ? 1 : 0); return; }
+      if(axisLocked === 'x'){
+        setTranslate(startTranslate + dx);
+        const dt = e.timeStamp - lastT;
+        if(dt > 0){ velocity = (x - lastX) / dt; }
+        lastX = x; lastT = e.timeStamp;
+      }
+    }, {passive:true});
+
+    document.addEventListener('touchend', () => {
+      if(!dragging) return;
+      dragging = false;
+      const t = currentTranslate();
+      const ratio = sidebarPx ? t / sidebarPx : 0;
+      const FLICK_SPEED = 0.35;
+      let finalRatio = ratio;
+      if(velocity > FLICK_SPEED) finalRatio = 1;
+      else if(velocity < -FLICK_SPEED) finalRatio = 0;
+      else if(ratio > 0.22 && ratio < 0.78) finalRatio = ratio;
+      endDrag(finalRatio);
+    });
+  })();
+
+  const moreBtn = document.getElementById('moreBtn');
+  const menuPop = document.getElementById('menuPop');
+  moreBtn.onclick = (e) => { e.stopPropagation(); menuPop.classList.toggle('open'); };
+  document.addEventListener('click', (e) => { if(!menuPop.contains(e.target) && !moreBtn.contains(e.target)) menuPop.classList.remove('open'); });
+
+  document.getElementById('menuRename').onclick = () => {
+    menuPop.classList.remove('open');
+    if(!activeChat()) return;
+    showRenameModal(activeChat().title, (val) => { activeChat().title = val; saveChats(); renderSidebar(); });
+  };
+  document.getElementById('menuShare').onclick = () => {
+    menuPop.classList.remove('open');
+    const fakeLink = 'https://assistant.app/chat/' + currentChatId;
+    if(navigator.clipboard) navigator.clipboard.writeText(fakeLink);
+    showToast('Ссылка на чат скопирована');
+  };
+  document.getElementById('menuDelete').onclick = () => {
+    menuPop.classList.remove('open');
+    requestDeleteChat(currentChatId);
+  };
+  document.getElementById('newChatBtn').onclick = () => createChat(true);
+  document.getElementById('newChatBtn2').onclick = () => createChat(true);
+
+  /* ================= Attachments ================= */
+  let pendingFiles = [];
+  function openFilePicker(){ document.getElementById('file-input').click(); }
+  function readAsDataURL(file){ return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
+  async function onFilesChosen(input){
+    for(const file of Array.from(input.files)){
+      const isImg = file.type.startsWith('image/');
+      const item = { name:file.name, type: file.type || '', kind:isImg?'image':'file', dataUrl:null };
+      try{ item.dataUrl = await readAsDataURL(file); }catch(e){}
+      pendingFiles.push(item);
+    }
+    input.value = ''; renderAttachStrip(); toggleSend();
+  }
+  function removePendingFile(i){ pendingFiles.splice(i,1); renderAttachStrip(); toggleSend(); }
+  function clearPendingFiles(){ pendingFiles = []; renderAttachStrip(); }
+  function renderAttachStrip(){
+    const strip = document.getElementById('attachStrip');
+    strip.innerHTML = pendingFiles.map((f,i) => `<div class="attach-thumb">${
+      f.kind==='image' && f.dataUrl ? `<img src="${f.dataUrl}" alt="">` : `<div class="file-icon">📎<div class="file-name">${x(f.name)}</div></div>`
+    }<button class="rm-btn" onclick="removePendingFile(${i})">×</button></div>`).join('');
+    syncMessagesBottomInset();
+  }
+
+  /* ================= Model picker (Synced with Backend IDs) ================= */
+  const GROUP_MODELS = {
+    gemini:  [
+      ['gemini/gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite'],
+      ['gemini/gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite'],
+      ['gemini/gemini-3.6-flash', 'Gemini 3.6 Flash']
+    ],
+    other:   [
+      ['meta/llama-4-maverick-17b-128e-instruct', 'Llama 4 Maverick 17B'],
+      ['z-ai/glm-5.2', 'GLM-5.2'],
+      ['nvidia/nemotron-3-super-120b-a12b', 'Nemotron 3 Super 120B']
+    ]
+  };
+  const GROUP_LABELS = { gemini:'Gemini', other:'Other Models' };
+  const ALL_MODEL_NAMES = Object.values(GROUP_MODELS).flat().map(m => m[1]);
+
+  let model = 'gemini/gemini-3.1-flash-lite';
+  const modelLabel = document.getElementById('model-label');
+
+  function openGroupPicker() {
+    openSheet();
+  }
+
+  const sheet = document.getElementById('sheet');
+  const sheetScrim = document.getElementById('sheetScrim');
+  const sheetScroll = document.getElementById('sheetScroll');
+  function openSheet(){ showGroups(); sheet.classList.add('open'); sheetScrim.classList.add('show'); }
+  function closeSheet(){ sheet.classList.remove('open'); sheetScrim.classList.remove('show'); }
+  sheetScrim.onclick = closeSheet;
+
+  function showGroups(){
+    sheetScroll.innerHTML = Object.keys(GROUP_MODELS).map((key,i)=>{
+      return `${i?'<div class="ms-sep"></div>':''}<div class="ms-item" data-action="group" data-key="${key}">
+        <div class="ms-info"><b>${GROUP_LABELS[key]}</b></div>
+        <span class="ms-arrow">›</span>
+      </div>`;
+    }).join('');
+  }
+  function showGroup(key){
+    sheetScroll.innerHTML = `<div class="ms-item ms-back" data-action="back"><span>‹</span> ${GROUP_LABELS[key]}</div>` +
+      GROUP_MODELS[key].map((m,i)=>`${i?'<div class="ms-sep"></div>':''}<div class="ms-item${model===m[0]?' active':''}" data-action="model" data-id="${m[0]}" data-label="${m[1]}">
+        <div class="ms-info"><b>${m[1]}</b></div>
+        <svg class="ms-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6L9 17l-5-5"/></svg>
+      </div>`).join('');
+  }
+  sheetScroll.addEventListener('click', (e) => {
+    const item = e.target.closest('[data-action]');
+    if(!item) return;
+    const action = item.dataset.action;
+    if(action === 'group'){
+      showGroup(item.dataset.key);
+    } else if(action === 'model'){
+      model = item.dataset.id; modelLabel.textContent = item.dataset.label;
+      setTimeout(closeSheet, 150);
+    } else if(action === 'back'){ showGroups(); }
+  });
+
+  /* ================= Composer / Sending ================= */
+  const ta = document.getElementById('ta');
+  const sendBtn = document.getElementById('send-btn');
+  function resize(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,130)+'px'; syncMessagesBottomInset(); }
+  function syncMessagesBottomInset(){
+    const m = document.getElementById('messages');
+    if(!m) return 0;
+    const input = document.querySelector('.input-area');
+    const inputH = Math.ceil(input?.offsetHeight || 110);
+    const gap = 18;
+    const inset = inputH + gap;
+    m.style.setProperty('--messages-bottom-inset', inset + 'px');
+    let sp = document.getElementById('scroll-spacer');
+    if(!sp){ sp = document.createElement('div'); sp.id = 'scroll-spacer'; }
+    sp.style.height = inset + 'px';
+    if(sp.parentNode !== m || sp.nextSibling){ m.appendChild(sp); }
+    return inset;
+  }
+  function maxScrollTop(m){ return Math.max(0, m.scrollHeight - m.clientHeight); }
+  function lastMessageRow(){
+    const m = document.getElementById('messages');
+    if(!m) return null;
+    const rows = [...m.children].filter(el => el.id !== 'scroll-spacer');
+    return rows[rows.length - 1] || null;
+  }
+  function scrollElementAboveInputNow(el, gap=18){
+    const m = document.getElementById('messages');
+    if(!m || !el) return;
+    syncMessagesBottomInset();
+    const input = document.querySelector('.input-area');
+    const inputH = input?.offsetHeight || 110;
+    const mRect = m.getBoundingClientRect();
+    const eRect = el.getBoundingClientRect();
+    const targetBottom = mRect.bottom - inputH - gap;
+    const diff = eRect.bottom - targetBottom;
+    if(diff > 0){ m.scrollTop = Math.min(maxScrollTop(m), m.scrollTop + diff); }
+  }
+  function scrollElementAboveInput(el, gap=18, delay=30){ setTimeout(() => scrollElementAboveInputNow(el, gap), delay); }
+  window.addEventListener('resize', syncMessagesBottomInset);
+  function toggleSend(){ sendBtn.disabled = !(ta.value.trim() || pendingFiles.length); }
+  function onKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); if(ta.value.trim() || pendingFiles.length) send(); } }
+
+  async function send(){
+    if(!accessGranted){showAccessDenied('Нет доступа. Откройте бота в Telegram и отправьте /start.');return;}
+    
+    const text = ta.value.trim();
+    const files = pendingFiles.slice();
+    if(!text && !files.length) return;
+    
+    ta.value=''; resize(ta); clearPendingFiles(); toggleSend();
+    
+    const chat = activeChat();
+    
+    if(chat.history.length === 0 && currentChatId !== 'incognito' && text){
+      chat.title = text.slice(0, 44) + (text.length > 44 ? '…' : '');
+    }
+    
+    chat.history.push({role:'user', content: text, files: files});
+    saveActiveChat();
+    renderSidebar();
+
+    const messages = document.getElementById('messages');
+    const welcome = document.getElementById('welcome');
+    if(welcome) welcome.remove();
+    document.querySelector('.top-actions')?.classList.add('has-msgs');
+
+    const row = document.createElement('div');
+    row.className = 'row-user';
+    if(files.length) row.appendChild(renderAttachmentsBlock(files));
+    if(text){
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble-user';
+      bubble.textContent = text;
+      row.appendChild(bubble);
+    }
+    messages.appendChild(row);
+    scrollElementAboveInput(row, 18);
+
+    const thinkBlock = document.createElement('div');
+    thinkBlock.className = 'ai-block';
+    thinkBlock.id = 'tr';
+    thinkBlock.innerHTML = `
+      <div class="thinking-row open">
+        <svg class="clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        Думает
+        <span class="chev"></span>
+      </div>
+      <div class="thinking-body">Разбираю вопрос, прикидываю формат ответа и проверяю, что учёл все детали запроса.</div>
+      <div class="ai-text"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+    messages.appendChild(thinkBlock);
+    scrollElementAboveInput(thinkBlock, 18);
+
+    const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+    
+    try{
+      const apiHistory = chat.history.slice(0, -1).map(h => ({role: h.role, content: h.content}));
+
+      const resp=await fetch('/api/chat',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
+        body:JSON.stringify({
+          model: model, 
+          history: apiHistory,
+          message: (text || (files.length ? 'Вложения' : '')),
+          attachments: files.map(f => ({
+              name: f.name || '', 
+              type: f.type || '', 
+              dataUrl: f.dataUrl || '', 
+              kind: f.kind || 'file'
+          }))
+        })
+      });
+
+      if(resp.status===401||resp.status===403){
+        const data=await resp.json().catch(()=>({}));
+        document.getElementById('tr')?.remove();
+        appendBotError(messages, data.message || 'Нет доступа. Откройте бота в Telegram и отправьте /start.');
+        return;
+      }
+      if(!resp.ok){
+        const data=await resp.json().catch(()=>({}));
+        document.getElementById('tr')?.remove();
+        appendBotError(messages, data.message || 'Ошибка запроса.');
+        return;
+      }
+      
+      const data=await resp.json();
+      document.getElementById('tr')?.remove();
+
+      if (data.file) {
+        appendBotFile(messages, data.file);
+        chat.history.push({role:'assistant', content:`[Файл отправлен: ${data.file.name}]`, is_file: true, file_data: data.file});
+      } else if(data.intent==='image'){
+        appendBotImage(messages, data.image_base64, data.prompt);
+        chat.history.push({role:'assistant', content: data.prompt, is_image: true, image_base64: data.image_base64});
+      } else {
+        const reply=data.reply||'';
+        appendBotTextAnimated(messages, reply);
+        chat.history.push({role:'assistant', content: reply});
+      }
+
+      saveActiveChat();
+      
+    }catch(e){
+      document.getElementById('tr')?.remove();
+      appendBotError(messages,'Не удалось связаться с сервером. Проверь подключение.');
+    }
+  }
+
+  /* ================= Admin panel UI ================= */
+  let adminDataUsers = [];
+
+  document.getElementById('profileBtn').onclick = () => { closeSideFn(); document.getElementById('profileScreen').classList.add('open'); };
+  document.getElementById('closeProfile').onclick = () => { document.getElementById('profileScreen').classList.remove('open'); };
+  document.getElementById('openAdmin').onclick = () => { document.getElementById('adminScreen').classList.add('open'); adminLoadUsers(); };
+  document.getElementById('closeAdmin').onclick = () => { document.getElementById('adminScreen').classList.remove('open'); };
+  
+  document.querySelectorAll('.admin-tab').forEach(t => t.onclick = () => {
+    document.querySelectorAll('.admin-tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    adminRenderTab(t.dataset.tab);
+  });
+
+  async function adminLoadUsers(){
+    document.getElementById('adminBody').innerHTML = '<div class="a-empty">Загрузка...</div>';
+    try{
+      const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+      const r=await fetch('/api/admin/users', {headers:{'Authorization':'tma '+initData}});
+      const d=await r.json();
+      if(d.ok){
+        adminDataUsers = d.users;
+        adminRenderTab('users');
+      } else {
+        document.getElementById('adminBody').innerHTML = `<div class="a-empty">Ошибка: ${d.error||'Не удалось'}</div>`;
+      }
+    }catch(e){
+      document.getElementById('adminBody').innerHTML = `<div class="a-empty">Сетевая ошибка</div>`;
+    }
+  }
+
+  function adminRenderTab(tab){
+    const body = document.getElementById('adminBody');
+    body.classList.add('switching');
+    setTimeout(() => { adminRenderTabInner(tab); body.classList.remove('switching'); }, 160);
+  }
+  
+  const statusLabel = s => ({approved:'Одобрен', pending:'Ожидает', rejected:'Отклонён'}[s] || s);
+
+  function adminRenderTabInner(tab){
+    const body = document.getElementById('adminBody');
+    if(tab === 'stats'){
+      body.innerHTML = `
+        <div class="a-section-title">Пользователи</div>
+        <div class="a-card">
+          ${adminDataUsers.map(u => `
+            <div class="a-row" onclick="adminUserDetail(${u.user_id})">
+              <div class="a-avatar">${String(u.user_id).slice(-2)}</div>
+              <div class="a-info">
+                <div class="a-name">ID ${u.user_id}</div>
+                <div class="a-meta"><span class="a-badge ${u.status}">${statusLabel(u.status)}</span></div>
+              </div>
+            </div>`).join('')}
+        </div>`;
+      return;
+    }
+    const list = tab === 'pending' ? adminDataUsers.filter(u=>u.status==='pending') : adminDataUsers;
+    body.innerHTML = `
+      <div class="a-section-title">${tab==='pending'?'Ожидают одобрения':'Все пользователи'}</div>
+      <div class="a-card">
+        ${list.length ? list.map(u=>{
+          const actions = u.status==='approved'
+            ? `<button class="a-btn reject" onclick="event.stopPropagation();adminDoAction(${u.user_id},'reject')">Отозвать</button>`
+            : u.status==='pending'
+              ? `<button class="a-btn approve" onclick="event.stopPropagation();adminDoAction(${u.user_id},'approve')">Одобрить</button><button class="a-btn reject" onclick="event.stopPropagation();adminDoAction(${u.user_id},'reject')">Отклонить</button>`
+              : `<button class="a-btn approve" onclick="event.stopPropagation();adminDoAction(${u.user_id},'approve')">Одобрить</button>`;
+          return `<div class="a-row" onclick="adminUserDetail(${u.user_id})">
+            <div class="a-avatar">${String(u.user_id).slice(-2)}</div>
+            <div class="a-info">
+              <div class="a-name">ID ${u.user_id}</div>
+              <div class="a-meta"><span class="a-badge ${u.status}">${statusLabel(u.status)}</span></div>
+            </div>
+            <div class="a-actions">${actions}</div>
+          </div>`;
+        }).join('') : `<div class="a-empty">Нет записей</div>`}
+      </div>`;
+  }
+
+  async function adminDoAction(userId, action){
+    try{
+      const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+      const r=await fetch('/api/admin/action', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
+        body:JSON.stringify({action, user_id: userId})
+      });
+      const d=await r.json();
+      if(d.ok){
+         const u = adminDataUsers.find(x=>x.user_id===userId);
+         if(u) u.status = action==='approve' ? 'approved' : 'rejected';
+         adminRenderTab(document.querySelector('.admin-tab.active').dataset.tab);
+      }
+    }catch(e){}
+  }
+
+  function adminSetModelLimit(userId, model){
+    const u = adminDataUsers.find(x=>x.user_id===userId);
+    if(!u) return;
+    const input = document.querySelector(`.limitModelInput[data-model="${CSS.escape(model)}"]`);
+    const val = parseInt(input.value, 10);
+    if (!u.limits) u.limits = {};
+    if(isNaN(val) || val <= 0){ delete u.limits[model]; }
+    else { u.limits[model] = val; }
+    adminUserDetail(userId);
+  }
+  function adminClearModelLimit(userId, model){
+    const u = adminDataUsers.find(x=>x.user_id===userId);
+    if(!u) return;
+    if (u.limits) delete u.limits[model];
+    adminUserDetail(userId);
+  }
+
+  async function adminUserDetail(userId){
+    const u = adminDataUsers.find(x=>x.user_id===userId);
+    if(!u) return;
+    const body = document.getElementById('adminBody');
+    body.innerHTML = `<div class="a-empty">Загрузка статистики...</div>`;
+    
+    let stats={total:0,day:0,week:0,models:{}};
+    try{
+      const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+      const r=await fetch(`/api/admin/users/${userId}/stats`, {headers:{'Authorization':'tma '+initData}});
+      const d=await r.json();
+      if(d.ok) stats=d.stats;
+    }catch(e){}
+
+    const modelEntries=Object.entries(stats.models||{}).sort((a,b)=>b[1]-a[1]);
+    const maxM = Math.max(1, ...(modelEntries.map(m=>m[1])));
+    if(!u.limits) u.limits = {};
+    
+    body.innerHTML = `
+      <div class="a-back-row" onclick="adminRenderTab(document.querySelector('.admin-tab.active').dataset.tab)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5l-7 7 7 7"/></svg>
+        <span>Назад</span>
+      </div>
+      <div class="a-detail-head">
+        <div class="a-avatar">${String(u.user_id).slice(-2)}</div>
+        <div>
+          <div class="a-detail-title">ID ${u.user_id}</div>
+          <span class="a-badge ${u.status}">${statusLabel(u.status)}</span>
+        </div>
+      </div>
+      <div class="a-stat-grid">
+        <div class="a-stat-box"><div class="a-stat-num">${stats.total||0}</div><div class="a-stat-lbl">Всего запросов</div></div>
+        <div class="a-stat-box"><div class="a-stat-num">${stats.day||0}</div><div class="a-stat-lbl">За сегодня</div></div>
+        <div class="a-stat-box"><div class="a-stat-num">${stats.week||0}</div><div class="a-stat-lbl">За неделю</div></div>
+      </div>
+      <div class="a-section-title">Используемые модели</div>
+      <div class="a-card" style="padding:6px 14px;">
+        ${modelEntries.length ? modelEntries.map(([m,c])=>`<div class="a-model-row"><div class="a-model-name">${m}</div><div class="a-model-bar-wrap"><div class="a-model-bar" style="width:${Math.round(c/maxM*100)}%"></div></div><div class="a-model-cnt">${c}</div></div>`).join('') : `<div class="a-empty">Нет активности</div>`}
+      </div>
+      <div class="a-section-title">Лимиты по моделям (в день)</div>
+      <div class="a-card" style="padding:6px 14px;">
+        ${ALL_MODEL_NAMES.map(m => `
+          <div class="a-model-row" style="gap:8px;">
+            <div class="a-model-name" style="width:auto; flex:1;">${m}</div>
+            <span style="font-size:11.5px; color:var(--ink-faint); flex-shrink:0;">${u.limits && u.limits[m] ? u.limits[m]+'/день' : 'без лимита'}</span>
+            <input type="number" min="0" class="limitModelInput" data-model="${m}" placeholder="лимит"
+              value="${u.limits && u.limits[m] ? u.limits[m] : ''}"
+              style="width:74px; flex-shrink:0; border:none; background:rgba(128,120,100,0.12); border-radius:10px; padding:7px 9px; font-size:12.5px; color:var(--ink); font-family:inherit;">
+            <button class="a-btn approve" style="padding:6px 9px; flex-shrink:0;" onclick="adminSetModelLimit(${u.user_id}, '${m}')">✓</button>
+            ${u.limits && u.limits[m] ? `<button class="a-btn reject" style="padding:6px 9px; flex-shrink:0;" onclick="adminClearModelLimit(${u.user_id}, '${m}')">✕</button>` : ''}
+          </div>`).join('')}
+      </div>`;
+  }
+
+  /* ================= Init App ================= */
+  document.addEventListener('DOMContentLoaded', () => {
+    loadChats();
+    pruneOldChats();
+
+    const savedActive = localStorage.getItem(ACTIVE_KEY);
+    if(savedActive && chats[savedActive]){
+      currentChatId = savedActive;
+    } else if(chatOrder.length > 0){
+      currentChatId = chatOrder[0];
+    } else {
+      createChat(false);
+    }
+
+    renderSidebar();
+    renderMessages();
+    syncMessagesBottomInset();
+  });
+
+</script>
+</body>
+</html>
