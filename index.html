@@ -135,14 +135,15 @@
     border:1px solid rgba(0,0,0,.05);
     box-shadow:0 1px 2px rgba(0,0,0,.055), 0 6px 18px rgba(0,0,0,.055), inset 0 1px 0 rgba(255,255,255,.90);
   }
-  #menuBtn, #ghostBtn, #incognitoCloseBtn{width:46px; height:46px;}
-  #menuBtn svg{width:26px; height:26px;}
-  #pillGroup{width:114px; height:46px; padding:4px 8px; gap:22px; border-radius:23px;}
+  #menuBtn, #ghostBtn, #incognitoCloseBtn{width:42px; height:42px;}
+  #menuBtn svg{width:20px; height:20px;}
+  #ghostBtn svg, #incognitoCloseBtn svg{width:22px; height:22px;}
+  #pillGroup{width:98px; height:42px; padding:4px 7px; gap:14px; border-radius:21px;}
   #pillGroup .icon-btn, #pillGroup .icon-btn.dk{
-    width:38px; height:38px; background:transparent; color:var(--ink);
+    width:35px; height:34px; background:transparent; color:var(--ink);
   }
-  #pillGroup .icon-btn.dk svg{width:28px; height:28px;}
-  #pillGroup #moreBtn svg{width:28px; height:28px;}
+  #pillGroup .icon-btn.dk svg{width:22px; height:22px;}
+  #pillGroup #moreBtn svg{width:22px; height:22px;}
   @media (prefers-color-scheme: dark){
     #menuBtn, #ghostBtn, #incognitoCloseBtn, #pillGroup{
       background:var(--glass-a-grad);
@@ -151,6 +152,7 @@
     }
     #menuBtn, #ghostBtn, #incognitoCloseBtn{width:38px; height:38px;}
     #menuBtn svg{width:17px; height:17px; stroke-width:1.8;}
+    #ghostBtn svg, #incognitoCloseBtn svg{width:17px; height:17px;}
     #pillGroup{width:auto; height:auto; padding:4px; gap:2px; border-radius:22px;}
     #pillGroup .icon-btn{width:32px; height:32px;}
     #pillGroup .icon-btn.dk{
@@ -438,7 +440,7 @@
 
     <header class="topbar">
       <button class="icon-btn glass" id="menuBtn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><path d="M2.5 8h19M4 16h12.5"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2.5 8h19M4 16h12.5"/></svg>
       </button>
       <div class="topbar-title" id="topbarTitle">Анонимный чат</div>
       <div class="top-actions" id="topActions">
@@ -450,7 +452,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4H7a3 3 0 00-3 3v10a3 3 0 003 3h10a3 3 0 003-3v-6"/><path d="M10 14l.8-3.4 6.3-6.3a2 2 0 012.8 2.8l-6.3 6.3L10 14z"/></svg>
           </button>
           <button class="icon-btn" id="moreBtn" title="Ещё">
-            <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.75"/><circle cx="12" cy="12" r="1.75"/><circle cx="19" cy="12" r="1.75"/></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
           </button>
         </div>
         <div class="menu-pop glass-strong" id="menuPop">
