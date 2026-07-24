@@ -136,8 +136,13 @@
   #menuBtn, #ghostBtn, #incognitoCloseBtn, #pillGroup{
     background:linear-gradient(155deg,rgba(255,255,255,.90) 0%,rgba(248,248,248,.82) 100%);
     backdrop-filter:blur(18px) saturate(135%); -webkit-backdrop-filter:blur(18px) saturate(135%);
-    border:1px solid rgba(0,0,0,.05);
-    box-shadow:0 1px 2px rgba(0,0,0,.055), 0 6px 18px rgba(0,0,0,.055), inset 0 1px 0 rgba(255,255,255,.90);
+    border:none;
+    box-shadow:
+      0 1px 2px rgba(0,0,0,.035),
+      0 6px 18px rgba(0,0,0,.06),
+      inset 0 1px 0 rgba(255,255,255,.94),
+      inset 0 0 0 .5px rgba(0,0,0,.024),
+      inset 0 -1px 0 rgba(0,0,0,.016);
   }
   #menuBtn, #ghostBtn, #incognitoCloseBtn{
     width:42px; height:42px; min-width:42px; min-height:42px; flex:0 0 42px; padding:0;
@@ -311,13 +316,14 @@
       background:linear-gradient(160deg,rgba(255,255,255,.94) 0%,rgba(251,251,251,.90) 48%,rgba(255,255,255,.93) 100%) !important;
       backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
       -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
-      border:1px solid rgba(0,0,0,.065) !important;
+      border:none !important;
       box-shadow:
-        0 1px 2px rgba(0,0,0,.055),
-        0 7px 18px rgba(0,0,0,.075),
-        0 20px 48px rgba(0,0,0,.085),
-        inset 0 1px 0 rgba(255,255,255,.94),
-        inset 0 -1px 0 rgba(0,0,0,.022) !important;
+        0 1px 2px rgba(0,0,0,.04),
+        0 7px 18px rgba(0,0,0,.07),
+        0 20px 48px rgba(0,0,0,.075),
+        inset 0 1px 0 rgba(255,255,255,.96),
+        inset 0 0 0 .5px rgba(0,0,0,.026),
+        inset 0 -1px 0 rgba(0,0,0,.018) !important;
     }
   }
   .input-card textarea{
@@ -406,13 +412,14 @@
     background:linear-gradient(160deg,rgba(255,255,255,.94) 0%,rgba(251,251,251,.90) 48%,rgba(255,255,255,.93) 100%) !important;
     backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
     -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
-    border:1px solid rgba(0,0,0,.065) !important;
+    border:none !important;
     box-shadow:
-      0 1px 2px rgba(0,0,0,.055),
-      0 8px 22px rgba(0,0,0,.09),
-      0 22px 52px rgba(0,0,0,.12),
-      inset 0 1px 0 rgba(255,255,255,.94),
-      inset 0 -1px 0 rgba(0,0,0,.022) !important;
+      0 1px 2px rgba(0,0,0,.04),
+      0 8px 22px rgba(0,0,0,.085),
+      0 22px 52px rgba(0,0,0,.11),
+      inset 0 1px 0 rgba(255,255,255,.96),
+      inset 0 0 0 .5px rgba(0,0,0,.026),
+      inset 0 -1px 0 rgba(0,0,0,.018) !important;
   }
   .sheet.open{
     opacity:1; visibility:visible; transform:translateY(0) scale(1); pointer-events:all;
@@ -455,15 +462,15 @@
       background:linear-gradient(160deg,rgba(42,42,39,.84) 0%,rgba(34,34,32,.76) 48%,rgba(42,42,39,.80) 100%) !important;
       backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
       -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
-      border:1px solid rgba(255,255,255,.10) !important;
-      box-shadow:0 18px 46px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.10) !important;
+      border:none !important;
+      box-shadow:0 18px 46px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.12), inset 0 0 0 .5px rgba(255,255,255,.05) !important;
     }
     .input-card{
       background:linear-gradient(160deg,rgba(42,42,39,.84) 0%,rgba(34,34,32,.76) 48%,rgba(42,42,39,.80) 100%) !important;
       backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
       -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
-      border:1px solid rgba(255,255,255,.10) !important;
-      box-shadow:0 14px 36px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.10) !important;
+      border:none !important;
+      box-shadow:0 14px 36px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.12), inset 0 0 0 .5px rgba(255,255,255,.05) !important;
     }
   }
 
