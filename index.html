@@ -281,13 +281,21 @@
   /* ---------------- Composer ---------------- */
   .input-area{position:absolute; bottom:0; left:0; right:0; z-index:8; padding:7px 15px calc(max(env(safe-area-inset-bottom,10px), 10px) + 18px); background:transparent; pointer-events:none;}
   .input-card{
+    --composer-duration:620ms;
+    --composer-ease:cubic-bezier(.22,1,.36,1);
     pointer-events:auto; position:relative; overflow:hidden; width:100%; height:48px; min-height:48px;
     isolation:isolate; border-radius:25px; padding:6px 6px 6px 8px; display:grid; grid-template-columns:36px minmax(0,1fr) auto 36px;
     grid-template-rows:36px; align-items:center; column-gap:8px; row-gap:0;
     font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", sans-serif;
-    transition:height .56s var(--ease), min-height .56s var(--ease), padding .56s var(--ease),
-      border-radius .56s var(--ease), grid-template-rows .56s var(--ease),
-      background .46s var(--ease), box-shadow .46s var(--ease), backdrop-filter .46s var(--ease);
+    transition:height var(--composer-duration) var(--composer-ease),
+      min-height var(--composer-duration) var(--composer-ease),
+      padding var(--composer-duration) var(--composer-ease),
+      border-radius var(--composer-duration) var(--composer-ease),
+      grid-template-rows var(--composer-duration) var(--composer-ease),
+      row-gap var(--composer-duration) var(--composer-ease),
+      background var(--composer-duration) var(--composer-ease),
+      box-shadow var(--composer-duration) var(--composer-ease),
+      backdrop-filter var(--composer-duration) var(--composer-ease);
     will-change:height, border-radius, padding;
   }
   .input-card.expanded{
@@ -297,9 +305,10 @@
   .input-card.expanded.has-attachments{grid-template-rows:auto minmax(32px,auto) 36px;}
   .input-card.animating{overflow:hidden;}
   .input-card.measuring{transition:none !important;}
+  .input-card.measuring *{transition:none !important; animation:none !important;}
   @media (prefers-color-scheme: light){
     .input-card{
-      background:linear-gradient(160deg,rgba(255,255,254,.94) 0%,rgba(254,253,250,.90) 48%,rgba(255,255,254,.93) 100%) !important;
+      background:linear-gradient(160deg,rgba(255,255,255,.94) 0%,rgba(251,251,251,.90) 48%,rgba(255,255,255,.93) 100%) !important;
       backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
       -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
       border:none !important;
@@ -311,7 +320,9 @@
     width:100%; background:transparent; border:none; outline:none !important; box-shadow:none !important;
     -webkit-appearance:none; appearance:none; color:var(--ink); font-family:inherit; font-size:16px; font-weight:400; line-height:1.4;
     letter-spacing:-.01em; resize:none; display:block; padding:0; margin:0; caret-color:#0A84FF;
-    -webkit-text-size-adjust:100%; transition:opacity .26s var(--ease), transform .46s var(--spring);
+    -webkit-text-size-adjust:100%;
+    transition:opacity var(--composer-duration) var(--composer-ease),
+      transform var(--composer-duration) var(--composer-ease);
   }
   .input-card:not(.expanded) textarea{
     grid-column:2 / 4; grid-row:1; height:26px !important; min-height:26px; max-height:26px; overflow:hidden; white-space:nowrap;
@@ -338,10 +349,11 @@
     border:none; border-radius:999px; display:flex; align-items:center; gap:6px; justify-content:center; font-family:inherit;
     cursor:pointer; max-width:48vw; background:transparent !important; box-shadow:none !important;
     backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
-    transition:opacity .28s var(--ease), transform .42s var(--spring), color .2s;
+    transition:opacity var(--composer-duration) var(--composer-ease),
+      transform var(--composer-duration) var(--composer-ease), color .2s;
   }
   .input-card:not(.expanded) .pill-model{
-    position:absolute; opacity:0; visibility:hidden; pointer-events:none; transform:translateY(7px) scale(.90);
+    position:absolute; opacity:0; visibility:hidden; pointer-events:none; transform:translateY(4px) scale(.98);
   }
   .input-card.expanded .pill-model{
     position:relative; grid-column:3; grid-row:2; justify-self:end; margin-left:0;
@@ -358,7 +370,10 @@
   .send-btn{
     position:relative; z-index:2; grid-column:4; grid-row:1; width:35px; height:35px; min-width:35px; border-radius:50%; background:#0A84FF; color:#fff;
     flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; border:none; padding:0; margin:0;
-    transition:opacity .32s var(--ease), background .32s var(--ease), color .32s var(--ease), transform .3s var(--ease);
+    transition:opacity var(--composer-duration) var(--composer-ease),
+      background var(--composer-duration) var(--composer-ease),
+      color var(--composer-duration) var(--composer-ease),
+      transform var(--composer-duration) var(--composer-ease);
   }
   .input-card.expanded .send-btn{grid-column:4; grid-row:2;}
   .send-btn:active{transform:scale(.92);}
@@ -377,7 +392,7 @@
     will-change:transform, opacity;
     transition:opacity .24s var(--ease), transform .48s var(--spring), visibility .48s;
     display:flex; flex-direction:column;
-    background:linear-gradient(160deg,rgba(255,255,254,.94) 0%,rgba(254,253,250,.90) 48%,rgba(255,255,254,.93) 100%) !important;
+    background:linear-gradient(160deg,rgba(255,255,255,.94) 0%,rgba(251,251,251,.90) 48%,rgba(255,255,255,.93) 100%) !important;
     backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
     -webkit-backdrop-filter:blur(2px) saturate(102%) brightness(.90) !important;
     border:none !important;
@@ -390,7 +405,7 @@
   }
   .sheet-page{
     width:100%; height:100%; display:flex; flex-direction:column; opacity:1; transform:translateX(0);
-    transition:opacity .28s var(--ease), transform .40s var(--spring);
+    transition:opacity .46s cubic-bezier(.22,1,.36,1), transform .46s cubic-bezier(.22,1,.36,1);
     will-change:opacity, transform;
   }
   .sheet-page.outgoing{position:absolute; inset:0;}
@@ -2207,66 +2222,111 @@
   const ta = document.getElementById('ta');
   const sendBtn = document.getElementById('send-btn');
   const inputCard = document.querySelector('.input-card');
+  const COMPOSER_MOTION_MS = 620;
+  const COMPOSER_MOTION_EASING = 'cubic-bezier(.22,1,.36,1)';
   let composerAnimationTimer = null;
 
   function setComposerExpanded(expanded, immediate = false){
     if(!inputCard) return;
     const isExpanded = inputCard.classList.contains('expanded');
     if(isExpanded === expanded){
-      if(immediate) inputCard.style.removeProperty('height');
+      if(immediate){
+        clearTimeout(composerAnimationTimer);
+        inputCard.getAnimations?.().forEach(animation => animation.cancel());
+        inputCard.querySelectorAll('*').forEach(el => el.getAnimations?.().forEach(animation => animation.cancel()));
+        inputCard.style.removeProperty('height');
+        inputCard.classList.remove('animating', 'measuring');
+        inputCard.querySelector('.pill-model')?.style.removeProperty('visibility');
+      }
       syncMessagesBottomInset();
       return;
     }
 
     clearTimeout(composerAnimationTimer);
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    const motionTargets = [ta, inputCard.querySelector('.pill-plus'), inputCard.querySelector('.pill-model'), sendBtn].filter(Boolean);
+    const modelButton = inputCard.querySelector('.pill-model');
+    const motionTargets = [ta, inputCard.querySelector('.pill-plus'), modelButton, sendBtn].filter(Boolean);
+    inputCard.getAnimations?.().forEach(animation => animation.cancel());
     motionTargets.forEach(el => el.getAnimations?.().forEach(animation => animation.cancel()));
     const firstRects = new Map(motionTargets.map(el => [el, el.getBoundingClientRect()]));
     const startHeight = inputCard.getBoundingClientRect().height || (isExpanded ? 92 : 48);
+    const firstCardStyle = getComputedStyle(inputCard);
+    const firstCardFrame = {
+      height:startHeight + 'px',
+      minHeight:firstCardStyle.minHeight,
+      paddingTop:firstCardStyle.paddingTop,
+      paddingRight:firstCardStyle.paddingRight,
+      paddingBottom:firstCardStyle.paddingBottom,
+      paddingLeft:firstCardStyle.paddingLeft,
+      borderRadius:firstCardStyle.borderRadius,
+      rowGap:firstCardStyle.rowGap
+    };
 
     inputCard.classList.add('measuring');
     inputCard.style.height = 'auto';
     inputCard.classList.toggle('expanded', expanded);
     resize(ta);
     const endHeight = expanded ? Math.max(92, inputCard.scrollHeight) : 48;
+    const lastCardStyle = getComputedStyle(inputCard);
+    const lastCardFrame = {
+      height:endHeight + 'px',
+      minHeight:lastCardStyle.minHeight,
+      paddingTop:lastCardStyle.paddingTop,
+      paddingRight:lastCardStyle.paddingRight,
+      paddingBottom:lastCardStyle.paddingBottom,
+      paddingLeft:lastCardStyle.paddingLeft,
+      borderRadius:lastCardStyle.borderRadius,
+      rowGap:lastCardStyle.rowGap
+    };
     inputCard.style.height = startHeight + 'px';
     inputCard.classList.remove('measuring');
 
     if(immediate || reducedMotion){
       inputCard.style.removeProperty('height');
+      modelButton?.style.removeProperty('visibility');
       syncMessagesBottomInset();
       return;
     }
 
+    if(!expanded && modelButton) modelButton.style.visibility = 'visible';
     inputCard.classList.add('animating');
     inputCard.getBoundingClientRect();
-    requestAnimationFrame(() => {
-      inputCard.style.height = endHeight + 'px';
-      motionTargets.forEach(el => {
-        const first = firstRects.get(el);
-        const last = el.getBoundingClientRect();
-        const dx = first.left - last.left;
-        const dy = first.top - last.top;
-        if((Math.abs(dx) > .5 || Math.abs(dy) > .5) && el.animate){
-          const animation = el.animate(
-            [
-              {transform:`translate(${dx}px, ${dy}px)`},
-              {transform:'translate(0, 0)'}
-            ],
-            {duration:540, easing:'cubic-bezier(.22,1,.36,1)', fill:'both'}
-          );
-          animation.finished.then(() => animation.cancel()).catch(() => {});
+    const cardAnimation = inputCard.animate?.(
+      [firstCardFrame, lastCardFrame],
+      {duration:COMPOSER_MOTION_MS, easing:COMPOSER_MOTION_EASING, fill:'both'}
+    );
+    motionTargets.forEach(el => {
+      const first = firstRects.get(el);
+      const last = el.getBoundingClientRect();
+      const dx = first.left - last.left;
+      const dy = first.top - last.top;
+      const isModelButton = el === modelButton;
+      if((Math.abs(dx) > .5 || Math.abs(dy) > .5 || isModelButton) && el.animate){
+        const fromFrame = {transform:`translate(${dx}px, ${dy}px)`};
+        const toFrame = {transform:'translate(0, 0)'};
+        if(isModelButton){
+          fromFrame.opacity = expanded ? 0 : 1;
+          toFrame.opacity = expanded ? 1 : 0;
         }
-      });
-      syncMessagesBottomInset();
+        el.animate(
+          [fromFrame, toFrame],
+          {duration:COMPOSER_MOTION_MS, easing:COMPOSER_MOTION_EASING, fill:'both'}
+        );
+      }
     });
+    syncMessagesBottomInset();
     composerAnimationTimer = setTimeout(() => {
+      inputCard.classList.add('measuring');
+      inputCard.style.height = endHeight + 'px';
+      cardAnimation?.cancel();
+      motionTargets.forEach(el => el.getAnimations?.().forEach(animation => animation.cancel()));
       inputCard.style.removeProperty('height');
       inputCard.classList.remove('animating');
+      modelButton?.style.removeProperty('visibility');
       resize(ta);
+      inputCard.classList.remove('measuring');
       syncMessagesBottomInset();
-    }, 590);
+    }, COMPOSER_MOTION_MS + 40);
   }
 
   function resize(el){
