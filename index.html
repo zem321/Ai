@@ -49,7 +49,7 @@
     #moreBtn{background:transparent; box-shadow:none;}
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
-  html,body{height:100%; margin:0; background:var(--bg); color:var(--ink); overflow:hidden;}
+  html,body{height:100%; margin:0; background:var(--bg); color:var(--ink); overflow:hidden; -webkit-text-size-adjust:100%; text-size-adjust:100%;}
   @media (prefers-reduced-motion: reduce){ *{animation-duration:.001ms !important; transition-duration:.001ms !important;} }
 
   .glass, .glass-strong{background:var(--glass-a-grad); backdrop-filter:var(--glass-a-blur); -webkit-backdrop-filter:var(--glass-a-blur);
@@ -190,10 +190,11 @@
     padding-bottom:0 !important; scroll-padding-bottom:var(--messages-bottom-inset, 130px); display:flex; flex-direction:column; gap:26px;}
   .messages::-webkit-scrollbar{width:0;}
   #scroll-spacer{flex-shrink:0; width:100%;}
-  .welcome{margin:auto; text-align:center; display:flex; flex-direction:column; align-items:center; gap:10px; padding:0 24px; animation:fadeUp .55s var(--spring);}
-  .welcome .mark-big{width:40px; height:40px; color:var(--coral);}
-  .welcome h1{font-size:21px; font-weight:600; margin:6px 0 0; font-family:"Source Serif 4", Georgia, serif;}
-  .welcome p{margin:0; color:var(--ink-soft); font-size:14px; max-width:300px;}
+  .welcome{margin:auto; text-align:center; display:flex; flex:0 0 auto; flex-direction:column; align-items:center; gap:10px; padding:0 24px; animation:fadeUp .55s var(--spring);}
+  .welcome > *{flex:0 0 auto;}
+  .welcome .mark-big{width:40px; min-width:40px; height:40px; min-height:40px; color:var(--coral);}
+  .welcome h1{font-size:21px; line-height:1.2; font-weight:600; margin:6px 0 0; font-family:"Source Serif 4", Georgia, serif;}
+  .welcome p{margin:0; color:var(--ink-soft); font-size:14px; line-height:1.4; max-width:300px;}
   @keyframes fadeUp{from{opacity:0; transform:translateY(12px);} to{opacity:1; transform:translateY(0);}}
   @keyframes msgIn{from{opacity:0; transform:translateY(10px) scale(.985);} to{opacity:1; transform:translateY(0) scale(1);}}
   .row-user{display:flex; flex-direction:column; align-items:flex-end; gap:8px; animation:msgIn .38s var(--spring);}
