@@ -369,7 +369,7 @@
     transition:transform .5s var(--ease);
   }
   .pill-plus:active{transform:scale(.88);}
-  .pill-plus svg{width:27px; height:27px; position:relative; z-index:1; transform:translateY(1px);}
+  .pill-plus svg{width:24px; height:24px; position:relative; z-index:1; transform:translateY(1px);}
   .pill-model{
     z-index:2; height:35px; padding:0 7px; font-size:14.5px; font-weight:400; letter-spacing:-.012em; color:var(--ink); flex-shrink:1; min-width:0;
     border:none; border-radius:999px; display:flex; align-items:center; gap:6px; justify-content:center; font-family:inherit;
@@ -653,7 +653,7 @@
         <textarea id="ta" rows="1" placeholder="Написать сообщение…" oninput="resize(this);handleComposerInput()" onkeydown="onKey(event)" disabled></textarea>
         <div class="input-toolbar">
           <button class="pill-plus glass-pill" onclick="openFilePicker()" title="Прикрепить">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
           </button>
           <button class="pill-model glass-pill" id="model-btn" onclick="openSheet()">
             <span id="model-label">Gemini 3.1 Flash Lite</span>
@@ -2010,21 +2010,14 @@
 
   (function initSwipe(){
     let dragging = false, startX = 0, startY = 0, startProgress = 0, sidebarPx = 0, axisLocked = null;
-    let lastX = 0, lastT = 0, velocity = 0;
+    let lastX = 0, lastT = 0, velocity = 0, dragProgress = 0;
 
     function getSidebarPx(){
       return sidebar.getBoundingClientRect().width || Math.min(window.innerWidth * 0.86, 330);
     }
-    function currentProgress(){
-      const m = getComputedStyle(sidebar).transform;
-      if(!m || m === 'none') return sidebar.classList.contains('open') ? sidebarPx : 0;
-      const vals = m.match(/matrix\(([^)]+)\)/);
-      if(!vals) return sidebar.classList.contains('open') ? sidebarPx : 0;
-      const parts = vals[1].split(',').map(parseFloat);
-      return Math.max(0, Math.min(sidebarPx, (parts[4] || 0) + sidebarPx));
-    }
     function setProgress(px){
       const progress = Math.max(0, Math.min(sidebarPx, px));
+      dragProgress = progress;
       const ratio = sidebarPx ? progress / sidebarPx : 0;
       sidebar.style.transform = `translateX(${progress - sidebarPx}px)`;
       mainEl.style.transform = `translateX(${progress}px)`;
@@ -2061,13 +2054,14 @@
       const x = e.touches[0].clientX, y = e.touches[0].clientY;
       const isOpen = sidebar.classList.contains('open');
       const sbPx = getSidebarPx();
-      if(!isOpen && x > 60) return;
+      if(!isOpen && x > 84) return;
       if(isOpen && x < sbPx) return;
       if(sheet.classList.contains('open') || document.getElementById('modalScrim').classList.contains('show')) return;
       dragging = true; axisLocked = null;
       startX = x; startY = y;
       lastX = x; lastT = e.timeStamp; velocity = 0;
       startProgress = isOpen ? sbPx : 0;
+      dragProgress = startProgress;
       sidebarPx = sbPx;
       sidebar.classList.add('dragging'); mainEl.classList.add('dragging'); mainVeil.classList.add('dragging');
       mainVeil.style.visibility = 'visible';
@@ -2082,24 +2076,26 @@
       }
       if(axisLocked === 'y'){ dragging = false; endDrag(sidebar.classList.contains('open') ? 1 : 0); return; }
       if(axisLocked === 'x'){
+        e.preventDefault();
         setProgress(startProgress + dx);
         const dt = e.timeStamp - lastT;
         if(dt > 0){ velocity = (x - lastX) / dt; }
         lastX = x; lastT = e.timeStamp;
       }
-    }, {passive:true});
+    }, {passive:false});
 
     document.addEventListener('touchend', () => {
       if(!dragging) return;
       dragging = false;
-      const progress = currentProgress();
-      const ratio = sidebarPx ? progress / sidebarPx : 0;
-      const FLICK_SPEED = 0.35;
-      let finalRatio = ratio;
-      if(velocity > FLICK_SPEED) finalRatio = 1;
-      else if(velocity < -FLICK_SPEED) finalRatio = 0;
-      else if(ratio > 0.22 && ratio < 0.78) finalRatio = ratio;
-      endDrag(finalRatio);
+      const ratio = sidebarPx ? dragProgress / sidebarPx : 0;
+      const FLICK_SPEED = 0.18;
+      const shouldOpen = velocity > FLICK_SPEED || (velocity >= -FLICK_SPEED && ratio >= 0.28);
+      endDrag(shouldOpen ? 1 : 0);
+    });
+    document.addEventListener('touchcancel', () => {
+      if(!dragging) return;
+      dragging = false;
+      endDrag(sidebar.classList.contains('open') ? 1 : 0);
     });
   })();
 
