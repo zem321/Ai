@@ -77,6 +77,7 @@
   /* ---------------- Sidebar ---------------- */
   .sidebar{position:fixed; top:0; left:0; height:100%; width:var(--sidebar-w); background:var(--sidebar-bg); z-index:5;
     display:flex; flex-direction:column; padding:env(safe-area-inset-top,18px) 0 env(safe-area-inset-bottom,14px) 0;}
+  .sidebar[hidden]{display:none !important;}
   .sidebar-top{display:flex; align-items:center; justify-content:space-between; padding:8px 18px 18px;}
   .mark{width:26px; height:26px; color:var(--coral); display:flex; align-items:center; justify-content:center;}
   .side-scroll{flex:1; overflow-y:auto; padding:0 10px 92px;}
@@ -414,7 +415,7 @@
 <body>
 <div class="app startup-locked">
 
-  <aside class="sidebar" id="sidebar">
+  <aside class="sidebar" id="sidebar" hidden>
     <div class="sidebar-top">
       <div class="mark"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0l1.2 8.1L21 9l-7.8 1.9L12 20l-1.2-9.1L3 9l7.8-.9z"/></svg></div>
     </div>
@@ -1838,6 +1839,7 @@
   const closeSideFn = () => { mainEl.classList.remove('pushed'); mainVeil.classList.remove('show'); vibrateTick(); };
   function lockSidebarClosed(){
     document.querySelector('.app')?.classList.add('startup-locked');
+    sidebar.hidden = true;
     mainEl.classList.remove('pushed', 'dragging');
     mainEl.style.transform = '';
     mainEl.style.borderRadius = '';
@@ -1848,6 +1850,9 @@
   function releaseStartupLock(){
     requestAnimationFrame(() => requestAnimationFrame(() => {
       document.querySelector('.app')?.classList.remove('startup-locked');
+      requestAnimationFrame(() => {
+        sidebar.hidden = false;
+      });
     }));
   }
   window.addEventListener('pagehide', lockSidebarClosed);
