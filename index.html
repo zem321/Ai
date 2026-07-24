@@ -479,7 +479,7 @@
     <div class="input-area">
       <div class="input-card glass-strong">
         <div class="attach-strip" id="attachStrip"></div>
-        <textarea id="ta" rows="1" placeholder="Написать сообщение…" oninput="resize(this);toggleSend()" onkeydown="onKey(event)" disabled></textarea>
+        <textarea id="ta" rows="1" placeholder="Написать сообщение…" oninput="resize(this);handleComposerInput()" onkeydown="onKey(event)" disabled></textarea>
         <div class="input-toolbar">
           <button class="pill-plus glass-pill" onclick="openFilePicker()" title="Прикрепить">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1175,14 +1175,32 @@
       const s = localStorage.getItem(CHATS_KEY);
       if(s){
         const parsed = JSON.parse(s);
-        chats = parsed.chats || {};
+        const storedChats = parsed.chats || {};
+        chats = {};
+        for(const id of Object.keys(storedChats)){
+          const chat = storedChats[id];
+          if(chat && (chat.history || []).length){
+            const {draft, ...persistentChat} = chat;
+            chats[id] = persistentChat;
+          }
+        }
         chatOrder = (parsed.order || []).filter(id => chats[id]);
+        saveChats();
       }
     }catch(e){}
   }
   function saveChats(){
     try{
-      localStorage.setItem(CHATS_KEY, JSON.stringify({chats, order: chatOrder}));
+      const persistentChats = {};
+      const persistentOrder = [];
+      for(const id of chatOrder){
+        const chat = chats[id];
+        if(!chat || !(chat.history || []).length) continue;
+        const {draft, ...persistentChat} = chat;
+        persistentChats[id] = persistentChat;
+        persistentOrder.push(id);
+      }
+      localStorage.setItem(CHATS_KEY, JSON.stringify({chats:persistentChats, order:persistentOrder}));
     }catch(e){}
   }
   function pruneOldChats(){
@@ -1212,12 +1230,45 @@
     if(!ch) return;
     ch.updated = Date.now();
     saveChats();
+    if((ch.history || []).length){
+      try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
+    }
   }
 
   function activeChat(){ return currentChatId === 'incognito' ? incognitoChat : chats[currentChatId]; }
   function activeHistory(){
     const ch = activeChat();
     return ch ? ch.history || [] : [];
+  }
+
+  function captureActiveDraft(){
+    if(!currentChatId || currentChatId === 'incognito') return;
+    const chat = chats[currentChatId];
+    const input = document.getElementById('ta');
+    if(chat && input) chat.draft = input.value;
+  }
+
+  function discardUnusedChat(id){
+    const chat = chats[id];
+    if(!chat || (chat.history || []).length || (chat.draft || '').trim()) return;
+    delete chats[id];
+    chatOrder = chatOrder.filter(chatId => chatId !== id);
+  }
+
+  function rememberAndReleaseCurrentChat(){
+    if(!currentChatId || currentChatId === 'incognito') return;
+    const previousId = currentChatId;
+    captureActiveDraft();
+    discardUnusedChat(previousId);
+  }
+
+  function restoreActiveDraft(){
+    const input = document.getElementById('ta');
+    if(!input) return;
+    const chat = activeChat();
+    input.value = currentChatId === 'incognito' ? '' : ((chat && chat.draft) || '');
+    resize(input);
+    toggleSend();
   }
 
   function renderSidebar(){
@@ -1309,10 +1360,15 @@
 
   function openChat(id){
     if(!chats[id]) return;
+    if(id === currentChatId){ closeSideFn(); return; }
+    rememberAndReleaseCurrentChat();
+    if(!chats[id]) return;
     resetIncognitoUI();
     currentChatId = id;
-    try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
-    renderMessages(); renderSidebar(); closeSideFn();
+    if((chats[id].history || []).length){
+      try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
+    }
+    renderMessages(); renderSidebar(); restoreActiveDraft(); closeSideFn();
   }
 
   function requestDeleteChat(id){
@@ -1327,13 +1383,15 @@
     if(currentChatId === id){
       if(chatOrder.length){ 
         currentChatId = chatOrder[0]; 
-        try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
+        if((chats[currentChatId].history || []).length){
+          try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
+        }
       } else { 
         createChat(); 
         return; 
       }
     }
-    renderMessages(); renderSidebar();
+    renderMessages(); renderSidebar(); restoreActiveDraft();
   }
 
   function resetIncognitoUI(){
@@ -1344,25 +1402,26 @@
   }
 
   function createChat(doRender = true){
+    rememberAndReleaseCurrentChat();
     resetIncognitoUI();
     const id = 'c' + Date.now();
-    chats[id] = { title:'Новый разговор', history:[], created: Date.now(), updated: Date.now() };
+    chats[id] = { title:'Новый разговор', history:[], draft:'', created: Date.now(), updated: Date.now() };
     chatOrder.unshift(id);
     currentChatId = id;
     saveChats();
-    try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
     if(doRender){
-      renderMessages(); renderSidebar(); closeSideFn();
+      renderMessages(); renderSidebar(); restoreActiveDraft(); closeSideFn();
     }
   }
 
   function enterIncognito(){
+    rememberAndReleaseCurrentChat();
     incognitoChat = { history:[] };
     currentChatId = 'incognito';
     document.getElementById('topbarTitle').classList.add('show');
     document.getElementById('topActions').style.display = 'none';
     document.getElementById('incognitoCloseBtn').style.display = 'flex';
-    renderMessages(); renderSidebar(); closeSideFn();
+    renderMessages(); renderSidebar(); restoreActiveDraft(); closeSideFn();
   }
 
   function exitIncognito(){
@@ -2021,6 +2080,13 @@
   function scrollElementAboveInput(el, gap=18, delay=30){ setTimeout(() => scrollElementAboveInputNow(el, gap), delay); }
   window.addEventListener('resize', syncMessagesBottomInset);
   function toggleSend(){ sendBtn.disabled = !(ta.value.trim() || pendingFiles.length); }
+  function handleComposerInput(){
+    if(currentChatId && currentChatId !== 'incognito'){
+      const chat = chats[currentChatId];
+      if(chat) chat.draft = ta.value;
+    }
+    toggleSend();
+  }
   function onKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); if(ta.value.trim() || pendingFiles.length) send(); } }
 
   async function send(){
@@ -2033,6 +2099,7 @@
     ta.value=''; resize(ta); clearPendingFiles(); toggleSend();
     
     const chat = activeChat();
+    if(currentChatId !== 'incognito') delete chat.draft;
     
     if(chat.history.length === 0 && currentChatId !== 'incognito' && text){
       chat.title = text.slice(0, 44) + (text.length > 44 ? '…' : '');
@@ -2323,6 +2390,7 @@
 
     renderSidebar();
     renderMessages();
+    restoreActiveDraft();
     syncMessagesBottomInset();
   });
 
