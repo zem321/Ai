@@ -65,6 +65,9 @@
   .app.startup-locked .main-veil{
     opacity:0 !important; visibility:hidden !important; pointer-events:none !important; transition:none !important;
   }
+  .app.startup-locked .sidebar{
+    opacity:0 !important; visibility:hidden !important; transition:none !important;
+  }
   .main-veil{position:absolute; inset:0; z-index:25; background:transparent; backdrop-filter:blur(0.8px); -webkit-backdrop-filter:blur(0.8px);
     opacity:0; visibility:hidden; transition:opacity .4s var(--ease-drawer), visibility .4s, background .9s var(--ease); pointer-events:none;}
   .main-veil.show{opacity:1; visibility:visible; pointer-events:auto;}
