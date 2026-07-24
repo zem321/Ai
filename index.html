@@ -289,7 +289,7 @@
     --composer-duration:800ms;
     --composer-ease:cubic-bezier(.4,0,.2,1);
     pointer-events:auto; position:relative; overflow:hidden; width:100%; height:48px; min-height:48px;
-    isolation:isolate; border-radius:25px; padding:6px 6px 6px 8px; display:grid; grid-template-columns:36px minmax(0,1fr) auto 36px;
+    isolation:isolate; border-radius:25px; padding:6px 6px 6px 8px; display:grid; grid-template-columns:36px minmax(0,1fr) auto 36px 36px;
     grid-template-rows:36px; align-items:center; column-gap:8px; row-gap:0;
     font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", sans-serif;
     transition:height var(--composer-duration) var(--composer-ease),
@@ -388,20 +388,30 @@
   .input-card.expanded .pill-plus{grid-column:1; grid-row:2;}
   .input-card.expanded.has-attachments .pill-plus,
   .input-card.expanded.has-attachments .pill-model,
+  .input-card.expanded.has-attachments .mic-btn,
   .input-card.expanded.has-attachments .send-btn{grid-row:3;}
   .pill-model:active{transform:scale(.96);}
   .pill-model span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; position:relative; z-index:1;}
   .pill-model .chev{width:5px; height:5px; border-right:1.3px solid var(--ink-faint); border-bottom:1.3px solid var(--ink-faint); transform:rotate(45deg); flex-shrink:0; position:relative; z-index:1;}
   .tool-spacer{display:none;}
+  .mic-btn{
+    position:relative; z-index:2; grid-column:4; grid-row:1; width:35px; height:35px; min-width:35px;
+    display:flex; align-items:center; justify-content:center; padding:0; margin:0; border:none; border-radius:50%;
+    color:var(--ink); background:transparent; cursor:pointer;
+    transition:transform var(--composer-duration) var(--composer-ease);
+  }
+  .mic-btn:active{transform:scale(.90);}
+  .mic-btn svg{width:20px; height:20px;}
+  .input-card.expanded .mic-btn{grid-column:4; grid-row:2;}
   .send-btn{
-    position:relative; z-index:2; grid-column:4; grid-row:1; width:35px; height:35px; min-width:35px; border-radius:50%; background:#0A84FF; color:#fff;
+    position:relative; z-index:2; grid-column:5; grid-row:1; width:35px; height:35px; min-width:35px; border-radius:50%; background:#0A84FF; color:#fff;
     flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; border:none; padding:0; margin:0;
     transition:opacity var(--composer-duration) var(--composer-ease),
       background var(--composer-duration) var(--composer-ease),
       color var(--composer-duration) var(--composer-ease),
       transform var(--composer-duration) var(--composer-ease);
   }
-  .input-card.expanded .send-btn{grid-column:4; grid-row:2;}
+  .input-card.expanded .send-btn{grid-column:5; grid-row:2;}
   .send-btn:active{transform:scale(.92);}
   .send-btn:disabled{background:rgba(var(--neutral-rgb),.16); color:var(--ink-faint); opacity:.8; cursor:default;}
   .send-btn svg{width:17px; height:17px;}
@@ -660,6 +670,13 @@
             <span class="chev"></span>
           </button>
           <div class="tool-spacer"></div>
+          <button class="mic-btn" id="mic-btn" type="button" title="Голосовой ввод" aria-label="Голосовой ввод" onclick="document.getElementById('ta')?.focus()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="3" width="6" height="12" rx="3"></rect>
+              <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"></path>
+              <path d="M12 18v3"></path>
+            </svg>
+          </button>
           <button class="send-btn" id="send-btn" disabled onclick="send()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
           </button>
@@ -2297,7 +2314,7 @@
     clearTimeout(composerAnimationTimer);
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     const modelButton = inputCard.querySelector('.pill-model');
-    const motionTargets = [ta, inputCard.querySelector('.pill-plus'), modelButton, sendBtn].filter(Boolean);
+    const motionTargets = [ta, inputCard.querySelector('.pill-plus'), modelButton, inputCard.querySelector('.mic-btn'), sendBtn].filter(Boolean);
     inputCard.getAnimations?.().forEach(animation => animation.cancel());
     motionTargets.forEach(el => el.getAnimations?.().forEach(animation => animation.cancel()));
     const firstRects = new Map(motionTargets.map(el => [el, el.getBoundingClientRect()]));
