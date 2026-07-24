@@ -190,12 +190,21 @@
     padding-bottom:0 !important; scroll-padding-bottom:var(--messages-bottom-inset, 130px); display:flex; flex-direction:column; gap:26px;}
   .messages::-webkit-scrollbar{width:0;}
   #scroll-spacer{flex-shrink:0; width:100%;}
-  .welcome{margin:auto; text-align:center; display:flex; flex:0 0 auto; flex-direction:column; align-items:center; gap:10px; padding:0 24px; animation:fadeUp .55s var(--spring);}
+  .welcome{
+    --welcome-focus-scale:1;
+    position:absolute; left:50%; top:50%; width:min(100%, 348px); margin:0;
+    text-align:center; display:flex; flex:0 0 auto; flex-direction:column; align-items:center; gap:10px; padding:0 24px;
+    transform:translate(-50%,-50%) scale(var(--welcome-focus-scale));
+    transform-origin:center; animation:welcomeIn .55s var(--spring);
+  }
   .welcome > *{flex:0 0 auto;}
   .welcome .mark-big{width:40px; min-width:40px; height:40px; min-height:40px; color:var(--coral);}
   .welcome h1{font-size:21px; line-height:1.2; font-weight:600; margin:6px 0 0; font-family:"Source Serif 4", Georgia, serif;}
   .welcome p{margin:0; color:var(--ink-soft); font-size:14px; line-height:1.4; max-width:300px;}
-  @keyframes fadeUp{from{opacity:0; transform:translateY(12px);} to{opacity:1; transform:translateY(0);}}
+  @keyframes welcomeIn{
+    from{opacity:0; transform:translate(-50%,calc(-50% + 12px)) scale(var(--welcome-focus-scale));}
+    to{opacity:1; transform:translate(-50%,-50%) scale(var(--welcome-focus-scale));}
+  }
   @keyframes msgIn{from{opacity:0; transform:translateY(10px) scale(.985);} to{opacity:1; transform:translateY(0) scale(1);}}
   .row-user{display:flex; flex-direction:column; align-items:flex-end; gap:8px; animation:msgIn .38s var(--spring);}
   .bubble-user{background:var(--bubble-user); color:var(--ink); padding:12px 16px; border-radius:20px; font-size:15px; line-height:1.5; max-width:82%;}
@@ -2431,7 +2440,45 @@
     toggleSend();
   }
   function onKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); if(ta.value.trim() || pendingFiles.length) send(); } }
-  ta.addEventListener('focus', () => setComposerExpanded(true));
+
+  function currentViewportScale(){
+    const vv = window.visualViewport;
+    if(!vv) return 1;
+    const reported = Number(vv.scale) || 1;
+    const widthBased = vv.width > 0 ? document.documentElement.clientWidth / vv.width : 1;
+    return Math.abs(widthBased - 1) > Math.abs(reported - 1) ? widthBased : reported;
+  }
+  let welcomeViewportScaleBeforeFocus = currentViewportScale();
+  function rememberWelcomeViewportScale(){
+    if(document.activeElement !== ta) welcomeViewportScaleBeforeFocus = currentViewportScale();
+  }
+  function syncWelcomeViewportScale(){
+    const welcome = document.getElementById('welcome');
+    if(!welcome) return;
+    if(document.activeElement !== ta){
+      welcome.style.setProperty('--welcome-focus-scale', '1');
+      return;
+    }
+    const current = currentViewportScale() || 1;
+    const counterScale = Math.max(.82, Math.min(1.3, welcomeViewportScaleBeforeFocus / current));
+    welcome.style.setProperty('--welcome-focus-scale', counterScale.toFixed(4));
+  }
+  function settleWelcomeViewportScale(){
+    [0, 60, 180, 360].forEach(delay => setTimeout(syncWelcomeViewportScale, delay));
+  }
+  ta.addEventListener('pointerdown', rememberWelcomeViewportScale, {passive:true});
+  ta.addEventListener('touchstart', rememberWelcomeViewportScale, {passive:true});
+  ta.addEventListener('focus', () => {
+    setComposerExpanded(true);
+    settleWelcomeViewportScale();
+  });
+  ta.addEventListener('blur', () => {
+    document.getElementById('welcome')?.style.setProperty('--welcome-focus-scale', '1');
+    welcomeViewportScaleBeforeFocus = currentViewportScale();
+  });
+  window.visualViewport?.addEventListener('resize', syncWelcomeViewportScale, {passive:true});
+  window.visualViewport?.addEventListener('scroll', syncWelcomeViewportScale, {passive:true});
+  window.addEventListener('resize', syncWelcomeViewportScale, {passive:true});
 
   async function send(){
     if(!accessGranted){showAccessDenied('Нет доступа. Откройте бота в Telegram и отправьте /start.');return;}
