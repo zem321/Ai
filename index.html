@@ -111,6 +111,7 @@
   .main{position:relative; height:100%; z-index:10; background:var(--bg);
     transition:transform .4s var(--ease-drawer), border-radius .4s var(--ease-drawer);}
   .main.dragging{transition:none !important;}
+  .main.pushed{transform:translateX(var(--sidebar-w)); border-radius:26px 0 0 26px;}
   .topbar{position:absolute; top:0; left:0; right:0; z-index:8; display:flex; align-items:center; justify-content:space-between;
     padding:calc(env(safe-area-inset-top,10px) + 8px) 16px 16px; pointer-events:none;}
   .topbar > *{pointer-events:auto;}
@@ -1828,8 +1829,18 @@
   const mainEl = document.querySelector('.main');
   const mainVeil = document.getElementById('mainVeil');
   function vibrateTick(){ if(navigator.vibrate) navigator.vibrate(12); }
-  const openSide = () => { sidebar.classList.add('open'); mainVeil.classList.add('show'); vibrateTick(); };
-  const closeSideFn = () => { sidebar.classList.remove('open'); mainVeil.classList.remove('show'); vibrateTick(); };
+  const openSide = () => {
+    sidebar.classList.add('open');
+    mainEl.classList.add('pushed');
+    mainVeil.classList.add('show');
+    vibrateTick();
+  };
+  const closeSideFn = () => {
+    sidebar.classList.remove('open');
+    mainEl.classList.remove('pushed');
+    mainVeil.classList.remove('show');
+    vibrateTick();
+  };
   document.getElementById('menuBtn').onclick = openSide;
   mainVeil.onclick = closeSideFn;
 
@@ -1852,19 +1863,31 @@
       const progress = Math.max(0, Math.min(sidebarPx, px));
       const ratio = sidebarPx ? progress / sidebarPx : 0;
       sidebar.style.transform = `translateX(${progress - sidebarPx}px)`;
+      mainEl.style.transform = `translateX(${progress}px)`;
+      mainEl.style.borderRadius = ratio > 0.02 ? '26px 0 0 26px' : '0';
       mainVeil.style.opacity = ratio;
       mainVeil.style.visibility = ratio > 0.01 ? 'visible' : 'hidden';
     }
     function endDrag(finalRatio){
       sidebar.classList.remove('dragging');
+      mainEl.classList.remove('dragging');
       mainVeil.classList.remove('dragging');
       const wasOpen = sidebar.classList.contains('open');
       const willOpen = finalRatio >= 0.3;
-      if(willOpen){ sidebar.classList.add('open'); mainVeil.classList.add('show'); }
-      else { sidebar.classList.remove('open'); mainVeil.classList.remove('show'); }
+      if(willOpen){
+        sidebar.classList.add('open');
+        mainEl.classList.add('pushed');
+        mainVeil.classList.add('show');
+      } else {
+        sidebar.classList.remove('open');
+        mainEl.classList.remove('pushed');
+        mainVeil.classList.remove('show');
+      }
       if(willOpen !== wasOpen) vibrateTick();
       requestAnimationFrame(() => {
         sidebar.style.transform = '';
+        mainEl.style.transform = '';
+        mainEl.style.borderRadius = '';
         mainVeil.style.opacity = ''; mainVeil.style.visibility = '';
       });
     }
@@ -1882,7 +1905,7 @@
       lastX = x; lastT = e.timeStamp; velocity = 0;
       startProgress = isOpen ? sbPx : 0;
       sidebarPx = sbPx;
-      sidebar.classList.add('dragging'); mainVeil.classList.add('dragging');
+      sidebar.classList.add('dragging'); mainEl.classList.add('dragging'); mainVeil.classList.add('dragging');
       mainVeil.style.visibility = 'visible';
     }, {passive:true});
 
