@@ -280,58 +280,119 @@
 
   /* ---------------- Composer ---------------- */
   .input-area{position:absolute; bottom:0; left:0; right:0; z-index:8; padding:7px 15px calc(max(env(safe-area-inset-bottom,10px), 10px) + 12px); background:transparent; pointer-events:none;}
-  .input-card{pointer-events:auto; position:relative; overflow:hidden; border-radius:29px; padding:13px 13px 11px 18px; display:flex; flex-direction:column; gap:9px; transition:background .58s var(--ease), box-shadow .58s var(--ease);}
-  @media (prefers-color-scheme: light){
-    .input-card{box-shadow:0 8px 28px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.05), inset 0 1px 0 rgba(255,255,255,.82);}
+  .input-card{
+    pointer-events:auto; position:relative; overflow:hidden; width:100%; height:58px; min-height:58px;
+    border-radius:30px; padding:10px 12px; display:grid; grid-template-columns:36px minmax(0,1fr) 36px;
+    grid-template-rows:38px; align-items:center; column-gap:9px; row-gap:0;
+    transition:height .52s var(--spring), min-height .52s var(--spring), padding .52s var(--spring),
+      border-radius .52s var(--spring), background .58s var(--ease), box-shadow .58s var(--ease);
+    will-change:height, border-radius, padding;
   }
-  textarea{width:100%; background:transparent; border:none; outline:none !important; box-shadow:none !important; -webkit-appearance:none; appearance:none; color:var(--ink); font-family:inherit; font-size:16px; line-height:1.45; letter-spacing:-.01em; resize:none; min-height:26px; max-height:132px; display:block; padding:0; margin:0; caret-color:var(--coral); -webkit-text-size-adjust:100%;}
-  textarea::placeholder{color:var(--ink-faint);}
-  .input-toolbar{display:flex; align-items:center; gap:9px; min-height:35px;}
-  .pill-plus{width:35px; height:35px; padding:0; flex-shrink:0; color:var(--ink); border:none; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit; transition:transform .5s var(--ease);}
+  .input-card.expanded{
+    height:auto; min-height:112px; border-radius:28px; padding:13px 13px 11px 18px;
+    display:flex; flex-direction:column; align-items:stretch; gap:9px;
+  }
+  .input-card.animating{overflow:hidden;}
+  @media (prefers-color-scheme: light){
+    .input-card{
+      background:linear-gradient(155deg,rgba(255,255,255,.93),rgba(249,252,252,.86));
+      backdrop-filter:blur(24px) saturate(135%); -webkit-backdrop-filter:blur(24px) saturate(135%);
+      box-shadow:0 9px 30px rgba(0,0,0,.075), 0 1px 3px rgba(0,0,0,.045), inset 0 1px 0 rgba(255,255,255,.90);
+    }
+  }
+  .input-card textarea{
+    width:100%; background:transparent; border:none; outline:none !important; box-shadow:none !important;
+    -webkit-appearance:none; appearance:none; color:var(--ink); font-family:inherit; font-size:16px; line-height:1.45;
+    letter-spacing:-.01em; resize:none; display:block; padding:0; margin:0; caret-color:#0A84FF;
+    -webkit-text-size-adjust:100%; transition:opacity .26s var(--ease), transform .46s var(--spring);
+  }
+  .input-card:not(.expanded) textarea{
+    grid-column:2; grid-row:1; height:26px !important; min-height:26px; max-height:26px; overflow:hidden; white-space:nowrap;
+  }
+  .input-card.expanded textarea{min-height:26px; max-height:132px; white-space:pre-wrap; overflow-y:auto;}
+  .input-card textarea::placeholder{color:var(--ink-faint);}
+  .input-card:not(.expanded) .attach-strip{display:none;}
+  .input-toolbar{display:contents;}
+  .input-card.expanded .input-toolbar{display:flex; align-items:center; gap:9px; min-height:35px;}
+  .pill-plus{
+    grid-column:1; grid-row:1; width:35px; height:35px; padding:0; flex-shrink:0; color:var(--ink); border:none;
+    border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; font-family:inherit;
+    background:transparent !important; box-shadow:none !important; backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
+    transition:transform .5s var(--ease);
+  }
   .pill-plus:active{transform:scale(.88);}
   .pill-plus svg{width:18px; height:18px; position:relative; z-index:1;}
-  .pill-model{height:35px; padding:0 15px; font-size:12.1px; font-weight:500; color:var(--ink-soft); flex-shrink:1; min-width:0; border:none; border-radius:999px; display:flex; align-items:center; gap:5px; justify-content:center; font-family:inherit; cursor:pointer; transition:transform .3s var(--ease); max-width:52vw;}
+  .pill-model{
+    height:35px; padding:0 8px; font-size:12.1px; font-weight:500; color:var(--ink-faint); flex-shrink:1; min-width:0;
+    border:none; border-radius:999px; display:flex; align-items:center; gap:6px; justify-content:center; font-family:inherit;
+    cursor:pointer; max-width:48vw; background:transparent !important; box-shadow:none !important;
+    backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
+    transition:opacity .28s var(--ease), transform .42s var(--spring), color .2s;
+  }
+  .input-card:not(.expanded) .pill-model{
+    position:absolute; opacity:0; visibility:hidden; pointer-events:none; transform:translateY(7px) scale(.90);
+  }
+  .input-card.expanded .pill-model{
+    position:relative; order:3; margin-left:auto; opacity:1; visibility:visible; transform:translateY(0) scale(1);
+  }
   .pill-model:active{transform:scale(.96);}
   .pill-model span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; position:relative; z-index:1;}
   .pill-model .chev{width:5px; height:5px; border-right:1.3px solid var(--ink-faint); border-bottom:1.3px solid var(--ink-faint); transform:rotate(45deg); flex-shrink:0; position:relative; z-index:1;}
-  .tool-spacer{flex:1;}
-  .send-btn{width:35px; height:35px; min-width:35px; border-radius:50%; background:var(--ink); color:var(--bg); flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; border:none; padding:0; margin:0; transition:opacity .42s var(--ease), background .42s var(--ease), color .42s var(--ease), transform .3s var(--ease);}
+  .tool-spacer{display:none;}
+  .input-card.expanded .tool-spacer{display:block; order:2; flex:1;}
+  .input-card.expanded .pill-plus{order:1;}
+  .send-btn{
+    grid-column:3; grid-row:1; width:35px; height:35px; min-width:35px; border-radius:50%; background:#0A84FF; color:#fff;
+    flex-shrink:0; display:flex; align-items:center; justify-content:center; cursor:pointer; border:none; padding:0; margin:0;
+    transition:opacity .32s var(--ease), background .32s var(--ease), color .32s var(--ease), transform .3s var(--ease);
+  }
+  .input-card.expanded .send-btn{order:4;}
   .send-btn:active{transform:scale(.92);}
   .send-btn:disabled{background:rgba(var(--neutral-rgb),0.16); color:var(--ink-faint); opacity:.8; cursor:default;}
   .send-btn svg{width:17px; height:17px;}
 
   /* ---------------- Model sheet ---------------- */
-  .sheet-scrim{position:fixed; inset:0; background:transparent; backdrop-filter:none; -webkit-backdrop-filter:none; z-index:50; opacity:0; pointer-events:none; transition:opacity .36s var(--ease);}
+  .sheet-scrim{position:fixed; inset:0; background:transparent; backdrop-filter:none; -webkit-backdrop-filter:none; z-index:50; opacity:0; pointer-events:none; transition:opacity .28s var(--ease);}
   .sheet-scrim.show{opacity:1; pointer-events:all;}
-  .sheet{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 28px); z-index:60; width:min(82%, 318px); max-width:318px; height:228px; margin:0; padding:6px 0; transform:translate(-50%, 18px) scale(.972); transform-origin:bottom center; opacity:0; border-radius:24px; pointer-events:none; overflow:hidden; will-change:transform, opacity; transition:opacity .76s var(--ease), transform .76s var(--ease); display:flex; flex-direction:column;}
-  .sheet.open{opacity:1; transform:translate(-50%, 0) scale(1); pointer-events:all;}
-  .sheet-scroll{flex:1; display:flex; flex-direction:column; overflow:hidden; position:relative; z-index:2;}
-  .ms-item{flex:1 1 0; display:flex; align-items:center; gap:10px; padding:0 16px; cursor:pointer; min-height:0; transition:background .2s var(--ease);}
+  .sheet{
+    --sheet-origin-x:50%; position:fixed; left:12px; bottom:92px; z-index:60;
+    width:min(calc(100vw - 24px), 310px); max-width:310px; max-height:min(430px, calc(100vh - 120px));
+    margin:0; padding:10px; transform:translateY(16px) scale(.72); transform-origin:var(--sheet-origin-x) 100%;
+    opacity:0; visibility:hidden; border-radius:25px; pointer-events:none; overflow:hidden;
+    will-change:transform, opacity; transition:opacity .28s var(--ease), transform .5s var(--spring), visibility .5s;
+    display:flex; flex-direction:column;
+    background:linear-gradient(145deg,rgba(255,255,255,.90),rgba(235,251,251,.78));
+    backdrop-filter:blur(30px) saturate(145%); -webkit-backdrop-filter:blur(30px) saturate(145%);
+    border:1px solid rgba(255,255,255,.72);
+    box-shadow:0 18px 48px rgba(0,0,0,.16), 0 2px 10px rgba(0,0,0,.06), inset 0 1px 0 rgba(255,255,255,.92);
+  }
+  .sheet.open{opacity:1; visibility:visible; transform:translateY(0) scale(1); pointer-events:all;}
+  .sheet-scroll{
+    flex:1; display:flex; flex-direction:column; overflow-y:auto; position:relative; z-index:2;
+    transition:opacity .18s var(--ease), transform .28s var(--spring);
+  }
+  .sheet-scroll.switching{opacity:0; transform:translateX(12px) scale(.985);}
+  .ms-current{padding:9px 12px 12px;}
+  .ms-current span{display:block; font-size:12px; color:var(--ink-faint); margin-bottom:3px;}
+  .ms-current b{display:block; font-size:17px; font-weight:500; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .ms-item{flex:none; min-height:58px; display:flex; align-items:center; gap:10px; padding:8px 12px; cursor:pointer; border-radius:16px; transition:background .2s var(--ease), transform .2s var(--spring);}
   .ms-item:active{background:rgba(var(--neutral-rgb),0.12);}
-  .ms-item.active .ms-info b{color:var(--coral);}
+  .ms-item:hover{background:rgba(var(--neutral-rgb),0.055);}
+  .ms-item.active{background:rgba(255,255,255,.40);}
+  .ms-item.active .ms-info b{color:var(--ink);}
   .ms-info{flex:1; min-width:0;}
-  .ms-info b{font-size:14.5px; font-weight:500; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:color .2s var(--ease);}
-  .ms-arrow{color:var(--ink-faint); font-size:16px; flex-shrink:0;}
-  .ms-check{width:16px; height:16px; color:var(--coral); opacity:0; flex-shrink:0;}
+  .ms-info b{font-size:15.5px; font-weight:500; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:color .2s var(--ease);}
+  .ms-info small{display:block; color:var(--ink-faint); font-size:12px; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .ms-arrow{color:var(--ink); font-size:24px; line-height:1; flex-shrink:0;}
+  .ms-check{order:-1; width:15px; height:15px; color:var(--ink); opacity:0; flex-shrink:0;}
   .ms-item.active .ms-check{opacity:1;}
-  .ms-back{color:var(--ink-soft); font-weight:600; font-size:13px; gap:8px;}
-  .ms-sep{height:1px; background:var(--border); margin:0 16px; flex-shrink:0;}
-  @media (prefers-color-scheme: light){
+  .ms-back{min-height:48px; color:var(--ink-soft); font-weight:600; font-size:13px; gap:8px; border-bottom:1px solid var(--border); border-radius:14px 14px 8px 8px; margin-bottom:2px;}
+  .ms-sep{height:1px; background:var(--border); margin:0 12px; flex-shrink:0;}
+  @media (prefers-color-scheme: dark){
     .sheet{
-      left:15px; right:auto; bottom:96px;
-      width:min(calc(100% - 30px), 306px); max-width:306px; height:auto; min-height:0;
-      padding:8px 10px; transform:translateY(12px) scale(.98); transform-origin:bottom left;
-      border:none;
-      box-shadow:0 14px 36px rgba(0,0,0,.14), 0 2px 8px rgba(0,0,0,.06), inset 0 1px 0 rgba(255,255,255,.82);
+      background:linear-gradient(145deg,rgba(54,54,52,.90),rgba(34,40,40,.84));
+      border:1px solid rgba(255,255,255,.08); box-shadow:0 18px 48px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.08);
     }
-    .sheet.open{transform:translateY(0) scale(1);}
-    .sheet-scroll{flex:none;}
-    .ms-item{flex:none; min-height:60px; padding:8px 12px; border-radius:14px;}
-    .ms-info b{font-size:15.5px;}
-    .ms-arrow{font-size:24px; color:var(--ink);}
-    .ms-check{order:-1; width:15px; height:15px;}
-    .ms-back{min-height:48px; border-bottom:1px solid var(--border); border-radius:12px 12px 0 0; margin-bottom:2px;}
-    .ms-sep{margin:0 12px;}
   }
 
   /* ---------------- Custom modal ---------------- */
@@ -1277,6 +1338,7 @@
     input.value = currentChatId === 'incognito' ? '' : ((chat && chat.draft) || '');
     resize(input);
     toggleSend();
+    setComposerExpanded(document.activeElement === input || !!input.value.trim(), true);
   }
 
   function renderSidebar(){
@@ -1982,6 +2044,7 @@
     strip.innerHTML = pendingFiles.map((f,i) => `<div class="attach-thumb">${
       f.kind==='image' && f.dataUrl ? `<img src="${f.dataUrl}" alt="">` : `<div class="file-icon">📎<div class="file-name">${x(f.name)}</div></div>`
     }<button class="rm-btn" onclick="removePendingFile(${i})">×</button></div>`).join('');
+    if(pendingFiles.length) setComposerExpanded(true);
     syncMessagesBottomInset();
   }
 
@@ -2012,50 +2075,61 @@
   const sheetScrim = document.getElementById('sheetScrim');
   const sheetScroll = document.getElementById('sheetScroll');
   function positionSheetNearModelButton(){
-    if(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches){
-      sheet.style.removeProperty('left');
-      sheet.style.removeProperty('right');
-      sheet.style.removeProperty('bottom');
-      return;
-    }
     const button = document.getElementById('model-btn');
-    const card = button?.closest('.input-card');
-    if(!button || !card) return;
+    if(!button) return;
     const buttonRect = button.getBoundingClientRect();
-    const cardRect = card.getBoundingClientRect();
-    const panelWidth = Math.min(window.innerWidth - 30, 306);
-    const sideGap = 8;
-    const edgeGap = 15;
-    const canFitBeside = buttonRect.right + sideGap + panelWidth <= window.innerWidth - edgeGap;
-    const left = canFitBeside
-      ? buttonRect.right + sideGap
-      : Math.max(edgeGap, Math.min(buttonRect.left, window.innerWidth - panelWidth - edgeGap));
-    const bottom = canFitBeside
-      ? Math.max(0, window.innerHeight - cardRect.bottom)
-      : Math.max(0, window.innerHeight - buttonRect.top + sideGap);
+    const edgeGap = 12;
+    const panelWidth = Math.min(window.innerWidth - edgeGap * 2, 310);
+    const left = Math.max(edgeGap, Math.min(buttonRect.right - panelWidth, window.innerWidth - panelWidth - edgeGap));
+    const bottom = Math.max(edgeGap, window.innerHeight - buttonRect.top + 10);
+    const originX = Math.max(24, Math.min(panelWidth - 24, buttonRect.left + buttonRect.width / 2 - left));
     sheet.style.left = left + 'px';
     sheet.style.right = 'auto';
     sheet.style.bottom = bottom + 'px';
+    sheet.style.setProperty('--sheet-origin-x', originX + 'px');
   }
-  function openSheet(){ showGroups(); positionSheetNearModelButton(); sheet.classList.add('open'); sheetScrim.classList.add('show'); }
+  function openSheet(){
+    showGroups(false);
+    positionSheetNearModelButton();
+    sheetScrim.classList.add('show');
+    requestAnimationFrame(() => sheet.classList.add('open'));
+  }
   function closeSheet(){ sheet.classList.remove('open'); sheetScrim.classList.remove('show'); }
   sheetScrim.onclick = closeSheet;
   window.addEventListener('resize', () => { if(sheet.classList.contains('open')) positionSheetNearModelButton(); });
 
-  function showGroups(){
-    sheetScroll.innerHTML = Object.keys(GROUP_MODELS).map((key,i)=>{
-      return `${i?'<div class="ms-sep"></div>':''}<div class="ms-item" data-action="group" data-key="${key}">
-        <div class="ms-info"><b>${GROUP_LABELS[key]}</b></div>
+  function setSheetContent(html, animate = true){
+    if(!animate){
+      sheetScroll.innerHTML = html;
+      sheetScroll.classList.remove('switching');
+      return;
+    }
+    sheetScroll.classList.add('switching');
+    setTimeout(() => {
+      sheetScroll.innerHTML = html;
+      requestAnimationFrame(() => sheetScroll.classList.remove('switching'));
+    }, 150);
+  }
+
+  function showGroups(animate = true){
+    const selectedName = modelLabel.textContent;
+    const rows = Object.keys(GROUP_MODELS).map((key,i)=>{
+      const containsSelected = GROUP_MODELS[key].some(item => item[0] === model);
+      const subtitle = containsSelected ? selectedName : `${GROUP_MODELS[key].length} модели`;
+      return `${i?'<div class="ms-sep"></div>':''}<div class="ms-item${containsSelected?' active':''}" data-action="group" data-key="${key}">
+        <div class="ms-info"><b>${GROUP_LABELS[key]}</b><small>${subtitle}</small></div>
         <span class="ms-arrow">›</span>
       </div>`;
     }).join('');
+    setSheetContent(`<div class="ms-current"><span>Текущая модель</span><b>${x(selectedName)}</b></div><div class="ms-sep"></div>${rows}`, animate);
   }
   function showGroup(key){
-    sheetScroll.innerHTML = `<div class="ms-item ms-back" data-action="back"><span>‹</span> ${GROUP_LABELS[key]}</div>` +
+    const rows = `<div class="ms-item ms-back" data-action="back"><span>‹</span> ${GROUP_LABELS[key]}</div>` +
       GROUP_MODELS[key].map((m,i)=>`${i?'<div class="ms-sep"></div>':''}<div class="ms-item${model===m[0]?' active':''}" data-action="model" data-id="${m[0]}" data-label="${m[1]}">
         <div class="ms-info"><b>${m[1]}</b></div>
         <svg class="ms-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6L9 17l-5-5"/></svg>
       </div>`).join('');
+    setSheetContent(rows, true);
   }
   sheetScroll.addEventListener('click', (e) => {
     const item = e.target.closest('[data-action]');
@@ -2066,13 +2140,57 @@
     } else if(action === 'model'){
       model = item.dataset.id; modelLabel.textContent = item.dataset.label;
       setTimeout(closeSheet, 150);
-    } else if(action === 'back'){ showGroups(); }
+    } else if(action === 'back'){ showGroups(true); }
   });
 
   /* ================= Composer / Sending ================= */
   const ta = document.getElementById('ta');
   const sendBtn = document.getElementById('send-btn');
-  function resize(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,130)+'px'; syncMessagesBottomInset(); }
+  const inputCard = document.querySelector('.input-card');
+  let composerAnimationTimer = null;
+
+  function setComposerExpanded(expanded, immediate = false){
+    if(!inputCard) return;
+    const isExpanded = inputCard.classList.contains('expanded');
+    if(isExpanded === expanded){
+      if(immediate) inputCard.style.removeProperty('height');
+      syncMessagesBottomInset();
+      return;
+    }
+
+    clearTimeout(composerAnimationTimer);
+    const startHeight = inputCard.getBoundingClientRect().height || (isExpanded ? 112 : 58);
+    inputCard.style.height = 'auto';
+    inputCard.classList.toggle('expanded', expanded);
+    const endHeight = expanded ? Math.max(112, inputCard.scrollHeight) : 58;
+
+    if(immediate){
+      inputCard.style.removeProperty('height');
+      resize(ta);
+      syncMessagesBottomInset();
+      return;
+    }
+
+    inputCard.classList.add('animating');
+    inputCard.style.height = startHeight + 'px';
+    inputCard.getBoundingClientRect();
+    requestAnimationFrame(() => {
+      inputCard.style.height = endHeight + 'px';
+      syncMessagesBottomInset();
+    });
+    composerAnimationTimer = setTimeout(() => {
+      inputCard.style.removeProperty('height');
+      inputCard.classList.remove('animating');
+      resize(ta);
+      syncMessagesBottomInset();
+    }, 560);
+  }
+
+  function resize(el){
+    el.style.height='auto';
+    el.style.height = inputCard?.classList.contains('expanded') ? Math.min(el.scrollHeight,130)+'px' : '26px';
+    syncMessagesBottomInset();
+  }
   function syncMessagesBottomInset(){
     const m = document.getElementById('messages');
     if(!m) return 0;
@@ -2110,6 +2228,7 @@
   window.addEventListener('resize', syncMessagesBottomInset);
   function toggleSend(){ sendBtn.disabled = !(ta.value.trim() || pendingFiles.length); }
   function handleComposerInput(){
+    setComposerExpanded(true);
     if(currentChatId && currentChatId !== 'incognito'){
       const chat = chats[currentChatId];
       if(chat) chat.draft = ta.value;
@@ -2117,6 +2236,7 @@
     toggleSend();
   }
   function onKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); if(ta.value.trim() || pendingFiles.length) send(); } }
+  ta.addEventListener('focus', () => setComposerExpanded(true));
 
   async function send(){
     if(!accessGranted){showAccessDenied('Нет доступа. Откройте бота в Telegram и отправьте /start.');return;}
@@ -2126,6 +2246,9 @@
     if(!text && !files.length) return;
     
     ta.value=''; resize(ta); clearPendingFiles(); toggleSend();
+    ta.blur();
+    closeSheet();
+    setComposerExpanded(false);
     
     const chat = activeChat();
     if(currentChatId !== 'incognito') delete chat.draft;
