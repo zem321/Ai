@@ -10,6 +10,7 @@ import database as db
 from handlers.start_handler import router as start_router
 from handlers.chat_handler import router as chat_router
 from handlers.image_handler import router as image_router
+from handlers.webapp_login_handler import router as webapp_login_router
 from middleware import AccessMiddleware
 from webapp_api import setup_webapp_routes
 
@@ -49,7 +50,9 @@ async def start_web() -> web.AppRunner:
     app.router.add_get("/app", miniapp)
     app.router.add_get("/health", health)
 
-    # Роуты HTTP API для мини-аппа: /api/me, /api/chat, /api/image.
+    # Роуты HTTP API для мини-аппа: /api/me, /api/chat, /api/image,
+    # а также /api/auth/code и /api/auth/logout — вход на сайт вне Telegram
+    # по одноразовому коду, который выдаёт бот (команда /code).
     # Логика внутри переиспользует call_ai()/generate_image() из тех же
     # модулей, что использует и сам бот — никакой новой бизнес-логики.
     setup_webapp_routes(app)
@@ -70,6 +73,7 @@ async def set_commands(bot: Bot):
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="chat", description="Режим чата"),
         BotCommand(command="clear", description="Очистить историю"),
+        BotCommand(command="code", description="Код для входа на сайт"),
         BotCommand(command="admin", description="Админ панель"),
     ])
 
@@ -93,6 +97,7 @@ async def main():
     dp.include_router(start_router)
     dp.include_router(chat_router)
     dp.include_router(image_router)
+    dp.include_router(webapp_login_router)
 
     await set_commands(bot)
 
