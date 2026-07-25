@@ -1,4 +1,6 @@
 import os
+import secrets
+import hashlib
 import asyncpg
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -35,6 +37,36 @@ async def init_db():
         )
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_rs_created ON request_stats(created_at)"
+        )
+
+        # ─── Вход на сайт по коду (вне Telegram Mini App) ──────────────────
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS login_codes (
+                code TEXT PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL,
+                used BOOLEAN NOT NULL DEFAULT FALSE
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS web_sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL,
+                last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_login_codes_user ON login_codes(user_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(user_id)"
         )
 
 
@@ -183,3 +215,89 @@ async def get_all_users_with_stats() -> list[dict]:
             """
         )
     return [dict(r) for r in rows]
+
+
+# ─── Вход на сайт по коду (вне Telegram Mini App) ──────────────────────────────
+# Код одноразовый и короткоживущий, выдаётся ботом по команде /code.
+# После успешного ввода кода сайт получает долгоживущий токен веб-сессии
+# (Bearer), который и подтверждает личность пользователя при дальнейших
+# запросах — сам по себе доступа не даёт, статус (approved/pending/rejected)
+# по-прежнему проверяется по таблице users.
+
+_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"  # без 0/O/1/I/L — легко перепутать
+
+
+async def create_login_code(user_id: int, length: int = 7, ttl_seconds: int = 600) -> str:
+    """Генерирует одноразовый код входа для user_id и сохраняет его в БД."""
+    code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(length))
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO login_codes(code, user_id, expires_at)
+            VALUES ($1, $2, NOW() + ($3 || ' seconds')::interval)
+            """,
+            code, user_id, str(ttl_seconds),
+        )
+    return code
+
+
+async def consume_login_code(code: str) -> int | None:
+    """Если код существует, не использован и не истёк — помечает его
+    использованным и возвращает user_id. Иначе — None. Код одноразовый:
+    повторный ввод того же кода всегда вернёт None."""
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE login_codes
+            SET used = TRUE
+            WHERE code = $1 AND used = FALSE AND expires_at > NOW()
+            RETURNING user_id
+            """,
+            code,
+        )
+    return row["user_id"] if row else None
+
+
+def _hash_token(token: str) -> str:
+    # В БД храним только хэш токена — сам токен нигде на сервере не хранится,
+    # это защищает активные сессии даже при утечке базы.
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def create_web_session(token: str, user_id: int, ttl_seconds: int) -> None:
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO web_sessions(token_hash, user_id, expires_at)
+            VALUES ($1, $2, NOW() + ($3 || ' seconds')::interval)
+            """,
+            _hash_token(token), user_id, str(ttl_seconds),
+        )
+
+
+async def get_web_session_user(token: str) -> int | None:
+    """Возвращает user_id по токену сессии, если он ещё не истёк.
+    Заодно обновляет last_seen_at."""
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE web_sessions
+            SET last_seen_at = NOW()
+            WHERE token_hash = $1 AND expires_at > NOW()
+            RETURNING user_id
+            """,
+            _hash_token(token),
+        )
+    return row["user_id"] if row else None
+
+
+async def delete_web_session(token: str) -> None:
+    async with _pool.acquire() as conn:
+        await conn.execute("DELETE FROM web_sessions WHERE token_hash = $1", _hash_token(token))
+
+
+async def cleanup_expired_auth() -> None:
+    """Необязательная периодическая уборка старых кодов/сессий (например, раз в сутки)."""
+    async with _pool.acquire() as conn:
+        await conn.execute("DELETE FROM login_codes WHERE expires_at < NOW() - INTERVAL '1 day'")
+        await conn.execute("DELETE FROM web_sessions WHERE expires_at < NOW()")
