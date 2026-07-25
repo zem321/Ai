@@ -7,6 +7,7 @@ import json
 import logging
 import time
 from collections import OrderedDict, deque
+from html import escape
 from urllib.parse import urlsplit
 import aiohttp
 from aiogram import Router, F
@@ -18,6 +19,9 @@ import database as db
 
 router = Router()
 logger = logging.getLogger(__name__)
+logger.info("image_handler module loaded: build=stream-read-v3")
+
+__all__ = ("router", "generate_image")
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://ai.api.nvidia.com/v1/genai")
@@ -56,6 +60,21 @@ class ProviderHTTPError(Exception):
         self.status = status
 
 
+async def _read_limited_response(
+    resp: aiohttp.ClientResponse,
+    limit: int,
+) -> bytes:
+    if resp.content_length is not None and resp.content_length > limit:
+        raise RuntimeError("NVIDIA API вернул слишком большой ответ")
+
+    raw = bytearray()
+    async for chunk in resp.content.iter_chunked(64 * 1024):
+        if len(raw) + len(chunk) > limit:
+            raise RuntimeError("NVIDIA API вернул слишком большой ответ")
+        raw.extend(chunk)
+    return bytes(raw)
+
+
 async def _nvidia_post_full_url(url, payload):
     if not NVIDIA_API_KEY:
         raise RuntimeError("NVIDIA_API_KEY не задан")
@@ -63,11 +82,7 @@ async def _nvidia_post_full_url(url, payload):
     timeout = aiohttp.ClientTimeout(total=90, connect=10, sock_read=60)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, json=payload, headers=headers) as resp:
-            if resp.content_length is not None and resp.content_length > PROVIDER_RESPONSE_LIMIT:
-                raise RuntimeError("NVIDIA API вернул слишком большой ответ")
-            raw = await resp.content.read(PROVIDER_RESPONSE_LIMIT + 1)
-            if len(raw) > PROVIDER_RESPONSE_LIMIT:
-                raise RuntimeError("NVIDIA API вернул слишком большой ответ")
+            raw = await _read_limited_response(resp, PROVIDER_RESPONSE_LIMIT)
             try:
                 data = json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -128,8 +143,23 @@ async def generate_image(prompt: str):
     except ProviderHTTPError as exc:
         if exc.status not in {400, 404, 405, 422}:
             raise
-        data = await _nvidia_post_full_url(openai_url, openai_payload)
-        return _extract_image_bytes(data)
+        logger.info(
+            "Основной NVIDIA image endpoint вернул HTTP %s; используется запасной endpoint",
+            exc.status,
+        )
+    except RuntimeError as exc:
+        if str(exc) not in {
+            "NVIDIA API вернул некорректный JSON",
+            "NVIDIA API вернул некорректный ответ",
+        }:
+            raise
+        logger.warning(
+            "Основной NVIDIA image endpoint вернул повреждённый ответ; "
+            "используется запасной endpoint"
+        )
+
+    data = await _nvidia_post_full_url(openai_url, openai_payload)
+    return _extract_image_bytes(data)
 
 
 class _ImageRateLimiter:
@@ -198,7 +228,7 @@ async def do_generate(message: Message, state: FSMContext):
             )
         await status_msg.delete()
         await message.answer_photo(photo=BufferedInputFile(image_bytes, filename="generated.png"),
-                                   caption=f"<b>Готово</b>\n\n{html.escape(prompt)}",
+                                   caption=f"<b>Готово</b>\n\n{escape(prompt)}",
                                    parse_mode="HTML",
                                    reply_markup=cancel_keyboard())
     except asyncio.TimeoutError:
