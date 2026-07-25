@@ -780,8 +780,9 @@
     if(logoutRow) logoutRow.style.display = (AUTH_MODE === 'web') ? 'flex' : 'none';
     hideLoginScreen();
     document.getElementById('access-overlay')?.remove();
-    if(ta) ta.disabled = false;
-    toggleSend();
+    const taEl = document.getElementById('ta');
+    if(taEl) taEl.disabled = false;
+    if(typeof toggleSend === 'function') toggleSend();
   }
 
   (function initAccess(){
@@ -813,8 +814,10 @@
 
     // Открыто как обычный сайт вне Telegram — вход по одноразовому коду из бота.
     AUTH_MODE='web';
-    if(ta) ta.disabled=true;
-    if(sendBtn) sendBtn.disabled=true;
+    const taEl0 = document.getElementById('ta');
+    const sendBtnEl0 = document.getElementById('send-btn');
+    if(taEl0) taEl0.disabled=true;
+    if(sendBtnEl0) sendBtnEl0.disabled=true;
 
     if(WEB_TOKEN){
       fetch('/api/me',{headers:{'Authorization':'Bearer '+WEB_TOKEN}})
@@ -841,8 +844,10 @@
 
   function showAccessDenied(message){
     accessGranted=false;
-    if(ta) ta.disabled=true;
-    if(sendBtn) sendBtn.disabled=true;
+    const taEl = document.getElementById('ta');
+    const sendBtnEl = document.getElementById('send-btn');
+    if(taEl) taEl.disabled=true;
+    if(sendBtnEl) sendBtnEl.disabled=true;
     if(document.getElementById('access-overlay')) return;
     const overlay=document.createElement('div');
     overlay.id='access-overlay';
@@ -853,8 +858,10 @@
 
   function showLoginScreen(errorMsg){
     accessGranted=false;
-    if(ta) ta.disabled=true;
-    if(sendBtn) sendBtn.disabled=true;
+    const taEl = document.getElementById('ta');
+    const sendBtnEl = document.getElementById('send-btn');
+    if(taEl) taEl.disabled=true;
+    if(sendBtnEl) sendBtnEl.disabled=true;
     let overlay=document.getElementById('login-overlay');
     if(overlay){
       const err=overlay.querySelector('#loginErr');
