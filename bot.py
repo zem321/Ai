@@ -1,6 +1,8 @@
 import os
 import asyncio
+import contextlib
 import logging
+from pathlib import Path
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
@@ -21,10 +23,47 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_KEY = os.getenv("API_KEY", "")
+MAX_REQUEST_BYTES = max(
+    1024 * 1024,
+    min(int(os.getenv("MAX_REQUEST_BYTES", str(10 * 1024 * 1024))), 20 * 1024 * 1024),
+)
+INDEX_PATH = Path(__file__).resolve().with_name("index.html")
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан!")
+
+
+@web.middleware
+async def security_headers(request: web.Request, handler):
+    try:
+        response = await handler(request)
+    except web.HTTPException as exc:
+        response = exc
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    )
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "base-uri 'none'; object-src 'none'; form-action 'self'; "
+        "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org; "
+        "script-src 'self' 'unsafe-inline' https://telegram.org; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self';",
+    )
+    # Браузер учитывает HSTS только если ответ уже получен по HTTPS.
+    response.headers.setdefault(
+        "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+    )
+    if request.path == "/" or request.path == "/app" or request.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("Pragma", "no-cache")
+    return response
 
 
 async def health(request: web.Request) -> web.Response:
@@ -33,19 +72,19 @@ async def health(request: web.Request) -> web.Response:
 
 async def miniapp(request: web.Request) -> web.Response:
     try:
-        with open("index.html", "r", encoding="utf-8") as f:
-            content = f.read()
-        content = content.replace(
-            'localStorage.getItem("api_key") || ""',
-            f'localStorage.getItem("api_key") || "{API_KEY}"'
-        )
+        # Секреты провайдеров никогда не передаются браузеру.
+        content = INDEX_PATH.read_text(encoding="utf-8")
         return web.Response(text=content, content_type="text/html", charset="utf-8")
     except FileNotFoundError:
-        return web.Response(text="OK")
+        logger.error("Не найден файл интерфейса: %s", INDEX_PATH)
+        return web.Response(text="Интерфейс временно недоступен", status=503)
 
 
 async def start_web() -> web.AppRunner:
-    app = web.Application()
+    app = web.Application(
+        client_max_size=MAX_REQUEST_BYTES,
+        middlewares=[security_headers],
+    )
     app.router.add_get("/", miniapp)
     app.router.add_get("/app", miniapp)
     app.router.add_get("/health", health)
@@ -68,6 +107,17 @@ async def start_web() -> web.AppRunner:
     return runner
 
 
+async def cleanup_auth_loop():
+    while True:
+        try:
+            await db.cleanup_expired_auth()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Ошибка очистки истёкших кодов и сессий")
+        await asyncio.sleep(60 * 60)
+
+
 async def set_commands(bot: Bot):
     await bot.set_my_commands([
         BotCommand(command="start", description="Главное меню"),
@@ -87,6 +137,7 @@ async def main():
         logger.info("Admin %s approved on startup", admin_id)
 
     web_runner = await start_web()
+    cleanup_task = asyncio.create_task(cleanup_auth_loop())
 
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
@@ -107,8 +158,12 @@ async def main():
     try:
         await dp.start_polling(bot, skip_updates=True)
     finally:
+        cleanup_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cleanup_task
         await bot.session.close()
         await web_runner.cleanup()
+        await db.close_db()
 
 
 if __name__ == "__main__":
