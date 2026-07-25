@@ -17,11 +17,15 @@ async def _build_code_message(user_id: int) -> str:
     if not await db.is_approved(user_id):
         return "У тебя пока нет доступа. Напиши /start и дождись одобрения."
 
-    code = await db.create_login_code(user_id)
+    try:
+        code = await db.create_login_code(user_id)
+    except RuntimeError as exc:
+        return f"⏳ {exc}"
     return (
         "🔑 Код для входа на сайт (вне Telegram):\n\n"
         f"`{code}`\n\n"
-        "Действует 10 минут и одноразовый. Открой сайт и введи этот код на экране входа."
+        "Действует 10 минут и одноразовый. Предыдущий код уже отключён. "
+        "Никому не пересылай этот код."
     )
 
 
