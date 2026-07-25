@@ -584,7 +584,7 @@
     .input-card{max-width:670px; margin:0 auto;}
   }
 </style>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js?63"></script>
 </head>
 <body>
 <div class="app">
@@ -760,10 +760,11 @@
   /* ================= GLOBALS & AUTH ================= */
   let accessGranted = false;
   let isAdmin = false;
-  // 'tg' — открыто как Telegram Mini App (initData); 'web' — обычный сайт, вход по коду из бота.
+  // 'tg' — Telegram Mini App; 'web' — обычный сайт с HttpOnly-cookie.
   let AUTH_MODE = 'tg';
-  const WEB_TOKEN_KEY = 'assistant_web_token';
-  let WEB_TOKEN = localStorage.getItem(WEB_TOKEN_KEY) || '';
+  const LEGACY_WEB_TOKEN_KEY = 'assistant_web_token';
+  // Удаляем токен старой версии: новая сессия недоступна JavaScript.
+  try{ localStorage.removeItem(LEGACY_WEB_TOKEN_KEY); }catch(e){}
 
   // В обычном мобильном браузере 100vh может включать адресную и нижнюю
   // панели. Из-за этого композер оказывается ниже реально видимой области.
@@ -787,14 +788,17 @@
   window.visualViewport?.addEventListener('scroll', syncAppViewportHeight, {passive:true});
 
   function authHeaderValue(){
-    if(AUTH_MODE === 'web') return 'Bearer ' + WEB_TOKEN;
+    if(AUTH_MODE === 'web') return '';
     const initData = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp.initData : '';
     return 'tma ' + initData;
   }
 
-  function clearWebSession(){
-    WEB_TOKEN = '';
-    localStorage.removeItem(WEB_TOKEN_KEY);
+  function apiHeaders(withJson = false){
+    const headers = {};
+    const auth = authHeaderValue();
+    if(auth) headers.Authorization = auth;
+    if(withJson) headers['Content-Type'] = 'application/json';
+    return headers;
   }
 
   function grantAccess(isAdminFlag){
@@ -844,22 +848,17 @@
     if(taEl0) taEl0.disabled=true;
     if(sendBtnEl0) sendBtnEl0.disabled=true;
 
-    if(WEB_TOKEN){
-      fetch('/api/me',{headers:{'Authorization':'Bearer '+WEB_TOKEN}})
-        .then(r=>{if(!r.ok) throw new Error('expired'); return r.json();})
-        .then(data=>{
-          if(data&&data.ok===true) grantAccess(data.is_admin);
-          else { clearWebSession(); showLoginScreen(); }
-        })
-        .catch(()=>{ clearWebSession(); showLoginScreen(); });
-    }else{
-      showLoginScreen();
-    }
+    fetch('/api/me',{headers:apiHeaders()})
+      .then(r=>{if(!r.ok) throw new Error('expired'); return r.json();})
+      .then(data=>{
+        if(data&&data.ok===true) grantAccess(data.is_admin);
+        else showLoginScreen();
+      })
+      .catch(()=>showLoginScreen());
   })();
 
   async function logoutWeb(){
-    try{ await fetch('/api/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+WEB_TOKEN}}); }catch(e){}
-    clearWebSession();
+    try{ await fetch('/api/auth/logout',{method:'POST',headers:apiHeaders()}); }catch(e){}
     accessGranted=false;
     isAdmin=false;
     document.getElementById('closeAdmin')?.click();
@@ -901,7 +900,7 @@
       <div style="font-size:36px;">🔐</div>
       <div style="font-size:18px;font-weight:600;">Вход по коду</div>
       <div style="font-size:14px;color:var(--ink-soft);line-height:1.6;max-width:280px;">Откройте бота в Telegram, отправьте команду <b>/code</b> и введите полученный код здесь.</div>
-      <input id="loginCodeInput" maxlength="7" autocomplete="one-time-code" placeholder="XXXXXXX"
+      <input id="loginCodeInput" maxlength="8" autocomplete="one-time-code" placeholder="XXXXXXXX"
         style="text-align:center;letter-spacing:4px;font-size:20px;font-weight:600;text-transform:uppercase;padding:12px 16px;border-radius:14px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--ink);width:220px;outline:none;">
       <div id="loginErr" style="font-size:13px;color:#E0524D;min-height:16px;">${errorMsg?x(errorMsg):''}</div>
       <button id="loginSubmitBtn" style="padding:11px 26px;border-radius:20px;border:none;background:var(--coral);color:var(--bg);font-size:14.5px;font-weight:600;cursor:pointer;">Войти</button>
@@ -930,13 +929,11 @@
     try{
       const r=await fetch('/api/auth/code',{
         method:'POST',
-        headers:{'Content-Type':'application/json'},
+        headers:apiHeaders(true),
         body:JSON.stringify({code})
       });
       const data=await r.json().catch(()=>({}));
       if(r.ok&&data.ok){
-        WEB_TOKEN=data.token;
-        localStorage.setItem(WEB_TOKEN_KEY, WEB_TOKEN);
         grantAccess(data.is_admin);
       }else{
         if(err) err.textContent=data.message||'Неверный код.';
@@ -1172,15 +1169,28 @@
 
   function sanitizeMarkdownUrl(url) {
     const raw = String(url || '').trim().replace(/&amp;/g, '&');
-    if (/^(https?:\/\/|mailto:|tg:\/\/|\/|#)/i.test(raw)) return mdEscapeAttr(raw);
+    if (/^\/\//.test(raw)) return '#';
+    if (/^(https?:\/\/|mailto:|tg:\/\/|\/(?!\/)|#)/i.test(raw)) return mdEscapeAttr(raw);
     return '#';
+  }
+
+  function sanitizeMarkdownImageUrl(url) {
+    const raw = String(url || '').trim().replace(/&amp;/g, '&');
+    // Внешние картинки не загружаются автоматически: это исключает
+    // tracking-pixel и утечку IP/referrer из ответа модели.
+    if (/^\/(?!\/)/.test(raw)) return mdEscapeAttr(raw);
+    return '';
   }
 
   function formatInlineMarkdown(text) {
     let html = replaceEmoji(String(text || ''));
 
-    html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, alt, url) => `<img src="${sanitizeMarkdownUrl(url)}" alt="${mdEscapeAttr(alt)}" class="markdown-image">`);
-    html = html.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, label, url) => `<a href="${sanitizeMarkdownUrl(url)}" target="_blank" class="markdown-link">${label}</a>`);
+    html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, alt, url) => {
+      const safeImage = sanitizeMarkdownImageUrl(url);
+      if(safeImage) return `<img src="${safeImage}" alt="${mdEscapeAttr(alt)}" class="markdown-image">`;
+      return `<a href="${sanitizeMarkdownUrl(url)}" target="_blank" rel="noopener noreferrer" class="markdown-link">🖼 ${alt || 'Изображение'}</a>`;
+    });
+    html = html.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (m, label, url) => `<a href="${sanitizeMarkdownUrl(url)}" target="_blank" rel="noopener noreferrer" class="markdown-link">${label}</a>`);
 
     html = html.replace(/~~([\s\S]+?)~~/g, '<del>$1</del>');
     html = html.replace(/\*\*\*([\s\S]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
@@ -1468,7 +1478,7 @@
   function showRenameModal(currentValue, onSave){
     modalCard.innerHTML = `
       <div class="modal-title">Переименовать чат</div>
-      <input class="modal-input" id="modalInput" value="${currentValue.replace(/"/g,'&quot;')}">
+      <input class="modal-input" id="modalInput" value="${mdEscapeAttr(currentValue)}">
       <div class="modal-actions">
         <button class="modal-btn cancel" id="modalCancel">Отмена</button>
         <button class="modal-btn primary" id="modalSave">Сохранить</button>
@@ -1484,8 +1494,8 @@
 
   function showConfirmModal(title, message, onConfirm){
     modalCard.innerHTML = `
-      <div class="modal-title">${title}</div>
-      <div class="modal-msg">${message}</div>
+      <div class="modal-title">${x(title)}</div>
+      <div class="modal-msg">${x(message)}</div>
       <div class="modal-actions">
         <button class="modal-btn cancel" id="modalCancel">Отмена</button>
         <button class="modal-btn danger" id="modalConfirm">Удалить</button>
@@ -1505,9 +1515,15 @@
   }
 
   /* ================= Chat store ================= */
-  const CHATS_KEY = 'oracle_chats_v2';
-  const ACTIVE_KEY = 'oracle_active_chat_v2';
-  const CHAT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  const CHATS_KEY = 'oracle_chats_v3_session';
+  const ACTIVE_KEY = 'oracle_active_chat_v3_session';
+  const CHAT_TTL_MS = 24 * 60 * 60 * 1000;
+  const chatStore = sessionStorage;
+  // Не оставляем переписку и вложения старой версии в постоянном хранилище.
+  try{
+    localStorage.removeItem('oracle_chats_v2');
+    localStorage.removeItem('oracle_active_chat_v2');
+  }catch(e){}
   
   let chats = {};
   let chatOrder = [];
@@ -1516,7 +1532,7 @@
 
   function loadChats(){
     try{
-      const s = localStorage.getItem(CHATS_KEY);
+      const s = chatStore.getItem(CHATS_KEY);
       if(s){
         const parsed = JSON.parse(s);
         const storedChats = parsed.chats || {};
@@ -1541,10 +1557,20 @@
         const chat = chats[id];
         if(!chat || !(chat.history || []).length) continue;
         const {draft, ...persistentChat} = chat;
-        persistentChats[id] = persistentChat;
+        // Текст доступен после перезагрузки вкладки, но содержимое файлов и
+        // base64-картинок не копируется даже в sessionStorage.
+        persistentChats[id] = {
+          ...persistentChat,
+          history: (persistentChat.history || []).map(item => {
+            const {files, file_data, image_base64, ...safeItem} = item;
+            if(item.is_file) return {role:'assistant', content:'[Файл был доступен до перезагрузки вкладки]'};
+            if(item.is_image) return {role:'assistant', content:'[Изображение было доступно до перезагрузки вкладки]'};
+            return safeItem;
+          })
+        };
         persistentOrder.push(id);
       }
-      localStorage.setItem(CHATS_KEY, JSON.stringify({chats:persistentChats, order:persistentOrder}));
+      chatStore.setItem(CHATS_KEY, JSON.stringify({chats:persistentChats, order:persistentOrder}));
     }catch(e){}
   }
   function pruneOldChats(){
@@ -1563,7 +1589,7 @@
       saveChats();
       if(currentChatId && !chats[currentChatId]){
         currentChatId = null;
-        try{localStorage.removeItem(ACTIVE_KEY);}catch(e){}
+        try{chatStore.removeItem(ACTIVE_KEY);}catch(e){}
       }
     }
   }
@@ -1575,7 +1601,7 @@
     ch.updated = Date.now();
     saveChats();
     if((ch.history || []).length){
-      try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
+      try{chatStore.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
     }
   }
 
@@ -1711,7 +1737,7 @@
     resetIncognitoUI();
     currentChatId = id;
     if((chats[id].history || []).length){
-      try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
+      try{chatStore.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
     }
     renderMessages(); renderSidebar(); restoreActiveDraft(); closeSideFn();
   }
@@ -1729,7 +1755,7 @@
       if(chatOrder.length){ 
         currentChatId = chatOrder[0]; 
         if((chats[currentChatId].history || []).length){
-          try{localStorage.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
+          try{chatStore.setItem(ACTIVE_KEY, currentChatId);}catch(e){}
         }
       } else { 
         createChat(); 
@@ -1788,7 +1814,7 @@
       messages.innerHTML = currentChatId === 'incognito' ? `
         <div class="welcome" id="welcome">
           <svg class="ghost-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 20V11a6 6 0 0112 0v9l-2.5-2-2 2-2-2-2 2-2-2z"/><circle cx="9.5" cy="11" r="1.1" fill="var(--bg)"/><circle cx="14.5" cy="11" r="1.1" fill="var(--bg)"/></svg>
-          <p class="incog-text">Анонимные чаты не имеют доступа к памяти. Они не сохраняются в историю, не добавляются в память и не используются для обучения моделей.</p>
+          <p class="incog-text">Этот чат не сохраняется в истории браузера. Запрос всё равно передаётся серверу и выбранному ИИ‑провайдеру для подготовки ответа.</p>
         </div>` : `
         <div class="welcome" id="welcome">
           <svg class="mark-big" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0l1.2 8.1L21 9l-7.8 1.9L12 20l-1.2-9.1L3 9l7.8-.9z"/></svg>
@@ -2297,11 +2323,26 @@
 
   /* ================= Attachments ================= */
   let pendingFiles = [];
+  const MAX_UI_ATTACHMENTS = 4;
+  const MAX_UI_FILE_BYTES = 6 * 1024 * 1024;
+  const SAFE_IMAGE_TYPES = new Set(['image/jpeg','image/png','image/webp','image/gif']);
   function openFilePicker(){ document.getElementById('file-input').click(); }
   function readAsDataURL(file){ return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
   async function onFilesChosen(input){
     for(const file of Array.from(input.files)){
+      if(pendingFiles.length >= MAX_UI_ATTACHMENTS){
+        showToast('Можно прикрепить не более 4 файлов');
+        break;
+      }
       const isImg = file.type.startsWith('image/');
+      if(file.size > MAX_UI_FILE_BYTES){
+        showToast(`Файл «${file.name}» больше 6 МБ`);
+        continue;
+      }
+      if(isImg && !SAFE_IMAGE_TYPES.has(file.type)){
+        showToast(`Формат изображения «${file.name}» не поддерживается`);
+        continue;
+      }
       const item = { name:file.name, type: file.type || '', kind:isImg?'image':'file', dataUrl:null };
       try{ item.dataUrl = await readAsDataURL(file); }catch(e){}
       pendingFiles.push(item);
@@ -2699,7 +2740,7 @@
 
       const resp=await fetch('/api/chat',{
         method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':authHeaderValue()},
+        headers:apiHeaders(true),
         body:JSON.stringify({
           model: model, 
           history: apiHistory,
@@ -2717,7 +2758,6 @@
         const data=await resp.json().catch(()=>({}));
         document.getElementById('tr')?.remove();
         if(AUTH_MODE==='web'&&resp.status===401){
-          clearWebSession();
           showLoginScreen(data.message||'Сессия истекла, войдите заново.');
         }else{
           appendBotError(messages, data.message || 'Нет доступа. Откройте бота в Telegram и отправьте /start.');
@@ -2771,13 +2811,13 @@
   async function adminLoadUsers(){
     document.getElementById('adminBody').innerHTML = '<div class="a-empty">Загрузка...</div>';
     try{
-      const r=await fetch('/api/admin/users', {headers:{'Authorization':authHeaderValue()}});
+      const r=await fetch('/api/admin/users?limit=200&offset=0', {headers:apiHeaders()});
       const d=await r.json();
       if(d.ok){
         adminDataUsers = d.users;
         adminRenderTab('users');
       } else {
-        document.getElementById('adminBody').innerHTML = `<div class="a-empty">Ошибка: ${d.error||'Не удалось'}</div>`;
+        document.getElementById('adminBody').innerHTML = `<div class="a-empty">Ошибка: ${x(d.error||'Не удалось')}</div>`;
       }
     }catch(e){
       document.getElementById('adminBody').innerHTML = `<div class="a-empty">Сетевая ошибка</div>`;
@@ -2790,7 +2830,8 @@
     setTimeout(() => { adminRenderTabInner(tab); body.classList.remove('switching'); }, 160);
   }
   
-  const statusLabel = s => ({approved:'Одобрен', pending:'Ожидает', rejected:'Отклонён'}[s] || s);
+  const statusLabel = s => ({approved:'Одобрен', pending:'Ожидает', rejected:'Отклонён'}[s] || 'Неизвестно');
+  const statusClass = s => ['approved','pending','rejected'].includes(s) ? s : 'rejected';
 
   function adminRenderTabInner(tab){
     const body = document.getElementById('adminBody');
@@ -2803,7 +2844,7 @@
               <div class="a-avatar">${String(u.user_id).slice(-2)}</div>
               <div class="a-info">
                 <div class="a-name">ID ${u.user_id}</div>
-                <div class="a-meta"><span class="a-badge ${u.status}">${statusLabel(u.status)}</span></div>
+                <div class="a-meta"><span class="a-badge ${statusClass(u.status)}">${x(statusLabel(u.status))}</span></div>
               </div>
             </div>`).join('')}
         </div>`;
@@ -2823,7 +2864,7 @@
             <div class="a-avatar">${String(u.user_id).slice(-2)}</div>
             <div class="a-info">
               <div class="a-name">ID ${u.user_id}</div>
-              <div class="a-meta"><span class="a-badge ${u.status}">${statusLabel(u.status)}</span></div>
+              <div class="a-meta"><span class="a-badge ${statusClass(u.status)}">${x(statusLabel(u.status))}</span></div>
             </div>
             <div class="a-actions">${actions}</div>
           </div>`;
@@ -2835,7 +2876,7 @@
     try{
       const r=await fetch('/api/admin/action', {
         method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':authHeaderValue()},
+        headers:apiHeaders(true),
         body:JSON.stringify({action, user_id: userId})
       });
       const d=await r.json();
@@ -2872,7 +2913,7 @@
     
     let stats={total:0,day:0,week:0,models:{}};
     try{
-      const r=await fetch(`/api/admin/users/${userId}/stats`, {headers:{'Authorization':authHeaderValue()}});
+      const r=await fetch(`/api/admin/users/${userId}/stats`, {headers:apiHeaders()});
       const d=await r.json();
       if(d.ok) stats=d.stats;
     }catch(e){}
@@ -2890,7 +2931,7 @@
         <div class="a-avatar">${String(u.user_id).slice(-2)}</div>
         <div>
           <div class="a-detail-title">ID ${u.user_id}</div>
-          <span class="a-badge ${u.status}">${statusLabel(u.status)}</span>
+          <span class="a-badge ${statusClass(u.status)}">${x(statusLabel(u.status))}</span>
         </div>
       </div>
       <div class="a-stat-grid">
@@ -2900,7 +2941,7 @@
       </div>
       <div class="a-section-title">Используемые модели</div>
       <div class="a-card" style="padding:6px 14px;">
-        ${modelEntries.length ? modelEntries.map(([m,c])=>`<div class="a-model-row"><div class="a-model-name">${m}</div><div class="a-model-bar-wrap"><div class="a-model-bar" style="width:${Math.round(c/maxM*100)}%"></div></div><div class="a-model-cnt">${c}</div></div>`).join('') : `<div class="a-empty">Нет активности</div>`}
+        ${modelEntries.length ? modelEntries.map(([m,c])=>`<div class="a-model-row"><div class="a-model-name">${x(m)}</div><div class="a-model-bar-wrap"><div class="a-model-bar" style="width:${Math.max(0,Math.min(100,Math.round(Number(c)/maxM*100)))}%"></div></div><div class="a-model-cnt">${Number(c)||0}</div></div>`).join('') : `<div class="a-empty">Нет активности</div>`}
       </div>
       <div class="a-section-title">Лимиты по моделям (в день)</div>
       <div class="a-card" style="padding:6px 14px;">
@@ -2930,7 +2971,7 @@
       : !!(performance.navigation && performance.navigation.type === 1);
 
     if(isReload){
-      const savedActive = localStorage.getItem(ACTIVE_KEY);
+      const savedActive = chatStore.getItem(ACTIVE_KEY);
       if(savedActive && chats[savedActive]){
         currentChatId = savedActive;
       } else if(chatOrder.length > 0){
