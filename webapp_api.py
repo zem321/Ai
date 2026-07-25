@@ -1,22 +1,3 @@
-"""
-HTTP API для мини-аппа (tg-ai-miniapp.html).
-
-Никакой новой логики обращения к ИИ-провайдерам здесь нет — все запросы
-идут через уже существующие функции call_ai() и generate_image() из
-handlers.chat_handler / handlers.image_handler, чтобы бот и мини-апп
-всегда использовали одну и ту же бизнес-логику и единый список моделей.
-
-Авторизация: мини-апп — это Telegram WebApp, поэтому пользователь
-идентифицируется через initData, которую передаёт Telegram. initData
-подписана HMAC-SHA256 по секрету, производному от BOT_TOKEN, поэтому
-её подлинность можно проверить без отдельной системы логина.
-
-Проверенный user_id сверяется с той же таблицей users (approved/pending/
-rejected), которой пользуется бот, — то есть доступ к мини-аппу есть
-только у тех, кому admin выдал доступ в самом боте.
-
-"""
-
 import sys
 import os
 
@@ -37,7 +18,12 @@ import secrets
 import logging
 import inspect
 import re
-from urllib.parse import parse_qsl
+import asyncio
+import base64
+import binascii
+import ipaddress
+from collections import OrderedDict, deque
+from urllib.parse import parse_qsl, urlsplit
 from aiohttp import web
 
 import database as db
@@ -81,37 +67,255 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 # Сколько секунд считаем initData валидной (защита от replay).
-INIT_DATA_MAX_AGE = 24 * 60 * 60  # 24 часа
+INIT_DATA_MAX_AGE = max(300, min(int(os.getenv("INIT_DATA_MAX_AGE", "3600")), 3600))
+INIT_DATA_FUTURE_SKEW = 60
 
 # ------------------ Вход по коду (для сайта вне Telegram) ------------------
-# Код одноразовый, короткоживущий; после успешного ввода выдаётся долгоживущий
-# токен веб-сессии (Bearer), который сайт хранит у себя (localStorage) и
-# использует вместо initData для всех дальнейших запросов.
+# Код одноразовый и короткоживущий. После входа сервер выдаёт HttpOnly-cookie:
+# JavaScript не видит токен сессии.
 LOGIN_CODE_TTL = 10 * 60              # код действителен 10 минут
-WEB_SESSION_TTL = 30 * 24 * 60 * 60   # веб-сессия живёт 30 дней
+WEB_SESSION_TTL = max(
+    60 * 60,
+    min(int(os.getenv("WEB_SESSION_TTL", str(7 * 24 * 60 * 60))), 30 * 24 * 60 * 60),
+)
+WEB_SESSION_IDLE_TTL = max(
+    15 * 60,
+    min(int(os.getenv("WEB_SESSION_IDLE_TTL", str(24 * 60 * 60))), WEB_SESSION_TTL),
+)
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "1").strip().lower() not in {"0", "false", "no"}
+SESSION_COOKIE_NAME = (
+    "__Host-assistant_session" if COOKIE_SECURE else "assistant_session"
+)
+PUBLIC_ORIGIN = os.getenv("PUBLIC_ORIGIN", "").strip().rstrip("/")
 
-# Простая защита от подбора кода: не больше N попыток с одного IP за окно времени.
+# Ограничения запросов. Этот процесс запускается в одном экземпляре вместе с
+# ботом; для горизонтального масштабирования эти счётчики следует вынести в Redis.
 _CODE_RATE_LIMIT = 8
 _CODE_RATE_WINDOW = 10 * 60
-_code_attempts: dict[str, list[float]] = {}
+_MAX_RATE_BUCKETS = 10_000
+_TRUSTED_PROXY_IPS = {
+    value.strip()
+    for value in os.getenv("TRUSTED_PROXY_IPS", "").split(",")
+    if value.strip()
+}
+
+ALLOWED_MODELS = {
+    "gemini/gemini-3.1-flash-lite",
+    "gemini/gemini-3.5-flash-lite",
+    "gemini/gemini-3.6-flash",
+    "meta/llama-4-maverick-17b-128e-instruct",
+    "z-ai/glm-5.2",
+    "nvidia/nemotron-3-super-120b-a12b",
+}
+DEFAULT_MODEL = "gemini/gemini-3.1-flash-lite"
+
+AUTH_BODY_LIMIT = 1024
+ADMIN_BODY_LIMIT = 16 * 1024
+IMAGE_BODY_LIMIT = 64 * 1024
+CHAT_BODY_LIMIT = max(
+    1024 * 1024,
+    min(int(os.getenv("CHAT_BODY_LIMIT", str(10 * 1024 * 1024))), 15 * 1024 * 1024),
+)
+MAX_MESSAGE_CHARS = 20_000
+MAX_REPLY_CHARS = 500_000
+MAX_GENERATED_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_HISTORY_ITEMS = 40
+MAX_HISTORY_CHARS = 50_000
+MAX_ATTACHMENTS = 4
+MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024
+MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024
+AI_TIMEOUT_SECONDS = max(15, min(int(os.getenv("AI_TIMEOUT_SECONDS", "120")), 300))
+IMAGE_TIMEOUT_SECONDS = max(30, min(int(os.getenv("IMAGE_TIMEOUT_SECONDS", "180")), 300))
+AI_CONCURRENCY = max(1, min(int(os.getenv("AI_CONCURRENCY", "4")), 16))
+_ai_semaphore = asyncio.Semaphore(AI_CONCURRENCY)
+
+_ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_ALLOWED_FILE_TYPES = {
+    "text/plain", "text/csv", "text/markdown", "application/json",
+    "application/xml", "text/xml", "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/octet-stream", "",
+}
+
+
+class SlidingWindowLimiter:
+    def __init__(self, max_buckets: int = _MAX_RATE_BUCKETS):
+        self.max_buckets = max_buckets
+        self.buckets: OrderedDict[str, deque[float]] = OrderedDict()
+
+    def allow(self, key: str, limit: int, window: int) -> bool:
+        now = time.monotonic()
+        bucket = self.buckets.get(key)
+        if bucket is None:
+            self._remove_stale(now, window)
+            if len(self.buckets) >= self.max_buckets:
+                return False
+            bucket = deque()
+            self.buckets[key] = bucket
+        else:
+            self.buckets.move_to_end(key)
+        while bucket and now - bucket[0] >= window:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            return False
+        bucket.append(now)
+        return True
+
+    def _remove_stale(self, now: float, window: int) -> None:
+        for key in list(self.buckets.keys()):
+            bucket = self.buckets[key]
+            while bucket and now - bucket[0] >= window:
+                bucket.popleft()
+            if not bucket:
+                self.buckets.pop(key, None)
+
+
+_rate_limiter = SlidingWindowLimiter()
 
 def _client_ip(request: web.Request) -> str:
-    fwd = request.headers.get("X-Forwarded-For", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.remote or "unknown"
+    remote = request.remote or "unknown"
+    if remote not in _TRUSTED_PROXY_IPS:
+        return remote
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if not forwarded or len(forwarded) > 512:
+        return remote
+    candidate = forwarded.split(",", 1)[0].strip()
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return remote
 
 def _rate_limited(ip: str) -> bool:
-    now = time.time()
-    attempts = [t for t in _code_attempts.get(ip, []) if now - t < _CODE_RATE_WINDOW]
-    attempts.append(now)
-    _code_attempts[ip] = attempts
-    # чистим старые ключи, чтобы словарь не рос бесконечно
-    if len(_code_attempts) > 5000:
-        for k in list(_code_attempts.keys()):
-            if not _code_attempts[k]:
-                _code_attempts.pop(k, None)
-    return len(attempts) > _CODE_RATE_LIMIT
+    global_ok = _rate_limiter.allow("auth:global", 300, 60)
+    ip_ok = _rate_limiter.allow(f"auth:{ip}", _CODE_RATE_LIMIT, _CODE_RATE_WINDOW)
+    return not (global_ok and ip_ok)
+
+
+def _limited(key: str, limit: int, window: int) -> bool:
+    return not _rate_limiter.allow(key, limit, window)
+
+
+async def _read_json_object(request: web.Request, max_bytes: int) -> dict:
+    content_length = request.content_length
+    if content_length is not None and content_length > max_bytes:
+        raise web.HTTPRequestEntityTooLarge(
+            max_size=max_bytes, actual_size=content_length
+        )
+    raw = await request.read()
+    if len(raw) > max_bytes:
+        raise web.HTTPRequestEntityTooLarge(
+            max_size=max_bytes, actual_size=len(raw)
+        )
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise web.HTTPBadRequest(text="Некорректный JSON") from exc
+    if not isinstance(payload, dict):
+        raise web.HTTPBadRequest(text="Ожидается JSON-объект")
+    return payload
+
+
+def _request_origin(request: web.Request) -> str:
+    origin = request.headers.get("Origin", "").rstrip("/")
+    if origin:
+        return origin
+    return ""
+
+
+def _same_origin(request: web.Request) -> bool:
+    origin = _request_origin(request)
+    if not origin:
+        return False
+    if PUBLIC_ORIGIN:
+        return hmac.compare_digest(origin, PUBLIC_ORIGIN)
+    try:
+        parts = urlsplit(origin)
+    except ValueError:
+        return False
+    return parts.scheme in {"http", "https"} and parts.netloc == request.host
+
+
+def _safe_filename(value: object, fallback: str = "file") -> str:
+    name = os.path.basename(str(value or fallback)).replace("\x00", "")
+    name = re.sub(r"[\r\n\t]+", " ", name).strip()
+    return (name[:100] or fallback)
+
+
+def _validate_history(value: object) -> list[dict]:
+    if not isinstance(value, list) or len(value) > MAX_HISTORY_ITEMS:
+        raise ValueError("Некорректная или слишком длинная история")
+    result: list[dict] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("Некорректный элемент истории")
+        role = item.get("role")
+        content = item.get("content")
+        if role not in {"user", "assistant"} or not isinstance(content, str):
+            raise ValueError("Недопустимая роль или содержимое истории")
+        if len(content) > MAX_HISTORY_CHARS:
+            raise ValueError("Слишком длинное сообщение в истории")
+        result.append({"role": role, "content": content})
+    return result
+
+
+def _decode_data_url(value: object, declared_type: str) -> tuple[bytes, str]:
+    if not isinstance(value, str) or not value:
+        raise ValueError("Пустое вложение")
+    if len(value) > (MAX_ATTACHMENT_BYTES * 4 // 3) + 4096:
+        raise ValueError("Вложение слишком большое")
+    media_type = declared_type.strip().lower()
+    encoded = value
+    if value.startswith("data:"):
+        try:
+            header, encoded = value.split(",", 1)
+        except ValueError as exc:
+            raise ValueError("Некорректный data URL") from exc
+        if ";base64" not in header.lower():
+            raise ValueError("Вложение должно быть в base64")
+        header_type = header[5:].split(";", 1)[0].strip().lower()
+        if header_type:
+            if media_type and header_type != media_type:
+                raise ValueError("MIME-тип вложения не совпадает")
+            media_type = header_type
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Некорректное base64-вложение") from exc
+    if len(raw) > MAX_ATTACHMENT_BYTES:
+        raise ValueError("Вложение слишком большое")
+    return raw, media_type
+
+
+def _validate_attachments(value: object) -> list[dict]:
+    if not isinstance(value, list) or len(value) > MAX_ATTACHMENTS:
+        raise ValueError("Слишком много вложений")
+    validated: list[dict] = []
+    total = 0
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("Некорректное вложение")
+        declared_type = str(item.get("type") or "").strip().lower()
+        raw, media_type = _decode_data_url(item.get("dataUrl"), declared_type)
+        is_image = media_type in _ALLOWED_IMAGE_TYPES
+        if media_type.startswith("image/") and not is_image:
+            raise ValueError("Этот формат изображения не поддерживается")
+        if not is_image and media_type not in _ALLOWED_FILE_TYPES:
+            raise ValueError("Этот тип файла не поддерживается")
+        total += len(raw)
+        if total > MAX_TOTAL_ATTACHMENT_BYTES:
+            raise ValueError("Суммарный размер вложений слишком большой")
+        validated.append({
+            "name": _safe_filename(item.get("name"), "file"),
+            "type": media_type,
+            "raw": raw,
+            "is_image": is_image,
+        })
+    return validated
 
 # ------------------ Автоопределение режима (чат / картинка / файл) ------------------
 
@@ -303,7 +507,7 @@ def check_init_data(init_data: str) -> dict | None:
         logger.error("webapp_api: BOT_TOKEN не задан — все запросы мини-аппа будут отклонены")
         return None
 
-    if not init_data:
+    if not init_data or len(init_data) > 8192:
         logger.warning("webapp_api: запрос без initData")
         return None
 
@@ -312,19 +516,14 @@ def check_init_data(init_data: str) -> dict | None:
     except Exception:
         return None
 
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        logger.warning("webapp_api: initData содержит повторяющиеся поля")
+        return None
     data = dict(pairs)
     received_hash = data.pop("hash", None)
-    if not received_hash:
+    if not received_hash or not re.fullmatch(r"[0-9a-fA-F]{64}", received_hash):
         return None
-
-    auth_date = data.get("auth_date")
-    if auth_date:
-        try:
-            if time.time() - int(auth_date) > INIT_DATA_MAX_AGE:
-                logger.warning("webapp_api: initData просрочена")
-                return None
-        except ValueError:
-            pass
 
     check_string = "\n".join(f"{k}={v}" for k, v in sorted(data.items()))
     secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
@@ -334,12 +533,25 @@ def check_init_data(init_data: str) -> dict | None:
         logger.warning("webapp_api: подпись initData не совпала")
         return None
 
+    auth_date = data.get("auth_date")
+    try:
+        auth_timestamp = int(auth_date)
+    except (TypeError, ValueError):
+        logger.warning("webapp_api: initData без корректной auth_date")
+        return None
+    age = time.time() - auth_timestamp
+    if age < -INIT_DATA_FUTURE_SKEW or age > INIT_DATA_MAX_AGE:
+        logger.warning("webapp_api: initData вне допустимого временного окна")
+        return None
+
     user_raw = data.get("user")
     if user_raw:
         try:
             data["user"] = json.loads(user_raw)
         except Exception:
             data["user"] = None
+    if not isinstance(data.get("user"), dict):
+        return None
 
     return data
 
@@ -380,8 +592,7 @@ async def _check_access_status(user_id: int) -> tuple[int | None, web.Response |
 async def _authorize(request: web.Request) -> tuple[int | None, web.Response | None]:
     """Поддерживает два способа входа:
     - 'Authorization: tma <initData>'  — Telegram Mini App (проверка HMAC-подписи);
-    - 'Authorization: Bearer <token>'  — обычный сайт, вход по коду из бота.
-    Устаревший заголовок X-Telegram-Init-Data оставлен для обратной совместимости.
+    - HttpOnly cookie — обычный сайт, вход по коду из бота.
     """
     auth_header = request.headers.get("Authorization", "")
 
@@ -394,27 +605,25 @@ async def _authorize(request: web.Request) -> tuple[int | None, web.Response | N
                 status=401,
             )
         user_id = parsed["user"].get("id")
-        if not user_id:
+        if not isinstance(user_id, int) or user_id <= 0:
             return None, web.json_response({"error": "unauthorized"}, status=401)
         return await _check_access_status(user_id)
 
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:].strip()
-        user_id = await db.get_web_session_user(token) if token else None
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    if token:
+        if len(token) > 128:
+            return None, web.json_response({"error": "unauthorized"}, status=401)
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and not _same_origin(request):
+            return None, web.json_response({"error": "bad_origin"}, status=403)
+        user_id = await db.get_web_session_user(
+            token, idle_seconds=WEB_SESSION_IDLE_TTL
+        )
         if not user_id:
             return None, web.json_response(
                 {"error": "unauthorized", "message": "Сессия истекла. Войдите заново по коду из бота."},
                 status=401,
             )
         return await _check_access_status(user_id)
-
-    legacy_init_data = request.headers.get("X-Telegram-Init-Data", "")
-    if legacy_init_data:
-        parsed = check_init_data(legacy_init_data)
-        if parsed and parsed.get("user"):
-            user_id = parsed["user"].get("id")
-            if user_id:
-                return await _check_access_status(user_id)
 
     return None, web.json_response(
         {"error": "unauthorized", "message": "Не удалось подтвердить пользователя."},
@@ -470,7 +679,11 @@ async def api_me(request: web.Request) -> web.Response:
         return err
     if not isinstance(user_id, int):
         return web.json_response({"error": "unauthorized"}, status=401)
-    return web.json_response({"ok": True, "user_id": user_id, "is_admin": user_id == ADMIN_ID})
+    response = web.json_response(
+        {"ok": True, "user_id": user_id, "is_admin": user_id == ADMIN_ID}
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 async def api_chat(request: web.Request) -> web.Response:
     user_id, err = await _authorize(request)
@@ -481,15 +694,38 @@ async def api_chat(request: web.Request) -> web.Response:
     if not isinstance(user_id, int):
         return web.json_response({"error": "unauthorized"}, status=401)
 
-    try:
-        payload = await request.json()
-    except Exception:
-        return web.json_response({"error": "bad_request"}, status=400)
+    if _limited(f"chat:{user_id}", 20, 60):
+        return web.json_response(
+            {"error": "rate_limited", "message": "Слишком много запросов. Подождите минуту."},
+            status=429,
+        )
 
-    user_text = (payload.get("message") or "").strip()
-    model_id = payload.get("model") or "freemodel/gpt-5.5"
-    history = payload.get("history") or []
-    attachments = payload.get("attachments") or []
+    try:
+        payload = await _read_json_object(request, CHAT_BODY_LIMIT)
+        message_value = payload.get("message", "")
+        if not isinstance(message_value, str):
+            raise ValueError("Сообщение должно быть строкой")
+        user_text = message_value.strip()
+        if len(user_text) > MAX_MESSAGE_CHARS:
+            raise ValueError("Сообщение слишком длинное")
+        model_id = payload.get("model") or DEFAULT_MODEL
+        if not isinstance(model_id, str) or model_id not in ALLOWED_MODELS:
+            return web.json_response(
+                {"error": "invalid_model", "message": "Недоступная модель."},
+                status=400,
+            )
+        history = _validate_history(payload.get("history") or [])
+        attachments = _validate_attachments(payload.get("attachments") or [])
+    except web.HTTPRequestEntityTooLarge:
+        return web.json_response(
+            {"error": "too_large", "message": "Запрос или вложения слишком большие."},
+            status=413,
+        )
+    except (web.HTTPBadRequest, ValueError) as exc:
+        return web.json_response(
+            {"error": "bad_request", "message": str(exc)},
+            status=400,
+        )
 
     if not user_text and not attachments:
         return web.json_response({"error": "empty_message"}, status=400)
@@ -501,30 +737,53 @@ async def api_chat(request: web.Request) -> web.Response:
 
     # === ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ===
     if intent == "image":
+        if _limited(f"image:{user_id}", 5, 10 * 60):
+            return web.json_response(
+                {"error": "rate_limited", "message": "Лимит генерации изображений исчерпан. Попробуйте позже."},
+                status=429,
+            )
         try:
-            image_bytes = await generate_image(user_text)
-        except Exception as e:
+            async with _ai_semaphore:
+                image_bytes = await asyncio.wait_for(
+                    generate_image(user_text),
+                    timeout=IMAGE_TIMEOUT_SECONDS,
+                )
+        except asyncio.TimeoutError:
+            return web.json_response(
+                {"error": "generation_timeout", "message": "Генерация заняла слишком много времени."},
+                status=504,
+            )
+        except Exception:
             logger.exception("webapp_api: ошибка генерации изображения")
-            return web.json_response({"error": "generation_failed", "message": str(e)}, status=502)
+            return web.json_response(
+                {"error": "generation_failed", "message": "Не удалось создать изображение."},
+                status=502,
+            )
 
-        import base64 as b64
+        await db.log_request(user_id, "image-generation", source="webapp")
+        if not isinstance(image_bytes, (bytes, bytearray)) or len(image_bytes) > MAX_GENERATED_IMAGE_BYTES:
+            logger.error("webapp_api: генератор вернул недопустимый размер изображения")
+            return web.json_response(
+                {"error": "generation_failed", "message": "Получено слишком большое изображение."},
+                status=502,
+            )
         return web.json_response({
             "intent": "image",
-            "image_base64": b64.b64encode(image_bytes).decode("ascii"),
+            "image_base64": base64.b64encode(image_bytes).decode("ascii"),
             "prompt": user_text,
         })
 
     # === ОБЫЧНЫЙ ЧАТ ===
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages += trim_history(list(history))
+    messages += trim_history(history)
 
     image_attachments = [
         a for a in attachments
-        if a.get("dataUrl") and a.get("type", "").startswith("image/")
+        if a["is_image"]
     ]
     file_attachments = [
         a for a in attachments
-        if a.get("dataUrl") and not a.get("type", "").startswith("image/")
+        if not a["is_image"]
     ]
 
     if image_attachments or file_attachments:
@@ -532,20 +791,14 @@ async def api_chat(request: web.Request) -> web.Response:
         content_parts = []
 
         # Add user text first — only if no file attachments (for files, text is embedded in prompt)
-        has_files = bool([a for a in attachments if a.get("dataUrl") and not a.get("type", "").startswith("image/")])
+        has_files = bool(file_attachments)
         if user_text and user_text != "Вложения" and not has_files:
             content_parts.append({"type": "text", "text": user_text})
 
         # Add images via vision
         for img in image_attachments:
-            data_url = img["dataUrl"]
-            # Extract base64 data from data URL (data:image/jpeg;base64,...)
-            if "," in data_url:
-                header, b64data = data_url.split(",", 1)
-                media_type = header.split(";")[0].replace("data:", "") or "image/jpeg"
-            else:
-                b64data = data_url
-                media_type = img.get("type", "image/jpeg")
+            media_type = img["type"]
+            b64data = base64.b64encode(img["raw"]).decode("ascii")
             content_parts.append({
                 "type": "image_url",
                 "image_url": {"url": f"data:{media_type};base64,{b64data}"}
@@ -553,16 +806,9 @@ async def api_chat(request: web.Request) -> web.Response:
 
         # Add file contents as text blocks (same logic as bot's extract_text_from_bytes)
         for fa in file_attachments:
-            import base64 as _b64
-            fname = fa.get("name", "file")
-            ftype = fa.get("type", "")
-            data_url = fa.get("dataUrl", "")
+            fname = fa["name"]
+            raw_bytes = fa["raw"]
             try:
-                if "," in data_url:
-                    _, b64data = data_url.split(",", 1)
-                else:
-                    b64data = data_url
-                raw_bytes = _b64.b64decode(b64data)
                 # Try encodings: utf-8 → cp1251 → latin1 (same as bot)
                 file_text = None
                 for enc in ("utf-8", "cp1251", "latin1"):
@@ -583,8 +829,8 @@ async def api_chat(request: web.Request) -> web.Response:
                 else:
                     prompt_text = f"Проанализируй содержимое файла {fname}:\n\n{file_text}"
                 content_parts.append({"type": "text", "text": prompt_text})
-            except Exception as e:
-                logger.warning("Failed to decode file attachment %s: %r", fname, e)
+            except Exception:
+                logger.warning("Failed to decode file attachment %s", fname)
                 content_parts.append({"type": "text", "text": f"[Файл: {fname}] — не удалось прочитать"})
 
         if not content_parts:
@@ -597,10 +843,27 @@ async def api_chat(request: web.Request) -> web.Response:
     messages.append({"role": "user", "content": user_content})
 
     try:
-        reply, debug = await call_ai(model_id, messages)
-    except Exception as e:
+        async with _ai_semaphore:
+            reply, debug = await asyncio.wait_for(
+                call_ai(model_id, messages),
+                timeout=AI_TIMEOUT_SECONDS,
+            )
+    except asyncio.TimeoutError:
+        return web.json_response(
+            {"error": "ai_timeout", "message": "Ответ модели занял слишком много времени."},
+            status=504,
+        )
+    except Exception:
         logger.exception("webapp_api: ошибка call_ai")
-        return web.json_response({"error": "ai_failed", "message": str(e)}, status=502)
+        return web.json_response(
+            {"error": "ai_failed", "message": "Модель временно недоступна."},
+            status=502,
+        )
+    reply = str(reply or "")
+    if len(reply) > MAX_REPLY_CHARS:
+        reply = reply[:MAX_REPLY_CHARS] + "\n\n[Ответ обрезан сервером]"
+    if not isinstance(debug, dict):
+        debug = {}
 
     # Логируем запрос в статистику
     await db.log_request(user_id, model_id, source="webapp")
@@ -641,9 +904,30 @@ async def api_auth_code(request: web.Request) -> web.Response:
     """POST /api/auth/code — вход на сайт (вне Telegram) по одноразовому коду из бота.
 
     Тело: {"code": "AB12CD3"}.
-    Ответ: {"ok": true, "token": "...", "user_id": ..., "is_admin": bool}.
-    Токен дальше передаётся как 'Authorization: Bearer <token>'.
+    Ответ: {"ok": true, "user_id": ..., "is_admin": bool}.
+    Токен возвращается только в защищённой HttpOnly-cookie.
     """
+    try:
+        payload = await _read_json_object(request, AUTH_BODY_LIMIT)
+    except web.HTTPRequestEntityTooLarge:
+        return web.json_response({"error": "too_large"}, status=413)
+    except web.HTTPBadRequest:
+        return web.json_response({"error": "bad_request"}, status=400)
+
+    if not _same_origin(request):
+        return web.json_response({"error": "bad_origin"}, status=403)
+
+    raw_code = payload.get("code")
+    if not isinstance(raw_code, str):
+        code = ""
+    else:
+        code = raw_code.strip().upper()
+    if not re.fullmatch(r"[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}", code):
+        return web.json_response(
+            {"error": "invalid_code", "message": "Введите 8-значный код из бота."},
+            status=400,
+        )
+
     ip = _client_ip(request)
     if _rate_limited(ip):
         logger.warning("webapp_api: /api/auth/code — превышен лимит попыток, ip=%s", ip)
@@ -651,15 +935,6 @@ async def api_auth_code(request: web.Request) -> web.Response:
             {"error": "rate_limited", "message": "Слишком много попыток. Подождите несколько минут."},
             status=429,
         )
-
-    try:
-        payload = await request.json()
-    except Exception:
-        return web.json_response({"error": "bad_request"}, status=400)
-
-    code = (payload.get("code") or "").strip().upper()
-    if not code:
-        return web.json_response({"error": "empty_code", "message": "Введите код."}, status=400)
 
     user_id = await db.consume_login_code(code)
     if not user_id:
@@ -676,23 +951,42 @@ async def api_auth_code(request: web.Request) -> web.Response:
     await db.create_web_session(token, checked_id, WEB_SESSION_TTL)
     logger.info("webapp_api: пользователь %s вошёл на сайт по коду", checked_id)
 
-    return web.json_response({
+    response = web.json_response({
         "ok": True,
-        "token": token,
         "user_id": checked_id,
         "is_admin": checked_id == ADMIN_ID,
         "expires_in": WEB_SESSION_TTL,
     })
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        max_age=WEB_SESSION_TTL,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="Strict",
+        path="/",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 async def api_auth_logout(request: web.Request) -> web.Response:
-    """POST /api/auth/logout — завершить веб-сессию (актуально только для входа по токену)."""
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:].strip()
-        if token:
-            await db.delete_web_session(token)
-    return web.json_response({"ok": True})
+    """POST /api/auth/logout — завершить текущую cookie-сессию."""
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    if token and not _same_origin(request):
+        return web.json_response({"error": "bad_origin"}, status=403)
+    if token:
+        await db.delete_web_session(token)
+    response = web.json_response({"ok": True})
+    response.del_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        secure=COOKIE_SECURE,
+        httponly=True,
+        samesite="Strict",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 async def api_image(request: web.Request) -> web.Response:
@@ -703,24 +997,52 @@ async def api_image(request: web.Request) -> web.Response:
     if not isinstance(user_id, int):
         return web.json_response({"error": "unauthorized"}, status=401)
 
+    if _limited(f"image:{user_id}", 5, 10 * 60):
+        return web.json_response(
+            {"error": "rate_limited", "message": "Лимит генерации изображений исчерпан. Попробуйте позже."},
+            status=429,
+        )
     try:
-        payload = await request.json()
-    except Exception:
+        payload = await _read_json_object(request, IMAGE_BODY_LIMIT)
+    except web.HTTPRequestEntityTooLarge:
+        return web.json_response({"error": "too_large"}, status=413)
+    except web.HTTPBadRequest:
         return web.json_response({"error": "bad_request"}, status=400)
 
-    prompt = (payload.get("prompt") or "").strip()
+    prompt_value = payload.get("prompt")
+    prompt = prompt_value.strip() if isinstance(prompt_value, str) else ""
     if not prompt:
         return web.json_response({"error": "empty_prompt"}, status=400)
+    if len(prompt) > MAX_MESSAGE_CHARS:
+        return web.json_response({"error": "prompt_too_long"}, status=400)
 
     try:
-        image_bytes = await generate_image(prompt)
-    except Exception as e:
+        async with _ai_semaphore:
+            image_bytes = await asyncio.wait_for(
+                generate_image(prompt),
+                timeout=IMAGE_TIMEOUT_SECONDS,
+            )
+    except asyncio.TimeoutError:
+        return web.json_response(
+            {"error": "generation_timeout", "message": "Генерация заняла слишком много времени."},
+            status=504,
+        )
+    except Exception:
         logger.exception("webapp_api: ошибка генерации изображения")
-        return web.json_response({"error": "generation_failed", "message": str(e)}, status=502)
+        return web.json_response(
+            {"error": "generation_failed", "message": "Не удалось создать изображение."},
+            status=502,
+        )
 
-    import base64 as b64
+    await db.log_request(user_id, "image-generation", source="webapp")
+    if not isinstance(image_bytes, (bytes, bytearray)) or len(image_bytes) > MAX_GENERATED_IMAGE_BYTES:
+        logger.error("webapp_api: генератор вернул недопустимый размер изображения")
+        return web.json_response(
+            {"error": "generation_failed", "message": "Получено слишком большое изображение."},
+            status=502,
+        )
     return web.json_response({
-        "image_base64": b64.b64encode(image_bytes).decode("ascii"),
+        "image_base64": base64.b64encode(image_bytes).decode("ascii"),
         "prompt": prompt,
     })
 
@@ -742,8 +1064,21 @@ async def api_admin_users(request: web.Request) -> web.Response:
     ok, err = await _authorize_admin(request)
     if not ok:
         return err
-    users = await db.get_all_users_with_stats()
-    return web.json_response({"ok": True, "users": users})
+    try:
+        limit = int(request.query.get("limit", "200"))
+        offset = int(request.query.get("offset", "0"))
+    except ValueError:
+        return web.json_response({"error": "bad_pagination"}, status=400)
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    users = await db.get_all_users_with_stats(limit=limit, offset=offset)
+    return web.json_response({
+        "ok": True,
+        "users": users,
+        "limit": limit,
+        "offset": offset,
+        "has_more": len(users) == limit,
+    })
 
 
 async def api_admin_user_stats(request: web.Request) -> web.Response:
@@ -751,7 +1086,12 @@ async def api_admin_user_stats(request: web.Request) -> web.Response:
     ok, err = await _authorize_admin(request)
     if not ok:
         return err
-    uid = int(request.match_info["user_id"])
+    try:
+        uid = int(request.match_info["user_id"])
+    except (TypeError, ValueError):
+        return web.json_response({"error": "bad_user_id"}, status=400)
+    if uid <= 0 or uid > 2**63 - 1:
+        return web.json_response({"error": "bad_user_id"}, status=400)
     stats = await db.get_user_stats(uid)
     return web.json_response({"ok": True, "user_id": uid, "stats": stats})
 
@@ -762,34 +1102,39 @@ async def api_admin_action(request: web.Request) -> web.Response:
     if not ok:
         return err
     try:
-        payload = await request.json()
-    except Exception:
+        payload = await _read_json_object(request, ADMIN_BODY_LIMIT)
+    except (web.HTTPBadRequest, web.HTTPRequestEntityTooLarge):
         return web.json_response({"error": "bad_request"}, status=400)
 
     action = payload.get("action")  # "approve" | "reject" | "revoke"
     uid = payload.get("user_id")
-    if not action or not uid:
+    if action not in {"approve", "reject", "revoke"}:
+        return web.json_response({"error": "unknown action"}, status=400)
+    if isinstance(uid, bool):
         return web.json_response({"error": "missing fields"}, status=400)
 
-    uid = int(uid)
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "bad_user_id"}, status=400)
+    if uid <= 0 or uid > 2**63 - 1:
+        return web.json_response({"error": "bad_user_id"}, status=400)
+    if uid == ADMIN_ID and action in {"reject", "revoke"}:
+        return web.json_response(
+            {"error": "cannot_revoke_admin"},
+            status=400,
+        )
+
     if action == "approve":
         await db.approve_user(uid)
-    elif action in ("reject", "revoke"):
-        await db.reject_user(uid)
     else:
-        return web.json_response({"error": "unknown action"}, status=400)
+        await db.reject_user(uid)
 
     logger.info("admin action=%s user_id=%s", action, uid)
     return web.json_response({"ok": True, "action": action, "user_id": uid})
 
 
 def setup_webapp_routes(app: web.Application) -> None:
-    try:
-        app._client_max_size = 1024 * 1024 * 30
-        logger.info("webapp_api: client_max_size increased to 30MB")
-    except Exception as e:
-        logger.warning("webapp_api: failed to increase client_max_size: %r", e)
-
     app.router.add_get("/api/me", api_me)
     app.router.add_post("/api/auth/code", api_auth_code)
     app.router.add_post("/api/auth/logout", api_auth_logout)
