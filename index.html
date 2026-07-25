@@ -725,6 +725,14 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="color:var(--ink-faint);"><path d="M9 6l6 6-6 6"/></svg>
         </div>
       </div>
+      <div class="a-card" id="webLogoutRow" style="display:none;">
+        <div class="a-row" onclick="logoutWeb()">
+          <div class="a-avatar" style="background:transparent;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+          </div>
+          <div class="a-info"><div class="a-name">Выйти</div></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -748,8 +756,35 @@
   /* ================= GLOBALS & AUTH ================= */
   let accessGranted = false;
   let isAdmin = false;
+  // 'tg' — открыто как Telegram Mini App (initData); 'web' — обычный сайт, вход по коду из бота.
+  let AUTH_MODE = 'tg';
+  const WEB_TOKEN_KEY = 'assistant_web_token';
+  let WEB_TOKEN = localStorage.getItem(WEB_TOKEN_KEY) || '';
 
-  (function initTelegramAccess(){
+  function authHeaderValue(){
+    if(AUTH_MODE === 'web') return 'Bearer ' + WEB_TOKEN;
+    const initData = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp.initData : '';
+    return 'tma ' + initData;
+  }
+
+  function clearWebSession(){
+    WEB_TOKEN = '';
+    localStorage.removeItem(WEB_TOKEN_KEY);
+  }
+
+  function grantAccess(isAdminFlag){
+    accessGranted = true;
+    isAdmin = !!isAdminFlag;
+    if(isAdmin) document.getElementById('adminPanelBlock').style.display = 'block';
+    const logoutRow = document.getElementById('webLogoutRow');
+    if(logoutRow) logoutRow.style.display = (AUTH_MODE === 'web') ? 'flex' : 'none';
+    hideLoginScreen();
+    document.getElementById('access-overlay')?.remove();
+    if(ta) ta.disabled = false;
+    toggleSend();
+  }
+
+  (function initAccess(){
     try{
       if(window.Telegram&&window.Telegram.WebApp){
         const tg=window.Telegram.WebApp;
@@ -757,24 +792,52 @@
         tg.expand();
       }
     }catch(e){}
-    const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
-    fetch('/api/me',{headers:{'Authorization':'tma '+initData}})
-      .then(r=>{if(!r.ok)return r.json().then(d=>{throw d;}).catch(()=>{throw {message:'Нет доступа.'};});return r.json();})
-      .then(data=>{
-        if(data&&data.ok===true){
-          accessGranted=true;
-          if(data.is_admin){
-            isAdmin=true;
-            document.getElementById('adminPanelBlock').style.display='block';
+
+    const tgInitData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
+
+    if(tgInitData){
+      // Открыто внутри Telegram — используем подписанную initData как раньше.
+      AUTH_MODE='tg';
+      fetch('/api/me',{headers:{'Authorization':'tma '+tgInitData}})
+        .then(r=>{if(!r.ok)return r.json().then(d=>{throw d;}).catch(()=>{throw {message:'Нет доступа.'};});return r.json();})
+        .then(data=>{
+          if(data&&data.ok===true){
+            grantAccess(data.is_admin);
+          }else{
+            showAccessDenied((data&&data.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.');
           }
-          if(ta) ta.disabled=false;
-          toggleSend();
-        }else{
-          showAccessDenied((data&&data.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.');
-        }
-      })
-      .catch(err=>showAccessDenied((err&&err.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.'));
+        })
+        .catch(err=>showAccessDenied((err&&err.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.'));
+      return;
+    }
+
+    // Открыто как обычный сайт вне Telegram — вход по одноразовому коду из бота.
+    AUTH_MODE='web';
+    if(ta) ta.disabled=true;
+    if(sendBtn) sendBtn.disabled=true;
+
+    if(WEB_TOKEN){
+      fetch('/api/me',{headers:{'Authorization':'Bearer '+WEB_TOKEN}})
+        .then(r=>{if(!r.ok) throw new Error('expired'); return r.json();})
+        .then(data=>{
+          if(data&&data.ok===true) grantAccess(data.is_admin);
+          else { clearWebSession(); showLoginScreen(); }
+        })
+        .catch(()=>{ clearWebSession(); showLoginScreen(); });
+    }else{
+      showLoginScreen();
+    }
   })();
+
+  async function logoutWeb(){
+    try{ await fetch('/api/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+WEB_TOKEN}}); }catch(e){}
+    clearWebSession();
+    accessGranted=false;
+    isAdmin=false;
+    document.getElementById('closeAdmin')?.click();
+    document.getElementById('closeProfile')?.click();
+    showLoginScreen();
+  }
 
   function showAccessDenied(message){
     accessGranted=false;
@@ -786,6 +849,71 @@
     overlay.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:32px;text-align:center;background:var(--bg);color:var(--ink)';
     overlay.innerHTML=`<div style="font-size:40px;">🚫</div><div style="font-size:18px;font-weight:600;">Доступ закрыт</div><div style="font-size:14px;color:var(--ink-soft);line-height:1.6;max-width:270px;">${x(message)}</div>`;
     document.body.appendChild(overlay);
+  }
+
+  function showLoginScreen(errorMsg){
+    accessGranted=false;
+    if(ta) ta.disabled=true;
+    if(sendBtn) sendBtn.disabled=true;
+    let overlay=document.getElementById('login-overlay');
+    if(overlay){
+      const err=overlay.querySelector('#loginErr');
+      if(err) err.textContent=errorMsg||'';
+      overlay.querySelector('#loginCodeInput')?.focus();
+      return;
+    }
+    overlay=document.createElement('div');
+    overlay.id='login-overlay';
+    overlay.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px;text-align:center;background:var(--bg);color:var(--ink)';
+    overlay.innerHTML=`
+      <div style="font-size:36px;">🔐</div>
+      <div style="font-size:18px;font-weight:600;">Вход по коду</div>
+      <div style="font-size:14px;color:var(--ink-soft);line-height:1.6;max-width:280px;">Откройте бота в Telegram, отправьте команду <b>/code</b> и введите полученный код здесь.</div>
+      <input id="loginCodeInput" maxlength="7" autocomplete="one-time-code" placeholder="XXXXXXX"
+        style="text-align:center;letter-spacing:4px;font-size:20px;font-weight:600;text-transform:uppercase;padding:12px 16px;border-radius:14px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--ink);width:220px;outline:none;">
+      <div id="loginErr" style="font-size:13px;color:#E0524D;min-height:16px;">${errorMsg?x(errorMsg):''}</div>
+      <button id="loginSubmitBtn" style="padding:11px 26px;border-radius:20px;border:none;background:var(--coral);color:var(--bg);font-size:14.5px;font-weight:600;cursor:pointer;">Войти</button>
+    `;
+    document.body.appendChild(overlay);
+
+    const input=overlay.querySelector('#loginCodeInput');
+    const btn=overlay.querySelector('#loginSubmitBtn');
+    const doSubmit=()=>submitLoginCode(input.value);
+    btn.onclick=doSubmit;
+    input.addEventListener('input',()=>{ input.value=input.value.toUpperCase().replace(/[^A-Z0-9]/g,''); });
+    input.addEventListener('keydown',e=>{ if(e.key==='Enter') doSubmit(); });
+    input.focus();
+  }
+
+  function hideLoginScreen(){
+    document.getElementById('login-overlay')?.remove();
+  }
+
+  async function submitLoginCode(rawCode){
+    const code=(rawCode||'').trim().toUpperCase();
+    const btn=document.getElementById('loginSubmitBtn');
+    const err=document.getElementById('loginErr');
+    if(!code){ if(err) err.textContent='Введите код.'; return; }
+    if(btn){ btn.disabled=true; btn.textContent='Проверяю…'; }
+    try{
+      const r=await fetch('/api/auth/code',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({code})
+      });
+      const data=await r.json().catch(()=>({}));
+      if(r.ok&&data.ok){
+        WEB_TOKEN=data.token;
+        localStorage.setItem(WEB_TOKEN_KEY, WEB_TOKEN);
+        grantAccess(data.is_admin);
+      }else{
+        if(err) err.textContent=data.message||'Неверный код.';
+      }
+    }catch(e){
+      if(err) err.textContent='Сетевая ошибка. Попробуйте ещё раз.';
+    }finally{
+      if(btn){ btn.disabled=false; btn.textContent='Войти'; }
+    }
   }
 
   function x(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');}
@@ -2534,14 +2662,12 @@
     messages.appendChild(thinkBlock);
     scrollElementAboveInput(thinkBlock, 18);
 
-    const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
-    
     try{
       const apiHistory = chat.history.slice(0, -1).map(h => ({role: h.role, content: h.content}));
 
       const resp=await fetch('/api/chat',{
         method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
+        headers:{'Content-Type':'application/json','Authorization':authHeaderValue()},
         body:JSON.stringify({
           model: model, 
           history: apiHistory,
@@ -2558,7 +2684,12 @@
       if(resp.status===401||resp.status===403){
         const data=await resp.json().catch(()=>({}));
         document.getElementById('tr')?.remove();
-        appendBotError(messages, data.message || 'Нет доступа. Откройте бота в Telegram и отправьте /start.');
+        if(AUTH_MODE==='web'&&resp.status===401){
+          clearWebSession();
+          showLoginScreen(data.message||'Сессия истекла, войдите заново.');
+        }else{
+          appendBotError(messages, data.message || 'Нет доступа. Откройте бота в Telegram и отправьте /start.');
+        }
         return;
       }
       if(!resp.ok){
@@ -2608,8 +2739,7 @@
   async function adminLoadUsers(){
     document.getElementById('adminBody').innerHTML = '<div class="a-empty">Загрузка...</div>';
     try{
-      const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
-      const r=await fetch('/api/admin/users', {headers:{'Authorization':'tma '+initData}});
+      const r=await fetch('/api/admin/users', {headers:{'Authorization':authHeaderValue()}});
       const d=await r.json();
       if(d.ok){
         adminDataUsers = d.users;
@@ -2671,10 +2801,9 @@
 
   async function adminDoAction(userId, action){
     try{
-      const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
       const r=await fetch('/api/admin/action', {
         method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':'tma '+initData},
+        headers:{'Content-Type':'application/json','Authorization':authHeaderValue()},
         body:JSON.stringify({action, user_id: userId})
       });
       const d=await r.json();
@@ -2711,8 +2840,7 @@
     
     let stats={total:0,day:0,week:0,models:{}};
     try{
-      const initData=(window.Telegram&&window.Telegram.WebApp)?window.Telegram.WebApp.initData:'';
-      const r=await fetch(`/api/admin/users/${userId}/stats`, {headers:{'Authorization':'tma '+initData}});
+      const r=await fetch(`/api/admin/users/${userId}/stats`, {headers:{'Authorization':authHeaderValue()}});
       const d=await r.json();
       if(d.ok) stats=d.stats;
     }catch(e){}
