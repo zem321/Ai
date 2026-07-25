@@ -64,7 +64,12 @@ except ImportError:
         raise e
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+try:
+    ADMIN_ID = int(os.environ["ADMIN_ID"])
+except (KeyError, TypeError, ValueError) as exc:
+    raise RuntimeError("ADMIN_ID должен быть задан положительным целым числом") from exc
+if ADMIN_ID <= 0:
+    raise RuntimeError("ADMIN_ID должен быть положительным Telegram ID")
 
 # Сколько секунд считаем initData валидной (защита от replay).
 INIT_DATA_MAX_AGE = max(300, min(int(os.getenv("INIT_DATA_MAX_AGE", "3600")), 3600))
@@ -87,17 +92,35 @@ SESSION_COOKIE_NAME = (
     "__Host-assistant_session" if COOKIE_SECURE else "assistant_session"
 )
 PUBLIC_ORIGIN = os.getenv("PUBLIC_ORIGIN", "").strip().rstrip("/")
+if not PUBLIC_ORIGIN:
+    raise RuntimeError("PUBLIC_ORIGIN должен быть задан, например https://assistant.example")
+_public_origin_parts = urlsplit(PUBLIC_ORIGIN)
+if (
+    _public_origin_parts.scheme != "https"
+    or not _public_origin_parts.netloc
+    or _public_origin_parts.username is not None
+    or _public_origin_parts.password is not None
+    or _public_origin_parts.path not in {"", "/"}
+    or _public_origin_parts.query
+    or _public_origin_parts.fragment
+):
+    raise RuntimeError("PUBLIC_ORIGIN должен быть точным HTTPS-origin без пути")
+if not COOKIE_SECURE:
+    raise RuntimeError("COOKIE_SECURE должен быть включён в production")
 
 # Ограничения запросов. Этот процесс запускается в одном экземпляре вместе с
 # ботом; для горизонтального масштабирования эти счётчики следует вынести в Redis.
 _CODE_RATE_LIMIT = 8
 _CODE_RATE_WINDOW = 10 * 60
 _MAX_RATE_BUCKETS = 10_000
-_TRUSTED_PROXY_IPS = {
-    value.strip()
-    for value in os.getenv("TRUSTED_PROXY_IPS", "").split(",")
-    if value.strip()
-}
+try:
+    _TRUSTED_PROXY_NETWORKS = tuple(
+        ipaddress.ip_network(value.strip(), strict=False)
+        for value in os.getenv("TRUSTED_PROXY_IPS", "").split(",")
+        if value.strip()
+    )
+except ValueError as exc:
+    raise RuntimeError("TRUSTED_PROXY_IPS содержит некорректный IP или CIDR") from exc
 
 ALLOWED_MODELS = {
     "gemini/gemini-3.1-flash-lite",
@@ -121,12 +144,24 @@ MAX_REPLY_CHARS = 500_000
 MAX_GENERATED_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_HISTORY_ITEMS = 40
 MAX_HISTORY_CHARS = 50_000
+MAX_HISTORY_TOTAL_CHARS = max(
+    20_000,
+    min(int(os.getenv("MAX_HISTORY_TOTAL_CHARS", "120000")), 250_000),
+)
 MAX_ATTACHMENTS = 4
 MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024
 MAX_TOTAL_ATTACHMENT_BYTES = 8 * 1024 * 1024
+MAX_ATTACHMENT_TEXT_CHARS = 60_000
+MAX_TOTAL_ATTACHMENT_TEXT_CHARS = 120_000
 AI_TIMEOUT_SECONDS = max(15, min(int(os.getenv("AI_TIMEOUT_SECONDS", "120")), 300))
 IMAGE_TIMEOUT_SECONDS = max(30, min(int(os.getenv("IMAGE_TIMEOUT_SECONDS", "180")), 300))
 AI_CONCURRENCY = max(1, min(int(os.getenv("AI_CONCURRENCY", "4")), 16))
+DEFAULT_DAILY_AI_LIMIT = max(
+    1, min(int(os.getenv("DEFAULT_DAILY_AI_LIMIT", "200")), 10000)
+)
+DEFAULT_DAILY_IMAGE_LIMIT = max(
+    1, min(int(os.getenv("DEFAULT_DAILY_IMAGE_LIMIT", "20")), 1000)
+)
 _ai_semaphore = asyncio.Semaphore(AI_CONCURRENCY)
 
 _ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -179,21 +214,37 @@ _rate_limiter = SlidingWindowLimiter()
 
 def _client_ip(request: web.Request) -> str:
     remote = request.remote or "unknown"
-    if remote not in _TRUSTED_PROXY_IPS:
-        return remote
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    if not forwarded or len(forwarded) > 512:
-        return remote
-    candidate = forwarded.split(",", 1)[0].strip()
     try:
-        return str(ipaddress.ip_address(candidate))
+        remote_ip = ipaddress.ip_address(remote)
     except ValueError:
         return remote
+    if not any(remote_ip in network for network in _TRUSTED_PROXY_NETWORKS):
+        return str(remote_ip)
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if not forwarded or len(forwarded) > 512:
+        return str(remote_ip)
+    try:
+        chain = [
+            ipaddress.ip_address(value.strip())
+            for value in forwarded.split(",")
+            if value.strip()
+        ]
+    except ValueError:
+        return str(remote_ip)
+    if len(chain) > 10:
+        return str(remote_ip)
+    for candidate in reversed(chain):
+        if any(candidate in network for network in _TRUSTED_PROXY_NETWORKS):
+            continue
+        return str(candidate)
+    return str(remote_ip)
 
 def _rate_limited(ip: str) -> bool:
-    global_ok = _rate_limiter.allow("auth:global", 300, 60)
     ip_ok = _rate_limiter.allow(f"auth:{ip}", _CODE_RATE_LIMIT, _CODE_RATE_WINDOW)
-    return not (global_ok and ip_ok)
+    if not ip_ok:
+        return True
+    global_ok = _rate_limiter.allow("auth:global", 300, 60)
+    return not global_ok
 
 
 def _limited(key: str, limit: int, window: int) -> bool:
@@ -250,6 +301,7 @@ def _validate_history(value: object) -> list[dict]:
     if not isinstance(value, list) or len(value) > MAX_HISTORY_ITEMS:
         raise ValueError("Некорректная или слишком длинная история")
     result: list[dict] = []
+    total_chars = 0
     for item in value:
         if not isinstance(item, dict):
             raise ValueError("Некорректный элемент истории")
@@ -259,6 +311,9 @@ def _validate_history(value: object) -> list[dict]:
             raise ValueError("Недопустимая роль или содержимое истории")
         if len(content) > MAX_HISTORY_CHARS:
             raise ValueError("Слишком длинное сообщение в истории")
+        total_chars += len(content)
+        if total_chars > MAX_HISTORY_TOTAL_CHARS:
+            raise ValueError("Суммарная история слишком длинная")
         result.append({"role": role, "content": content})
     return result
 
@@ -508,7 +563,7 @@ def check_init_data(init_data: str) -> dict | None:
         return None
 
     if not init_data or len(init_data) > 8192:
-        logger.warning("webapp_api: запрос без initData")
+        logger.debug("webapp_api: запрос без initData")
         return None
 
     try:
@@ -518,7 +573,7 @@ def check_init_data(init_data: str) -> dict | None:
 
     keys = [key for key, _ in pairs]
     if len(keys) != len(set(keys)):
-        logger.warning("webapp_api: initData содержит повторяющиеся поля")
+        logger.debug("webapp_api: initData содержит повторяющиеся поля")
         return None
     data = dict(pairs)
     received_hash = data.pop("hash", None)
@@ -530,18 +585,18 @@ def check_init_data(init_data: str) -> dict | None:
     computed_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(computed_hash, received_hash):
-        logger.warning("webapp_api: подпись initData не совпала")
+        logger.debug("webapp_api: подпись initData не совпала")
         return None
 
     auth_date = data.get("auth_date")
     try:
         auth_timestamp = int(auth_date)
     except (TypeError, ValueError):
-        logger.warning("webapp_api: initData без корректной auth_date")
+        logger.debug("webapp_api: initData без корректной auth_date")
         return None
     age = time.time() - auth_timestamp
     if age < -INIT_DATA_FUTURE_SKEW or age > INIT_DATA_MAX_AGE:
-        logger.warning("webapp_api: initData вне допустимого временного окна")
+        logger.debug("webapp_api: initData вне допустимого временного окна")
         return None
 
     user_raw = data.get("user")
@@ -630,6 +685,32 @@ async def _authorize(request: web.Request) -> tuple[int | None, web.Response | N
         status=401,
     )
 
+
+async def _reserve_ai_quota(
+    user_id: int,
+    model: str,
+    default_daily_limit: int,
+) -> web.Response | None:
+    try:
+        reserved = await db.reserve_request(
+            user_id,
+            model,
+            source="webapp",
+            default_daily_limit=default_daily_limit,
+        )
+    except Exception:
+        logger.exception("webapp_api: ошибка проверки серверной квоты")
+        return web.json_response(
+            {"error": "quota_unavailable", "message": "Проверка лимита временно недоступна."},
+            status=503,
+        )
+    if not reserved:
+        return web.json_response(
+            {"error": "daily_limit", "message": "Дневной лимит для выбранной модели исчерпан."},
+            status=429,
+        )
+    return None
+
 def build_vision_content(text: str, image_url: str):
     try:
         sig = inspect.signature(make_vision_content)
@@ -688,7 +769,7 @@ async def api_me(request: web.Request) -> web.Response:
 async def api_chat(request: web.Request) -> web.Response:
     user_id, err = await _authorize(request)
     if err is not None:
-        logger.info("webapp_api: /api/chat — отказ в доступе")
+        logger.debug("webapp_api: /api/chat — отказ в доступе")
         return err
 
     if not isinstance(user_id, int):
@@ -742,6 +823,13 @@ async def api_chat(request: web.Request) -> web.Response:
                 {"error": "rate_limited", "message": "Лимит генерации изображений исчерпан. Попробуйте позже."},
                 status=429,
             )
+        quota_error = await _reserve_ai_quota(
+            user_id,
+            "image-generation",
+            DEFAULT_DAILY_IMAGE_LIMIT,
+        )
+        if quota_error is not None:
+            return quota_error
         try:
             async with _ai_semaphore:
                 image_bytes = await asyncio.wait_for(
@@ -760,7 +848,6 @@ async def api_chat(request: web.Request) -> web.Response:
                 status=502,
             )
 
-        await db.log_request(user_id, "image-generation", source="webapp")
         if not isinstance(image_bytes, (bytes, bytearray)) or len(image_bytes) > MAX_GENERATED_IMAGE_BYTES:
             logger.error("webapp_api: генератор вернул недопустимый размер изображения")
             return web.json_response(
@@ -805,6 +892,7 @@ async def api_chat(request: web.Request) -> web.Response:
             })
 
         # Add file contents as text blocks (same logic as bot's extract_text_from_bytes)
+        remaining_file_chars = MAX_TOTAL_ATTACHMENT_TEXT_CHARS
         for fa in file_attachments:
             fname = fa["name"]
             raw_bytes = fa["raw"]
@@ -819,10 +907,18 @@ async def api_chat(request: web.Request) -> web.Response:
                         continue
                 if file_text is None:
                     file_text = raw_bytes.decode("utf-8", errors="replace")
-                # Trim if too large (same as bot: MAX_FILE_CHARS = 120_000)
-                MAX_FILE_CHARS = 120_000
-                if len(file_text) > MAX_FILE_CHARS:
-                    file_text = file_text[:MAX_FILE_CHARS] + f"\n\n[...обрезано, файл больше {MAX_FILE_CHARS} символов]"
+                file_limit = min(MAX_ATTACHMENT_TEXT_CHARS, remaining_file_chars)
+                if file_limit <= 0:
+                    content_parts.append({
+                        "type": "text",
+                        "text": f"[Файл: {fname}] — пропущен из-за общего лимита вложений",
+                    })
+                    continue
+                if len(file_text) > file_limit:
+                    file_text = file_text[:file_limit] + (
+                        f"\n\n[...обрезано до {file_limit} символов]"
+                    )
+                remaining_file_chars -= min(len(file_text), file_limit)
                 # Format same as bot
                 if user_text and user_text != "Вложения":
                     prompt_text = f"{user_text}\n\n--- Содержимое файла {fname} ---\n{file_text}"
@@ -841,6 +937,14 @@ async def api_chat(request: web.Request) -> web.Response:
         user_content = user_text
 
     messages.append({"role": "user", "content": user_content})
+
+    quota_error = await _reserve_ai_quota(
+        user_id,
+        model_id,
+        DEFAULT_DAILY_AI_LIMIT,
+    )
+    if quota_error is not None:
+        return quota_error
 
     try:
         async with _ai_semaphore:
@@ -864,9 +968,6 @@ async def api_chat(request: web.Request) -> web.Response:
         reply = reply[:MAX_REPLY_CHARS] + "\n\n[Ответ обрезан сервером]"
     if not isinstance(debug, dict):
         debug = {}
-
-    # Логируем запрос в статистику
-    await db.log_request(user_id, model_id, source="webapp")
 
     # === ОТПРАВКА ФАЙЛА ===
     want_file = is_file_request(user_text)
@@ -930,7 +1031,8 @@ async def api_auth_code(request: web.Request) -> web.Response:
 
     ip = _client_ip(request)
     if _rate_limited(ip):
-        logger.warning("webapp_api: /api/auth/code — превышен лимит попыток, ip=%s", ip)
+        if _rate_limiter.allow(f"auth-log:{ip}", 1, 60):
+            logger.warning("webapp_api: /api/auth/code — превышен лимит попыток, ip=%s", ip)
         return web.json_response(
             {"error": "rate_limited", "message": "Слишком много попыток. Подождите несколько минут."},
             status=429,
@@ -1016,6 +1118,14 @@ async def api_image(request: web.Request) -> web.Response:
     if len(prompt) > MAX_MESSAGE_CHARS:
         return web.json_response({"error": "prompt_too_long"}, status=400)
 
+    quota_error = await _reserve_ai_quota(
+        user_id,
+        "image-generation",
+        DEFAULT_DAILY_IMAGE_LIMIT,
+    )
+    if quota_error is not None:
+        return quota_error
+
     try:
         async with _ai_semaphore:
             image_bytes = await asyncio.wait_for(
@@ -1034,7 +1144,6 @@ async def api_image(request: web.Request) -> web.Response:
             status=502,
         )
 
-    await db.log_request(user_id, "image-generation", source="webapp")
     if not isinstance(image_bytes, (bytes, bytearray)) or len(image_bytes) > MAX_GENERATED_IMAGE_BYTES:
         logger.error("webapp_api: генератор вернул недопустимый размер изображения")
         return web.json_response(
@@ -1078,6 +1187,10 @@ async def api_admin_users(request: web.Request) -> web.Response:
         "limit": limit,
         "offset": offset,
         "has_more": len(users) == limit,
+        "default_limits": {
+            "chat": DEFAULT_DAILY_AI_LIMIT,
+            "image-generation": DEFAULT_DAILY_IMAGE_LIMIT,
+        },
     })
 
 
@@ -1134,6 +1247,58 @@ async def api_admin_action(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "action": action, "user_id": uid})
 
 
+async def api_admin_limit(request: web.Request) -> web.Response:
+    """POST /api/admin/limit — сохранить или удалить дневной лимит модели."""
+    ok, err = await _authorize_admin(request)
+    if not ok:
+        return err
+    try:
+        payload = await _read_json_object(request, ADMIN_BODY_LIMIT)
+    except (web.HTTPBadRequest, web.HTTPRequestEntityTooLarge):
+        return web.json_response({"error": "bad_request"}, status=400)
+
+    uid = payload.get("user_id")
+    model = payload.get("model")
+    raw_limit = payload.get("daily_limit")
+    if isinstance(uid, bool) or not isinstance(model, str):
+        return web.json_response({"error": "bad_request"}, status=400)
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "bad_user_id"}, status=400)
+    if uid <= 0 or uid > 2**63 - 1:
+        return web.json_response({"error": "bad_user_id"}, status=400)
+    allowed_limit_models = ALLOWED_MODELS | {"image-generation"}
+    if model not in allowed_limit_models:
+        return web.json_response({"error": "invalid_model"}, status=400)
+
+    if isinstance(raw_limit, bool):
+        return web.json_response({"error": "bad_limit"}, status=400)
+    if raw_limit is None or raw_limit == "" or raw_limit == 0 or raw_limit == "0":
+        checked_limit = None
+    else:
+        try:
+            checked_limit = int(raw_limit)
+        except (TypeError, ValueError):
+            return web.json_response({"error": "bad_limit"}, status=400)
+        if checked_limit < 1 or checked_limit > 10000:
+            return web.json_response({"error": "bad_limit"}, status=400)
+
+    await db.set_user_model_limit(uid, model, checked_limit)
+    logger.info(
+        "admin model limit updated user_id=%s model=%s configured=%s",
+        uid,
+        model,
+        checked_limit is not None,
+    )
+    return web.json_response({
+        "ok": True,
+        "user_id": uid,
+        "model": model,
+        "daily_limit": checked_limit,
+    })
+
+
 def setup_webapp_routes(app: web.Application) -> None:
     app.router.add_get("/api/me", api_me)
     app.router.add_post("/api/auth/code", api_auth_code)
@@ -1143,3 +1308,4 @@ def setup_webapp_routes(app: web.Application) -> None:
     app.router.add_get("/api/admin/users", api_admin_users)
     app.router.add_get("/api/admin/users/{user_id}/stats", api_admin_user_stats)
     app.router.add_post("/api/admin/action", api_admin_action)
+    app.router.add_post("/api/admin/limit", api_admin_limit)
