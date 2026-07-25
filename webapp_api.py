@@ -33,6 +33,7 @@ import json
 import time
 import hmac
 import hashlib
+import secrets
 import logging
 import inspect
 import re
@@ -42,7 +43,7 @@ from aiohttp import web
 import database as db
 
 logger = logging.getLogger(__name__)
-logger.info("webapp_api module loaded: build=auth-enforced-v5 + file-support")
+logger.info("webapp_api module loaded: build=auth-enforced-v6 + file-support + web-code-login")
 
 # Динамический импорт с поддержкой различных версий и структур проекта
 try:
@@ -81,6 +82,36 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 # Сколько секунд считаем initData валидной (защита от replay).
 INIT_DATA_MAX_AGE = 24 * 60 * 60  # 24 часа
+
+# ------------------ Вход по коду (для сайта вне Telegram) ------------------
+# Код одноразовый, короткоживущий; после успешного ввода выдаётся долгоживущий
+# токен веб-сессии (Bearer), который сайт хранит у себя (localStorage) и
+# использует вместо initData для всех дальнейших запросов.
+LOGIN_CODE_TTL = 10 * 60              # код действителен 10 минут
+WEB_SESSION_TTL = 30 * 24 * 60 * 60   # веб-сессия живёт 30 дней
+
+# Простая защита от подбора кода: не больше N попыток с одного IP за окно времени.
+_CODE_RATE_LIMIT = 8
+_CODE_RATE_WINDOW = 10 * 60
+_code_attempts: dict[str, list[float]] = {}
+
+def _client_ip(request: web.Request) -> str:
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.remote or "unknown"
+
+def _rate_limited(ip: str) -> bool:
+    now = time.time()
+    attempts = [t for t in _code_attempts.get(ip, []) if now - t < _CODE_RATE_WINDOW]
+    attempts.append(now)
+    _code_attempts[ip] = attempts
+    # чистим старые ключи, чтобы словарь не рос бесконечно
+    if len(_code_attempts) > 5000:
+        for k in list(_code_attempts.keys()):
+            if not _code_attempts[k]:
+                _code_attempts.pop(k, None)
+    return len(attempts) > _CODE_RATE_LIMIT
 
 # ------------------ Автоопределение режима (чат / картинка / файл) ------------------
 
@@ -312,25 +343,13 @@ def check_init_data(init_data: str) -> dict | None:
 
     return data
 
-async def _authorize(request: web.Request) -> tuple[int | None, web.Response | None]:
-    auth_header = request.headers.get("Authorization", "")
-    init_data = ""
-    if auth_header.startswith("tma "):
-        init_data = auth_header[4:]
-    else:
-        init_data = request.headers.get("X-Telegram-Init-Data", "")
+async def _check_access_status(user_id: int) -> tuple[int | None, web.Response | None]:
+    """Общая проверка approved/pending/rejected для уже аутентифицированного user_id.
 
-    parsed = check_init_data(init_data)
-    if not parsed or not parsed.get("user"):
-        return None, web.json_response(
-            {"error": "unauthorized", "message": "Не удалось подтвердить пользователя Telegram."},
-            status=401,
-        )
-
-    user_id = parsed["user"].get("id")
-    if not user_id:
-        return None, web.json_response({"error": "unauthorized"}, status=401)
-
+    Используется и для Telegram-входа (initData), и для входа по коду на сайте —
+    оба способа лишь подтверждают, ЧЕЙ это user_id, а доступ к боту/сайту
+    по-прежнему решает одна и та же таблица users.
+    """
     if user_id == ADMIN_ID:
         return user_id, None
 
@@ -355,6 +374,51 @@ async def _authorize(request: web.Request) -> tuple[int | None, web.Response | N
     return None, web.json_response(
         {"error": "no_access", "message": "Нет доступа. Откройте бота и отправьте /start."},
         status=403,
+    )
+
+
+async def _authorize(request: web.Request) -> tuple[int | None, web.Response | None]:
+    """Поддерживает два способа входа:
+    - 'Authorization: tma <initData>'  — Telegram Mini App (проверка HMAC-подписи);
+    - 'Authorization: Bearer <token>'  — обычный сайт, вход по коду из бота.
+    Устаревший заголовок X-Telegram-Init-Data оставлен для обратной совместимости.
+    """
+    auth_header = request.headers.get("Authorization", "")
+
+    if auth_header.startswith("tma "):
+        init_data = auth_header[4:]
+        parsed = check_init_data(init_data)
+        if not parsed or not parsed.get("user"):
+            return None, web.json_response(
+                {"error": "unauthorized", "message": "Не удалось подтвердить пользователя Telegram."},
+                status=401,
+            )
+        user_id = parsed["user"].get("id")
+        if not user_id:
+            return None, web.json_response({"error": "unauthorized"}, status=401)
+        return await _check_access_status(user_id)
+
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+        user_id = await db.get_web_session_user(token) if token else None
+        if not user_id:
+            return None, web.json_response(
+                {"error": "unauthorized", "message": "Сессия истекла. Войдите заново по коду из бота."},
+                status=401,
+            )
+        return await _check_access_status(user_id)
+
+    legacy_init_data = request.headers.get("X-Telegram-Init-Data", "")
+    if legacy_init_data:
+        parsed = check_init_data(legacy_init_data)
+        if parsed and parsed.get("user"):
+            user_id = parsed["user"].get("id")
+            if user_id:
+                return await _check_access_status(user_id)
+
+    return None, web.json_response(
+        {"error": "unauthorized", "message": "Не удалось подтвердить пользователя."},
+        status=401,
     )
 
 def build_vision_content(text: str, image_url: str):
@@ -573,6 +637,64 @@ async def api_chat(request: web.Request) -> web.Response:
         "model": debug.get("provider_model") or model_id,
     })
 
+async def api_auth_code(request: web.Request) -> web.Response:
+    """POST /api/auth/code — вход на сайт (вне Telegram) по одноразовому коду из бота.
+
+    Тело: {"code": "AB12CD3"}.
+    Ответ: {"ok": true, "token": "...", "user_id": ..., "is_admin": bool}.
+    Токен дальше передаётся как 'Authorization: Bearer <token>'.
+    """
+    ip = _client_ip(request)
+    if _rate_limited(ip):
+        logger.warning("webapp_api: /api/auth/code — превышен лимит попыток, ip=%s", ip)
+        return web.json_response(
+            {"error": "rate_limited", "message": "Слишком много попыток. Подождите несколько минут."},
+            status=429,
+        )
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"error": "bad_request"}, status=400)
+
+    code = (payload.get("code") or "").strip().upper()
+    if not code:
+        return web.json_response({"error": "empty_code", "message": "Введите код."}, status=400)
+
+    user_id = await db.consume_login_code(code)
+    if not user_id:
+        return web.json_response(
+            {"error": "invalid_code", "message": "Код неверный или уже истёк. Запросите новый в боте."},
+            status=401,
+        )
+
+    checked_id, err = await _check_access_status(user_id)
+    if err is not None:
+        return err
+
+    token = secrets.token_urlsafe(32)
+    await db.create_web_session(token, checked_id, WEB_SESSION_TTL)
+    logger.info("webapp_api: пользователь %s вошёл на сайт по коду", checked_id)
+
+    return web.json_response({
+        "ok": True,
+        "token": token,
+        "user_id": checked_id,
+        "is_admin": checked_id == ADMIN_ID,
+        "expires_in": WEB_SESSION_TTL,
+    })
+
+
+async def api_auth_logout(request: web.Request) -> web.Response:
+    """POST /api/auth/logout — завершить веб-сессию (актуально только для входа по токену)."""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+        if token:
+            await db.delete_web_session(token)
+    return web.json_response({"ok": True})
+
+
 async def api_image(request: web.Request) -> web.Response:
     user_id, err = await _authorize(request)
     if err is not None:
@@ -669,6 +791,8 @@ def setup_webapp_routes(app: web.Application) -> None:
         logger.warning("webapp_api: failed to increase client_max_size: %r", e)
 
     app.router.add_get("/api/me", api_me)
+    app.router.add_post("/api/auth/code", api_auth_code)
+    app.router.add_post("/api/auth/logout", api_auth_logout)
     app.router.add_post("/api/chat", api_chat)
     app.router.add_post("/api/image", api_image)
     app.router.add_get("/api/admin/users", api_admin_users)
