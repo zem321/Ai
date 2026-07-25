@@ -10,6 +10,7 @@
   :root{
     --ease: cubic-bezier(0.22,1,0.36,1);
     --spring: cubic-bezier(.32,.72,0,1);
+    --app-height:100vh;
     --bg:#FFFFFF;
     --bg-elevated:#F9F9F9;
     --sidebar-bg:#F7F7F8; --sidebar-input:#FFFFFF;
@@ -58,7 +59,10 @@
     border:none; box-shadow:var(--glass-b-shadow); position:relative; overflow:hidden;}
   @supports not (backdrop-filter: blur(1px)){ .glass, .glass-strong{background:var(--bg-elevated);} .glass-pill{background:var(--glass-b-fallback);} }
 
-  .app{position:relative; height:100vh; overflow:hidden; background:var(--bg-elevated);}
+  @supports (height:100dvh){
+    :root{--app-height:100dvh;}
+  }
+  .app{position:relative; height:var(--app-height,100vh); min-height:0; overflow:hidden; background:var(--bg-elevated);}
   .main-veil{position:absolute; inset:0; z-index:25; background:transparent; backdrop-filter:blur(0.8px); -webkit-backdrop-filter:blur(0.8px);
     opacity:0; visibility:hidden; transition:opacity .4s var(--ease-drawer), visibility .4s, background .9s var(--ease); pointer-events:none;}
   .main-veil.show{opacity:1; visibility:visible; pointer-events:auto;}
@@ -760,6 +764,27 @@
   let AUTH_MODE = 'tg';
   const WEB_TOKEN_KEY = 'assistant_web_token';
   let WEB_TOKEN = localStorage.getItem(WEB_TOKEN_KEY) || '';
+
+  // В обычном мобильном браузере 100vh может включать адресную и нижнюю
+  // панели. Из-за этого композер оказывается ниже реально видимой области.
+  // visualViewport даёт фактическую высоту окна и также держит поле ввода
+  // над экранной клавиатурой. CSS с 100dvh остаётся безопасным fallback.
+  let appViewportRaf = 0;
+  function syncAppViewportHeight(){
+    cancelAnimationFrame(appViewportRaf);
+    appViewportRaf = requestAnimationFrame(() => {
+      const viewport = window.visualViewport;
+      const height = viewport?.height || window.innerHeight || document.documentElement.clientHeight;
+      if(height > 0){
+        document.documentElement.style.setProperty('--app-height', Math.round(height) + 'px');
+      }
+    });
+  }
+  syncAppViewportHeight();
+  window.addEventListener('resize', syncAppViewportHeight, {passive:true});
+  window.addEventListener('orientationchange', syncAppViewportHeight, {passive:true});
+  window.visualViewport?.addEventListener('resize', syncAppViewportHeight, {passive:true});
+  window.visualViewport?.addEventListener('scroll', syncAppViewportHeight, {passive:true});
 
   function authHeaderValue(){
     if(AUTH_MODE === 'web') return 'Bearer ' + WEB_TOKEN;
