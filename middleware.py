@@ -3,7 +3,12 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery
 import database as db
 
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+try:
+    ADMIN_ID = int(os.environ["ADMIN_ID"])
+except (KeyError, TypeError, ValueError) as exc:
+    raise RuntimeError("ADMIN_ID должен быть задан положительным целым числом") from exc
+if ADMIN_ID <= 0:
+    raise RuntimeError("ADMIN_ID должен быть положительным Telegram ID")
 PUBLIC_COMMANDS = {"start", "help"}
 PUBLIC_HANDLER_MODULES = {"handlers.start_handler", "start_handler"}
 
