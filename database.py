@@ -16,15 +16,18 @@ DATABASE_POOL_MAX_SIZE = max(
     DATABASE_POOL_MIN_SIZE,
     int(os.getenv("DATABASE_POOL_MAX_SIZE", "10")),
 )
+REQUEST_STATS_RETENTION_DAYS = max(
+    7, min(int(os.getenv("REQUEST_STATS_RETENTION_DAYS", "90")), 365)
+)
 LOGIN_CODE_MIN_INTERVAL_SECONDS = max(
     1, int(os.getenv("LOGIN_CODE_MIN_INTERVAL_SECONDS", "30"))
 )
 MAX_WEB_SESSIONS_PER_USER = max(
     1, int(os.getenv("MAX_WEB_SESSIONS_PER_USER", "5"))
 )
-LOGIN_CODE_PEPPER = os.getenv("LOGIN_CODE_PEPPER") or os.getenv("BOT_TOKEN", "")
+LOGIN_CODE_PEPPER = os.getenv("LOGIN_CODE_PEPPER", "")
 
-_ALLOWED_SSL_MODES = {"verify-full", "verify-ca"}
+_ALLOWED_SSL_MODES = {"verify-full"}
 logger = logging.getLogger(__name__)
 
 _pool: asyncpg.Pool | None = None
@@ -42,7 +45,7 @@ def _build_ssl_context() -> ssl.SSLContext:
         cafile=DATABASE_SSL_ROOT_CERT or None,
     )
     context.verify_mode = ssl.CERT_REQUIRED
-    context.check_hostname = DATABASE_SSLMODE == "verify-full"
+    context.check_hostname = True
     return context
 
 
@@ -76,12 +79,12 @@ async def init_db():
     logger.info("database module loaded: build=render-system-ca-v2")
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL не задан")
-    if not LOGIN_CODE_PEPPER:
-        raise RuntimeError("LOGIN_CODE_PEPPER или BOT_TOKEN не задан")
-    if DATABASE_SSLMODE not in _ALLOWED_SSL_MODES:
+    if len(LOGIN_CODE_PEPPER.encode("utf-8")) < 32:
         raise RuntimeError(
-            "DATABASE_SSLMODE должен быть verify-full или verify-ca"
+            "LOGIN_CODE_PEPPER должен быть отдельным случайным секретом длиной не менее 32 байт"
         )
+    if DATABASE_SSLMODE not in _ALLOWED_SSL_MODES:
+        raise RuntimeError("DATABASE_SSLMODE должен быть verify-full")
 
     # Используем системные доверенные CA вместо несуществующего
     # ~/.postgresql/root.crt, который asyncpg ищет для строкового verify-full.
@@ -119,6 +122,32 @@ async def init_db():
         )
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_rs_created ON request_stats(created_at)"
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS model_limits (
+                user_id BIGINT NOT NULL,
+                model TEXT NOT NULL,
+                daily_limit INTEGER NOT NULL CHECK (daily_limit BETWEEN 1 AND 10000),
+                PRIMARY KEY (user_id, model),
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS request_usage_daily (
+                user_id BIGINT NOT NULL,
+                model TEXT NOT NULL,
+                usage_date DATE NOT NULL,
+                request_count INTEGER NOT NULL CHECK (request_count >= 0),
+                PRIMARY KEY (user_id, model, usage_date),
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_daily_date ON request_usage_daily(usage_date)"
         )
 
         # ─── Вход на сайт по коду (вне Telegram Mini App) ──────────────────
@@ -250,20 +279,112 @@ async def get_all_rejected() -> list[int]:
 
 # ─── Статистика запросов ───────────────────────────────────────────────────────
 
-async def log_request(user_id: int, model: str, source: str = "bot"):
-    """Записывает один запрос в статистику. source = 'bot' | 'webapp'."""
+async def reserve_request(
+    user_id: int,
+    model: str,
+    source: str,
+    default_daily_limit: int,
+) -> bool:
+    """Атомарно резервирует один внешний AI-запрос.
+
+    Квота общая для сайта и Telegram-бота и поэтому не обходится сменой
+    интерфейса или запуском нескольких процессов приложения.
+    """
     if source not in {"bot", "webapp"}:
-        source = "bot"
+        raise ValueError("Недопустимый источник запроса")
     safe_model = str(model or "")[:128]
-    try:
-        async with _pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO request_stats (user_id, model, source) VALUES ($1, $2, $3)",
-                user_id, safe_model, source,
+    if not safe_model:
+        raise ValueError("Модель не задана")
+    limit = max(1, min(int(default_daily_limit), 10000))
+
+    async with _pool.acquire() as conn:
+        async with conn.transaction():
+            configured_limit = await conn.fetchval(
+                """
+                SELECT daily_limit
+                FROM model_limits
+                WHERE user_id = $1 AND model = $2
+                """,
+                user_id,
+                safe_model,
             )
-    except Exception:
-        # Статистика не роняет основной поток, но сбой больше не скрывается.
-        logger.exception("Не удалось записать статистику запроса")
+            effective_limit = int(configured_limit or limit)
+            reserved = await conn.fetchval(
+                """
+                INSERT INTO request_usage_daily (
+                    user_id, model, usage_date, request_count
+                )
+                VALUES (
+                    $1, $2, (NOW() AT TIME ZONE 'UTC')::date, 1
+                )
+                ON CONFLICT (user_id, model, usage_date)
+                DO UPDATE SET request_count =
+                    request_usage_daily.request_count + 1
+                WHERE request_usage_daily.request_count < $3
+                RETURNING request_count
+                """,
+                user_id,
+                safe_model,
+                effective_limit,
+            )
+            if reserved is None:
+                return False
+            await conn.execute(
+                """
+                INSERT INTO request_stats (user_id, model, source)
+                VALUES ($1, $2, $3)
+                """,
+                user_id,
+                safe_model,
+                source,
+            )
+            return True
+
+
+async def set_user_model_limit(
+    user_id: int,
+    model: str,
+    daily_limit: int | None,
+) -> None:
+    safe_model = str(model or "")[:128]
+    if not safe_model:
+        raise ValueError("Модель не задана")
+    async with _pool.acquire() as conn:
+        if daily_limit is None:
+            await conn.execute(
+                "DELETE FROM model_limits WHERE user_id = $1 AND model = $2",
+                user_id,
+                safe_model,
+            )
+            return
+        checked_limit = int(daily_limit)
+        if checked_limit < 1 or checked_limit > 10000:
+            raise ValueError("Лимит должен быть от 1 до 10000")
+        await conn.execute(
+            """
+            INSERT INTO model_limits (user_id, model, daily_limit)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, model)
+            DO UPDATE SET daily_limit = EXCLUDED.daily_limit
+            """,
+            user_id,
+            safe_model,
+            checked_limit,
+        )
+
+
+async def get_user_model_limits(user_id: int) -> dict[str, int]:
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT model, daily_limit
+            FROM model_limits
+            WHERE user_id = $1
+            ORDER BY model
+            """,
+            user_id,
+        )
+    return {str(row["model"]): int(row["daily_limit"]) for row in rows}
 
 
 async def get_user_stats(user_id: int) -> dict:
@@ -328,7 +449,28 @@ async def get_all_users_with_stats(limit: int = 200, offset: int = 0) -> list[di
             limit,
             offset,
         )
-    return [dict(r) for r in rows]
+        user_ids = [int(row["user_id"]) for row in rows]
+        limit_rows = []
+        if user_ids:
+            limit_rows = await conn.fetch(
+                """
+                SELECT user_id, model, daily_limit
+                FROM model_limits
+                WHERE user_id = ANY($1::bigint[])
+                """,
+                user_ids,
+            )
+    limits_by_user: dict[int, dict[str, int]] = {}
+    for row in limit_rows:
+        limits_by_user.setdefault(int(row["user_id"]), {})[str(row["model"])] = int(
+            row["daily_limit"]
+        )
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["limits"] = limits_by_user.get(int(row["user_id"]), {})
+        result.append(item)
+    return result
 
 
 # ─── Вход на сайт по коду (вне Telegram Mini App) ──────────────────────────────
@@ -406,8 +548,8 @@ def _hash_token(token: str) -> str:
 
 
 def _hash_login_code(code: str) -> str:
-    if not LOGIN_CODE_PEPPER:
-        raise RuntimeError("LOGIN_CODE_PEPPER или BOT_TOKEN не задан")
+    if len(LOGIN_CODE_PEPPER.encode("utf-8")) < 32:
+        raise RuntimeError("LOGIN_CODE_PEPPER не задан или слишком короткий")
     return hmac.new(
         LOGIN_CODE_PEPPER.encode(),
         code.encode(),
@@ -479,10 +621,24 @@ async def delete_all_web_sessions(user_id: int) -> None:
 
 
 async def cleanup_expired_auth(conn=None) -> None:
-    """Удаляет истёкшие коды и сессии."""
+    """Удаляет истёкшие данные аутентификации и старую статистику."""
     if conn is not None:
         await conn.execute("DELETE FROM login_codes WHERE expires_at < NOW()")
         await conn.execute("DELETE FROM web_sessions WHERE expires_at < NOW()")
+        await conn.execute(
+            """
+            DELETE FROM request_usage_daily
+            WHERE usage_date < (NOW() AT TIME ZONE 'UTC')::date - $1::integer
+            """,
+            REQUEST_STATS_RETENTION_DAYS,
+        )
+        await conn.execute(
+            """
+            DELETE FROM request_stats
+            WHERE created_at < NOW() - ($1::integer * INTERVAL '1 day')
+            """,
+            REQUEST_STATS_RETENTION_DAYS,
+        )
         return
     async with _pool.acquire() as acquired:
         await cleanup_expired_auth(conn=acquired)
