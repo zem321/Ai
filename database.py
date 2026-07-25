@@ -3,10 +3,13 @@ import secrets
 import hashlib
 import hmac
 import logging
+import ssl
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import asyncpg
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_SSLMODE = os.getenv("DATABASE_SSLMODE", "verify-full").strip().lower()
+DATABASE_SSL_ROOT_CERT = os.getenv("DATABASE_SSL_ROOT_CERT", "").strip()
 DATABASE_COMMAND_TIMEOUT = float(os.getenv("DATABASE_COMMAND_TIMEOUT", "30"))
 DATABASE_POOL_MIN_SIZE = max(1, int(os.getenv("DATABASE_POOL_MIN_SIZE", "1")))
 DATABASE_POOL_MAX_SIZE = max(
@@ -27,8 +30,50 @@ logger = logging.getLogger(__name__)
 _pool: asyncpg.Pool | None = None
 
 
+def _build_ssl_context() -> ssl.SSLContext:
+    """Создаёт TLS-контекст на системных CA Render/ОС.
+
+    Строковый режим asyncpg ``verify-full`` ищет PostgreSQL-файл
+    ~/.postgresql/root.crt. На Render его обычно нет, тогда как системное
+    хранилище CA доступно через ssl.create_default_context().
+    """
+    context = ssl.create_default_context(
+        purpose=ssl.Purpose.SERVER_AUTH,
+        cafile=DATABASE_SSL_ROOT_CERT or None,
+    )
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.check_hostname = DATABASE_SSLMODE == "verify-full"
+    return context
+
+
+def _database_dsn_without_ssl_options(dsn: str) -> str:
+    """Убирает SSL-параметры DSN: TLS полностью задаёт ssl_context.
+
+    Это также нейтрализует сохранённый в DATABASE_URL параметр
+    sslrootcert=/opt/render/.postgresql/root.crt.
+    """
+    parts = urlsplit(dsn)
+    blocked = {
+        "ssl", "sslmode", "sslrootcert", "sslcert", "sslkey",
+        "sslcrl", "sslpassword",
+    }
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key.lower() not in blocked
+    ]
+    return urlunsplit((
+        parts.scheme,
+        parts.netloc,
+        parts.path,
+        urlencode(query),
+        parts.fragment,
+    ))
+
+
 async def init_db():
     global _pool
+    logger.info("database module loaded: build=render-system-ca-v2")
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL не задан")
     if not LOGIN_CODE_PEPPER:
@@ -38,10 +83,13 @@ async def init_db():
             "DATABASE_SSLMODE должен быть verify-full или verify-ca"
         )
 
-    # verify-full проверяет и цепочку сертификата, и имя сервера.
+    # Используем системные доверенные CA вместо несуществующего
+    # ~/.postgresql/root.crt, который asyncpg ищет для строкового verify-full.
+    ssl_context = _build_ssl_context()
+    database_dsn = _database_dsn_without_ssl_options(DATABASE_URL)
     _pool = await asyncpg.create_pool(
-        DATABASE_URL,
-        ssl=DATABASE_SSLMODE,
+        database_dsn,
+        ssl=ssl_context,
         command_timeout=DATABASE_COMMAND_TIMEOUT,
         min_size=DATABASE_POOL_MIN_SIZE,
         max_size=DATABASE_POOL_MAX_SIZE,
