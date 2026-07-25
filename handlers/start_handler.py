@@ -1,5 +1,6 @@
 import os
 import logging
+from html import escape
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command
@@ -11,7 +12,12 @@ from states import BotStates
 
 logger = logging.getLogger(__name__)
 router = Router()
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+try:
+    ADMIN_ID = int(os.environ["ADMIN_ID"])
+except (KeyError, TypeError, ValueError) as exc:
+    raise RuntimeError("ADMIN_ID должен быть задан положительным целым числом") from exc
+if ADMIN_ID <= 0:
+    raise RuntimeError("ADMIN_ID должен быть положительным Telegram ID")
 
 WELCOME_TEXT = """
 👋 <b>Привет! Я твой ИИ-ассистент</b>
@@ -30,10 +36,11 @@ WELCOME_TEXT = """
 async def notify_admin(bot: Bot, user):
     if not ADMIN_ID:
         return
-    username = f"@{user.username}" if user.username else "нет username"
+    full_name = escape(user.full_name or "Без имени")
+    username = escape(f"@{user.username}") if user.username else "нет username"
     text = (
         f"🔔 <b>Новый запрос на доступ!</b>\n\n"
-        f"👤 <b>Имя:</b> {user.full_name}\n"
+        f"👤 <b>Имя:</b> {full_name}\n"
         f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
         f"📱 <b>Username:</b> {username}\n\n"
         f"Выдать доступ?"
