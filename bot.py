@@ -2,6 +2,7 @@ import os
 import asyncio
 import contextlib
 import logging
+import secrets
 from pathlib import Path
 from aiohttp import web
 from aiogram import Bot, Dispatcher
@@ -23,6 +24,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+try:
+    ADMIN_ID = int(os.environ["ADMIN_ID"])
+except (KeyError, TypeError, ValueError) as exc:
+    raise RuntimeError("ADMIN_ID должен быть задан положительным целым числом") from exc
+if ADMIN_ID <= 0:
+    raise RuntimeError("ADMIN_ID должен быть положительным Telegram ID")
 MAX_REQUEST_BYTES = max(
     1024 * 1024,
     min(int(os.getenv("MAX_REQUEST_BYTES", str(10 * 1024 * 1024))), 20 * 1024 * 1024),
@@ -35,6 +42,8 @@ if not BOT_TOKEN:
 
 @web.middleware
 async def security_headers(request: web.Request, handler):
+    csp_nonce = secrets.token_urlsafe(24)
+    request["csp_nonce"] = csp_nonce
     try:
         response = await handler(request)
     except web.HTTPException as exc:
@@ -50,7 +59,8 @@ async def security_headers(request: web.Request, handler):
         "default-src 'self'; "
         "base-uri 'none'; object-src 'none'; form-action 'self'; "
         "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org; "
-        "script-src 'self' 'unsafe-inline' https://telegram.org; "
+        f"script-src 'self' 'nonce-{csp_nonce}' https://telegram.org; "
+        "script-src-attr 'none'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: blob:; "
@@ -74,6 +84,11 @@ async def miniapp(request: web.Request) -> web.Response:
     try:
         # Секреты провайдеров никогда не передаются браузеру.
         content = INDEX_PATH.read_text(encoding="utf-8")
+        nonce_marker = "__CSP_NONCE__"
+        if nonce_marker not in content:
+            logger.error("В index.html отсутствует CSP nonce-маркер")
+            return web.Response(text="Интерфейс временно недоступен", status=503)
+        content = content.replace(nonce_marker, request["csp_nonce"])
         return web.Response(text=content, content_type="text/html", charset="utf-8")
     except FileNotFoundError:
         logger.error("Не найден файл интерфейса: %s", INDEX_PATH)
@@ -131,10 +146,8 @@ async def set_commands(bot: Bot):
 async def main():
     await db.init_db()
 
-    admin_id = int(os.getenv("ADMIN_ID", "0"))
-    if admin_id:
-        await db.approve_user(admin_id)
-        logger.info("Admin %s approved on startup", admin_id)
+    await db.approve_user(ADMIN_ID)
+    logger.info("Admin %s approved on startup", ADMIN_ID)
 
     web_runner = await start_web()
     cleanup_task = asyncio.create_task(cleanup_auth_loop())
