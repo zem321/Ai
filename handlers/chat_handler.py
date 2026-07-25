@@ -4,6 +4,9 @@ import json
 import base64
 import logging
 import re
+import time
+import zipfile
+from collections import OrderedDict, deque
 from io import BytesIO
 from html import escape
 import aiohttp
@@ -43,11 +46,24 @@ SYSTEM_PROMPT = (
 )
 
 MAX_HISTORY = 20
+MAX_HISTORY_ITEM_CHARS = 40_000
+MAX_HISTORY_TOTAL_CHARS = 120_000
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
 
 # --- Файлы ---
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_FILE_CHARS = 120_000
+MAX_DOCX_EXPANDED_BYTES = 25 * 1024 * 1024
+MAX_DOCX_ENTRIES = 2_000
+MAX_PDF_PAGES = 100
+FILE_PARSE_TIMEOUT_SECONDS = 15
+PROVIDER_RESPONSE_LIMIT = 2 * 1024 * 1024
+BOT_AI_TIMEOUT_SECONDS = max(15, min(int(os.getenv("BOT_AI_TIMEOUT_SECONDS", "120")), 300))
+BOT_AI_CONCURRENCY = max(1, min(int(os.getenv("BOT_AI_CONCURRENCY", "4")), 16))
+DEFAULT_DAILY_AI_LIMIT = max(
+    1, min(int(os.getenv("DEFAULT_DAILY_AI_LIMIT", "200")), 10000)
+)
+_bot_ai_semaphore = asyncio.Semaphore(BOT_AI_CONCURRENCY)
 
 TEXT_EXTENSIONS = {
     ".txt", ".md", ".json", ".csv", ".log", ".yaml", ".yml", ".xml", ".html", ".htm",
@@ -74,7 +90,7 @@ NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-DEBUG_MODE = os.getenv("DEBUG_MODE", "1") not in ("0", "false", "False", "")
+DEBUG_MODE = os.getenv("DEBUG_MODE", "0") not in ("0", "false", "False", "")
 
 logger.info("NVIDIA_CHAT_URL = %s", NVIDIA_CHAT_URL)
 logger.info("DEBUG_MODE = %s", DEBUG_MODE)
@@ -89,10 +105,81 @@ def get_history(data):
     return data.get("chat_history", [])
 
 def get_model(data):
-    return data.get("selected_model", list(GEMINI_MODELS.keys())[0])
+    selected = data.get("selected_model")
+    return selected if selected in MODELS else list(GEMINI_MODELS.keys())[0]
 
 def trim_history(history: list) -> list:
-    return history[-MAX_HISTORY:]
+    result = []
+    total = 0
+    for item in reversed(history[-MAX_HISTORY:]):
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role not in {"user", "assistant"} or not isinstance(content, str):
+            continue
+        remaining = MAX_HISTORY_TOTAL_CHARS - total
+        if remaining <= 0:
+            break
+        clipped = content[: min(MAX_HISTORY_ITEM_CHARS, remaining)]
+        result.append({"role": role, "content": clipped})
+        total += len(clipped)
+    result.reverse()
+    return result
+
+
+class _BotRateLimiter:
+    def __init__(self, max_buckets: int = 10_000):
+        self.max_buckets = max_buckets
+        self.buckets: OrderedDict[str, deque[float]] = OrderedDict()
+
+    def allow(self, key: str, limit: int = 20, window: int = 60) -> bool:
+        now = time.monotonic()
+        bucket = self.buckets.get(key)
+        if bucket is None:
+            for stale_key in list(self.buckets.keys()):
+                stale = self.buckets[stale_key]
+                while stale and now - stale[0] >= window:
+                    stale.popleft()
+                if not stale:
+                    self.buckets.pop(stale_key, None)
+            if len(self.buckets) >= self.max_buckets:
+                return False
+            bucket = deque()
+            self.buckets[key] = bucket
+        else:
+            self.buckets.move_to_end(key)
+        while bucket and now - bucket[0] >= window:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            return False
+        bucket.append(now)
+        return True
+
+
+_bot_rate_limiter = _BotRateLimiter()
+
+
+async def reserve_bot_ai_request(message: Message, model_id: str) -> bool:
+    user_id = message.from_user.id
+    if not _bot_rate_limiter.allow(f"chat:{user_id}", 20, 60):
+        await message.answer("Слишком много запросов. Подожди минуту.")
+        return False
+    try:
+        reserved = await db.reserve_request(
+            user_id,
+            model_id,
+            source="bot",
+            default_daily_limit=DEFAULT_DAILY_AI_LIMIT,
+        )
+    except Exception:
+        logger.exception("Не удалось проверить серверную квоту")
+        await message.answer("Проверка лимита временно недоступна. Попробуй позже.")
+        return False
+    if not reserved:
+        await message.answer("Дневной лимит для выбранной модели исчерпан.")
+        return False
+    return True
 
 def guess_mime_type(file_path: str | None) -> str:
     if not file_path:
@@ -105,18 +192,6 @@ def guess_mime_type(file_path: str | None) -> str:
     if path.endswith(".gif"):
         return "image/gif"
     return "image/jpeg"
-
-def extract_api_error(data) -> str:
-    if not isinstance(data, dict):
-        return str(data)
-    error = data.get("error")
-    if isinstance(error, dict):
-        return error.get("message") or json.dumps(error, ensure_ascii=False)[:500]
-    if isinstance(error, str):
-        return error
-    if "detail" in data:
-        return str(data["detail"])
-    return json.dumps(data, ensure_ascii=False)[:500]
 
 async def edit_error(status_msg: Message, title: str, error: Exception):
     logger.exception(title)
@@ -199,13 +274,20 @@ async def send_debug_info(status_msg: Message, debug: dict):
     except Exception:
         pass
 
-async def telegram_file_to_bytes(message: Message, file_id: str) -> bytes:
+async def telegram_file_to_bytes(
+    message: Message,
+    file_id: str,
+    max_bytes: int = MAX_FILE_BYTES,
+) -> bytes:
     tg_file = await message.bot.get_file(file_id)
     if not tg_file.file_path:
         raise Exception("Telegram не вернул путь к файлу.")
     buffer = BytesIO()
     await message.bot.download_file(tg_file.file_path, destination=buffer)
-    return buffer.getvalue()
+    raw = buffer.getvalue()
+    if len(raw) > max_bytes:
+        raise Exception("Файл превышает допустимый размер.")
+    return raw
 
 async def telegram_file_to_data_url(message: Message, file_id: str, mime_type: str | None = None) -> str:
     tg_file = await message.bot.get_file(file_id)
@@ -237,14 +319,43 @@ def extract_text_from_bytes(raw: bytes, filename: str, mime_type: str | None) ->
         try: from pypdf import PdfReader
         except ImportError: raise Exception("Для чтения PDF установите: pip install pypdf")
         reader = PdfReader(BytesIO(raw))
-        texts = [page.extract_text() or "" for page in reader.pages]
+        if len(reader.pages) > MAX_PDF_PAGES:
+            raise Exception(f"В PDF больше {MAX_PDF_PAGES} страниц.")
+        texts = []
+        total = 0
+        for page in reader.pages:
+            text = page.extract_text() or ""
+            remaining = MAX_FILE_CHARS - total
+            if remaining <= 0:
+                break
+            texts.append(text[:remaining])
+            total += min(len(text), remaining)
         return "\n".join(texts).strip()
 
     if name_lower.endswith(".docx") or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         try: import docx
         except ImportError: raise Exception("Для чтения DOCX установите: pip install python-docx")
+        try:
+            with zipfile.ZipFile(BytesIO(raw)) as archive:
+                infos = archive.infolist()
+                expanded_size = sum(info.file_size for info in infos)
+                if len(infos) > MAX_DOCX_ENTRIES:
+                    raise Exception("В DOCX слишком много внутренних файлов.")
+                if expanded_size > MAX_DOCX_EXPANDED_BYTES:
+                    raise Exception("DOCX слишком велик после распаковки.")
+        except zipfile.BadZipFile as exc:
+            raise Exception("Некорректный DOCX-файл.") from exc
         doc = docx.Document(BytesIO(raw))
-        return "\n".join(p.text for p in doc.paragraphs).strip()
+        result = []
+        total = 0
+        for paragraph in doc.paragraphs:
+            text = paragraph.text
+            remaining = MAX_FILE_CHARS - total
+            if remaining <= 0:
+                break
+            result.append(text[:remaining])
+            total += min(len(text), remaining)
+        return "\n".join(result).strip()
 
     is_text = any(name_lower.endswith(ext) for ext in TEXT_EXTENSIONS) or mime.startswith("text/") or mime in ("application/json", "application/xml")
     if is_text or mime == "":
@@ -257,6 +368,21 @@ def extract_text_from_bytes(raw: bytes, filename: str, mime_type: str | None) ->
 
 
 # ------------------ API Вызовы ------------------
+
+async def _read_provider_json(resp: aiohttp.ClientResponse, provider: str) -> dict:
+    if resp.content_length is not None and resp.content_length > PROVIDER_RESPONSE_LIMIT:
+        raise Exception(f"{provider} вернул слишком большой ответ.")
+    raw = await resp.content.read(PROVIDER_RESPONSE_LIMIT + 1)
+    if len(raw) > PROVIDER_RESPONSE_LIMIT:
+        raise Exception(f"{provider} вернул слишком большой ответ.")
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise Exception(f"{provider} вернул некорректный ответ.") from exc
+    if not isinstance(data, dict):
+        raise Exception(f"{provider} вернул некорректный ответ.")
+    return data
+
 
 async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
     if not NVIDIA_API_KEY:
@@ -274,13 +400,20 @@ async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
     logger.info("call_nvidia -> url=%s model=%s", NVIDIA_CHAT_URL, payload["model"])
     async with aiohttp.ClientSession() as session:
         async with session.post(NVIDIA_CHAT_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-            text = await resp.text()
-            try: data = json.loads(text)
-            except Exception: raise Exception(f"NVIDIA вернул неожиданный ответ: {text[:500]}")
-            if resp.status != 200: raise Exception(extract_api_error(data))
+            data = await _read_provider_json(resp, "NVIDIA")
+            if resp.status != 200:
+                logger.warning(
+                    "NVIDIA API error status=%s",
+                    resp.status,
+                )
+                raise Exception("NVIDIA API временно недоступен.")
             
             debug = {"url": NVIDIA_CHAT_URL, "sent_model": payload["model"], "provider_model": data.get("model")}
-            return data["choices"][0]["message"]["content"], debug
+            try:
+                content = data["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError) as exc:
+                raise Exception("NVIDIA вернул некорректный формат ответа.") from exc
+            return str(content), debug
 
 
 async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
@@ -299,21 +432,22 @@ async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
     payload = {
         "model": raw_model,
         "messages": messages,
-        "temperature": 0.7
+        "temperature": 0.7,
+        "max_tokens": 2048,
     }
 
     logger.info("call_gemini -> url=%s model=%s", url, raw_model)
 
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-            text = await resp.text()
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Ошибка серверов Google (ответ не JSON): {text[:200]}")
+            data = await _read_provider_json(resp, "Google")
             
             if resp.status != 200:
-                raise Exception(extract_api_error(data))
+                logger.warning(
+                    "Google API error status=%s",
+                    resp.status,
+                )
+                raise Exception("Google API временно недоступен.")
             
             debug = {
                 "url": url,
@@ -323,9 +457,9 @@ async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
             
             try:
                 reply = data["choices"][0]["message"]["content"]
-                return reply, debug
-            except Exception:
-                raise Exception(f"Неверный формат ответа Google API: {json.dumps(data, ensure_ascii=False)[:500]}")
+                return str(reply), debug
+            except (KeyError, IndexError, TypeError) as exc:
+                raise Exception("Google API вернул некорректный формат ответа.") from exc
 
 
 async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
@@ -366,6 +500,9 @@ async def activate_model(callback: CallbackQuery, state: FSMContext, model_id: s
 @router.callback_query(F.data.startswith("model_"))
 async def set_model(callback: CallbackQuery, state: FSMContext):
     model_id = callback.data.replace("model_", "")
+    if model_id not in MODELS:
+        await callback.answer("Недоступная модель", show_alert=True)
+        return
     await activate_model(callback, state, model_id)
 
 @router.callback_query(F.data == "mode_chat")
@@ -402,6 +539,8 @@ async def handle_text(message: Message, state: FSMContext):
         return
 
     model_id = get_model(data)
+    if not await reserve_bot_ai_request(message, model_id):
+        return
     user_content_for_model = text
     if want_file:
         user_content_for_model += "\n\n[Системное напоминание: бот УМЕЕТ отправлять файлы. Просто выдай полное содержимое файла.]"
@@ -412,8 +551,11 @@ async def handle_text(message: Message, state: FSMContext):
         history.append({"role": "user", "content": user_content_for_model})
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trim_history(history)
         
-        reply, debug = await call_ai(model_id, messages)
-        await db.log_request(message.from_user.id, model_id, source="bot")
+        async with _bot_ai_semaphore:
+            reply, debug = await asyncio.wait_for(
+                call_ai(model_id, messages),
+                timeout=BOT_AI_TIMEOUT_SECONDS,
+            )
         
         history.append({"role": "assistant", "content": reply})
         await state.update_data(chat_history=trim_history(history))
@@ -429,6 +571,8 @@ async def handle_text(message: Message, state: FSMContext):
 async def handle_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     model_id = get_model(data)
+    if not await reserve_bot_ai_request(message, model_id):
+        return
     status_msg = await message.answer("<i>Обрабатываю фото...</i>", parse_mode="HTML")
     try:
         history = list(get_history(data))
@@ -438,8 +582,11 @@ async def handle_photo(message: Message, state: FSMContext):
         user_content = make_vision_content(prompt=caption, image_data_url=image_data_url)
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trim_history(history) + [{"role": "user", "content": user_content}]
         
-        reply, debug = await call_ai(model_id, messages)
-        await db.log_request(message.from_user.id, model_id, source="bot")
+        async with _bot_ai_semaphore:
+            reply, debug = await asyncio.wait_for(
+                call_ai(model_id, messages),
+                timeout=BOT_AI_TIMEOUT_SECONDS,
+            )
         
         history.append({"role": "user", "content": f"[Фото] {caption}".strip()})
         history.append({"role": "assistant", "content": reply})
@@ -459,6 +606,15 @@ async def handle_document(message: Message, state: FSMContext):
     mime_type = document.mime_type or ""
     filename = document.file_name or "file"
     caption = message.caption or ""
+    max_document_bytes = MAX_IMAGE_BYTES if mime_type.startswith("image/") else MAX_FILE_BYTES
+    if document.file_size and document.file_size > max_document_bytes:
+        await message.answer(
+            f"Файл слишком большой. Максимум {max_document_bytes // 1024 // 1024} МБ.",
+            reply_markup=cancel_keyboard(),
+        )
+        return
+    if not await reserve_bot_ai_request(message, model_id):
+        return
 
     if mime_type.startswith("image/"):
         status_msg = await message.answer("<i>Обрабатываю изображение...</i>", parse_mode="HTML")
@@ -468,8 +624,11 @@ async def handle_document(message: Message, state: FSMContext):
             user_content = make_vision_content(prompt=caption, image_data_url=image_data_url)
             messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trim_history(history) + [{"role": "user", "content": user_content}]
             
-            reply, debug = await call_ai(model_id, messages)
-            await db.log_request(message.from_user.id, model_id, source="bot")
+            async with _bot_ai_semaphore:
+                reply, debug = await asyncio.wait_for(
+                    call_ai(model_id, messages),
+                    timeout=BOT_AI_TIMEOUT_SECONDS,
+                )
             
             history.append({"role": "user", "content": f"[Изображение-файл] {caption}".strip()})
             history.append({"role": "assistant", "content": reply})
@@ -481,14 +640,18 @@ async def handle_document(message: Message, state: FSMContext):
             await edit_error(status_msg, "Ошибка", e)
         return
 
-    if document.file_size and document.file_size > MAX_FILE_BYTES:
-        await message.answer(f"Файл слишком большой. Максимум {MAX_FILE_BYTES // 1024 // 1024} МБ.", reply_markup=cancel_keyboard())
-        return
-
     status_msg = await message.answer("<i>Читаю файл...</i>", parse_mode="HTML")
     try:
-        raw = await telegram_file_to_bytes(message, document.file_id)
-        try: file_text = extract_text_from_bytes(raw, filename, mime_type)
+        raw = await telegram_file_to_bytes(
+            message,
+            document.file_id,
+            max_bytes=MAX_FILE_BYTES,
+        )
+        try:
+            file_text = await asyncio.wait_for(
+                asyncio.to_thread(extract_text_from_bytes, raw, filename, mime_type),
+                timeout=FILE_PARSE_TIMEOUT_SECONDS,
+            )
         except Exception as e:
             await edit_error(status_msg, "Не удалось прочитать файл", e)
             return
@@ -502,8 +665,11 @@ async def handle_document(message: Message, state: FSMContext):
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trim_history(history)
 
         await status_msg.edit_text("<i>Думаю...</i>", parse_mode="HTML")
-        reply, debug = await call_ai(model_id, messages)
-        await db.log_request(message.from_user.id, model_id, source="bot")
+        async with _bot_ai_semaphore:
+            reply, debug = await asyncio.wait_for(
+                call_ai(model_id, messages),
+                timeout=BOT_AI_TIMEOUT_SECONDS,
+            )
 
         history.append({"role": "assistant", "content": reply})
         await state.update_data(chat_history=trim_history(history))
