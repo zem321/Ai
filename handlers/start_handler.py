@@ -33,6 +33,19 @@ WELCOME_TEXT = """
 """
 
 
+def _safe_message_html(message: Message) -> str:
+    """Возвращает безопасное HTML-представление уже отправленного сообщения.
+
+    message.text содержит обычный текст без экранирования. Его повторная
+    отправка с parse_mode=HTML могла превратить отображавшиеся ранее символы
+    ``<...>`` из имени пользователя в Telegram-разметку.
+    """
+    html_text = getattr(message, "html_text", None)
+    if isinstance(html_text, str) and html_text:
+        return html_text
+    return escape(message.text or "")
+
+
 async def notify_admin(bot: Bot, user):
     if not ADMIN_ID:
         return
@@ -116,12 +129,15 @@ async def cb_approve(callback: CallbackQuery, bot: Bot):
         return
     user_id = int(callback.data.split("_")[1])
     await db.approve_user(user_id)
-    await callback.message.edit_text(callback.message.text + "\n\n✅ <b>Одобрен!</b>", parse_mode="HTML")
+    await callback.message.edit_text(
+        _safe_message_html(callback.message) + "\n\n✅ <b>Одобрен!</b>",
+        parse_mode="HTML",
+    )
     await callback.answer("✅ Одобрен!")
     try:
         await bot.send_message(user_id, "🎉 <b>Доступ одобрен!</b>\n\nНапиши /start чтобы начать.", parse_mode="HTML")
     except Exception:
-        pass
+        logger.info("Не удалось уведомить одобренного пользователя user_id=%s", user_id)
 
 
 @router.callback_query(F.data.startswith("reject_"))
@@ -131,12 +147,15 @@ async def cb_reject(callback: CallbackQuery, bot: Bot):
         return
     user_id = int(callback.data.split("_")[1])
     await db.reject_user(user_id)
-    await callback.message.edit_text(callback.message.text + "\n\n❌ <b>Отклонён.</b>", parse_mode="HTML")
+    await callback.message.edit_text(
+        _safe_message_html(callback.message) + "\n\n❌ <b>Отклонён.</b>",
+        parse_mode="HTML",
+    )
     await callback.answer("❌ Отклонён")
     try:
         await bot.send_message(user_id, "😔 <b>Доступ отклонён.</b>", parse_mode="HTML")
     except Exception:
-        pass
+        logger.info("Не удалось уведомить отклонённого пользователя user_id=%s", user_id)
 
 
 @router.callback_query(F.data.startswith("revoke_"))
@@ -157,7 +176,7 @@ async def cb_revoke(callback: CallbackQuery, bot: Bot):
     try:
         await bot.send_message(user_id, "🚫 <b>Ваш доступ отозван.</b>", parse_mode="HTML")
     except Exception:
-        pass
+        logger.info("Не удалось уведомить отозванного пользователя user_id=%s", user_id)
 
 
 @router.callback_query(F.data == "admin_panel")
