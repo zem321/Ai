@@ -25,6 +25,9 @@ LOGIN_CODE_MIN_INTERVAL_SECONDS = max(
 MAX_WEB_SESSIONS_PER_USER = max(
     1, int(os.getenv("MAX_WEB_SESSIONS_PER_USER", "5"))
 )
+WEB_SESSION_TOUCH_INTERVAL_SECONDS = max(
+    60, min(int(os.getenv("WEB_SESSION_TOUCH_INTERVAL_SECONDS", "300")), 3600)
+)
 LOGIN_CODE_PEPPER = os.getenv("LOGIN_CODE_PEPPER", "")
 
 _ALLOWED_SSL_MODES = {"verify-full"}
@@ -190,6 +193,29 @@ async def init_db():
         # Теперь в этом legacy-столбце хранится только HMAC-SHA-256. Старые короткие
         # коды намеренно инвалидируются при первом запуске обновлённой версии.
         await conn.execute("DELETE FROM login_codes WHERE LENGTH(code) <> 64")
+        # До установки уникальности оставляем только самый новый код пользователя.
+        # Это также безопасно мигрирует базу, если старая версия успела создать
+        # несколько кодов из-за параллельных запросов.
+        await conn.execute(
+            """
+            DELETE FROM login_codes AS old_code
+            USING login_codes AS newer_code
+            WHERE old_code.user_id = newer_code.user_id
+              AND (
+                    old_code.created_at < newer_code.created_at
+                    OR (
+                        old_code.created_at = newer_code.created_at
+                        AND old_code.code < newer_code.code
+                    )
+                  )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_login_codes_user
+            ON login_codes(user_id)
+            """
+        )
         # Сессии отклонённых пользователей не должны оживать после одобрения.
         await conn.execute(
             """
@@ -488,39 +514,43 @@ async def create_login_code(user_id: int, length: int = 8, ttl_seconds: int = 60
     ttl_seconds = max(60, min(int(ttl_seconds), 1800))
 
     async with _pool.acquire() as conn:
-        too_soon = await conn.fetchval(
-            """
-            SELECT EXISTS(
-                SELECT 1 FROM login_codes
-                WHERE user_id = $1
-                  AND created_at > NOW() - ($2::integer * INTERVAL '1 second')
-            )
-            """,
-            user_id,
-            LOGIN_CODE_MIN_INTERVAL_SECONDS,
-        )
-        if too_soon:
-            raise RuntimeError(
-                f"Новый код можно запросить через {LOGIN_CODE_MIN_INTERVAL_SECONDS} секунд."
-            )
-
-        await conn.execute("DELETE FROM login_codes WHERE user_id = $1", user_id)
-        for _ in range(5):
-            code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(length))
-            code_hash = _hash_login_code(code)
-            inserted = await conn.fetchval(
+        async with conn.transaction():
+            # Блокировка действует только в этой транзакции и сериализует
+            # параллельные запросы кода для одного Telegram user_id.
+            await conn.execute("SELECT pg_advisory_xact_lock($1::bigint)", user_id)
+            too_soon = await conn.fetchval(
                 """
-                INSERT INTO login_codes(code, user_id, expires_at)
-                VALUES ($1, $2, NOW() + ($3::integer * INTERVAL '1 second'))
-                ON CONFLICT (code) DO NOTHING
-                RETURNING code
+                SELECT EXISTS(
+                    SELECT 1 FROM login_codes
+                    WHERE user_id = $1
+                      AND created_at > NOW() - ($2::integer * INTERVAL '1 second')
+                )
                 """,
-                code_hash,
                 user_id,
-                ttl_seconds,
+                LOGIN_CODE_MIN_INTERVAL_SECONDS,
             )
-            if inserted:
-                return code
+            if too_soon:
+                raise RuntimeError(
+                    f"Новый код можно запросить через {LOGIN_CODE_MIN_INTERVAL_SECONDS} секунд."
+                )
+
+            await conn.execute("DELETE FROM login_codes WHERE user_id = $1", user_id)
+            for _ in range(5):
+                code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(length))
+                code_hash = _hash_login_code(code)
+                inserted = await conn.fetchval(
+                    """
+                    INSERT INTO login_codes(code, user_id, expires_at)
+                    VALUES ($1, $2, NOW() + ($3::integer * INTERVAL '1 second'))
+                    ON CONFLICT (code) DO NOTHING
+                    RETURNING code
+                    """,
+                    code_hash,
+                    user_id,
+                    ttl_seconds,
+                )
+                if inserted:
+                    return code
     raise RuntimeError("Не удалось создать код входа. Попробуйте ещё раз.")
 
 
@@ -547,20 +577,76 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _hash_login_code(code: str) -> str:
-    if len(LOGIN_CODE_PEPPER.encode("utf-8")) < 32:
+def _pepper_bytes() -> bytes:
+    pepper = LOGIN_CODE_PEPPER.encode("utf-8")
+    if len(pepper) < 32:
         raise RuntimeError("LOGIN_CODE_PEPPER не задан или слишком короткий")
+    return pepper
+
+
+def _hash_login_code(code: str) -> str:
     return hmac.new(
-        LOGIN_CODE_PEPPER.encode(),
+        _pepper_bytes(),
         code.encode(),
         hashlib.sha256,
     ).hexdigest()
 
 
+_SESSION_TOKEN_VERSION = 1
+_SESSION_TOKEN_DOMAIN = b"web-session-v1:"
+_SESSION_TOKEN_ALPHABET = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+)
+
+
+def generate_web_session_token() -> str:
+    """Создаёт непрозрачный токен с подписью для раннего отсева подделок."""
+    opaque = secrets.token_urlsafe(32)
+    signature = hmac.new(
+        _pepper_bytes(),
+        _SESSION_TOKEN_DOMAIN + opaque.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"v{_SESSION_TOKEN_VERSION}.{opaque}.{signature}"
+
+
+def is_valid_web_session_token(token: str) -> bool:
+    """Проверяет формат и подпись токена до обращения к PostgreSQL."""
+    if not isinstance(token, str) or len(token) > 128:
+        return False
+    try:
+        prefix, opaque, signature = token.split(".")
+    except ValueError:
+        return False
+    if prefix != f"v{_SESSION_TOKEN_VERSION}" or not 40 <= len(opaque) <= 64:
+        return False
+    if any(char not in _SESSION_TOKEN_ALPHABET for char in opaque):
+        return False
+    if len(signature) != 64:
+        return False
+    try:
+        bytes.fromhex(signature)
+    except ValueError:
+        return False
+    expected = hmac.new(
+        _pepper_bytes(),
+        _SESSION_TOKEN_DOMAIN + opaque.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
 async def create_web_session(token: str, user_id: int, ttl_seconds: int) -> None:
+    if not is_valid_web_session_token(token):
+        raise ValueError("Некорректный токен веб-сессии")
     ttl_seconds = max(300, min(int(ttl_seconds), 30 * 24 * 60 * 60))
     async with _pool.acquire() as conn:
         async with conn.transaction():
+            # Атомарно применяем лимит сессий при параллельных входах.
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock($1::bigint)",
+                user_id,
+            )
             await conn.execute(
                 "DELETE FROM web_sessions WHERE expires_at <= NOW()"
             )
@@ -592,25 +678,50 @@ async def create_web_session(token: str, user_id: int, ttl_seconds: int) -> None
 
 async def get_web_session_user(token: str, idle_seconds: int = 24 * 60 * 60) -> int | None:
     """Возвращает user_id по токену сессии, если он ещё не истёк.
-    Заодно обновляет last_seen_at."""
+    Обновляет last_seen_at с ограниченной частотой."""
+    if not is_valid_web_session_token(token):
+        return None
     idle_seconds = max(300, min(int(idle_seconds), 30 * 24 * 60 * 60))
+    # Интервал обновления всегда меньше idle TTL, иначе активно используемая
+    # сессия могла бы истечь между редкими touch-запросами.
+    touch_interval = min(
+        WEB_SESSION_TOUCH_INTERVAL_SECONDS,
+        max(60, idle_seconds // 2),
+    )
+    token_hash = _hash_token(token)
     async with _pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            UPDATE web_sessions
-            SET last_seen_at = NOW()
+            SELECT
+                user_id,
+                last_seen_at <= NOW() - ($3::integer * INTERVAL '1 second')
+                    AS should_touch
+            FROM web_sessions
             WHERE token_hash = $1
               AND expires_at > NOW()
               AND last_seen_at > NOW() - ($2::integer * INTERVAL '1 second')
-            RETURNING user_id
             """,
-            _hash_token(token),
+            token_hash,
             idle_seconds,
+            touch_interval,
         )
+        if row and row["should_touch"]:
+            await conn.execute(
+                """
+                UPDATE web_sessions
+                SET last_seen_at = NOW()
+                WHERE token_hash = $1
+                  AND last_seen_at <= NOW() - ($2::integer * INTERVAL '1 second')
+                """,
+                token_hash,
+                touch_interval,
+            )
     return row["user_id"] if row else None
 
 
 async def delete_web_session(token: str) -> None:
+    if not is_valid_web_session_token(token):
+        return
     async with _pool.acquire() as conn:
         await conn.execute("DELETE FROM web_sessions WHERE token_hash = $1", _hash_token(token))
 
