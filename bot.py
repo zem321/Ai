@@ -115,7 +115,8 @@ async def start_web() -> web.AppRunner:
     await runner.setup()
 
     port = int(os.getenv("PORT", "8080"))
-    site = web.TCPSite(runner, "0.0.0.0", port)
+    # Контейнерная платформа направляет HTTPS-трафик на этот внутренний порт.
+    site = web.TCPSite(runner, "0.0.0.0", port)  # nosec B104
     await site.start()
 
     logger.info("Web server started on port %s", port)
