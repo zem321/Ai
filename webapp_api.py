@@ -14,7 +14,6 @@ import json
 import time
 import hmac
 import hashlib
-import secrets
 import logging
 import inspect
 import re
@@ -142,6 +141,7 @@ CHAT_BODY_LIMIT = max(
 MAX_MESSAGE_CHARS = 20_000
 MAX_REPLY_CHARS = 500_000
 MAX_GENERATED_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_PROMPT_CHARS = 4_000
 MAX_HISTORY_ITEMS = 40
 MAX_HISTORY_CHARS = 50_000
 MAX_HISTORY_TOTAL_CHARS = max(
@@ -257,11 +257,18 @@ async def _read_json_object(request: web.Request, max_bytes: int) -> dict:
         raise web.HTTPRequestEntityTooLarge(
             max_size=max_bytes, actual_size=content_length
         )
-    raw = await request.read()
-    if len(raw) > max_bytes:
-        raise web.HTTPRequestEntityTooLarge(
-            max_size=max_bytes, actual_size=len(raw)
-        )
+    # request.read() сначала накапливает всё тело до общего client_max_size.
+    # Потоковое чтение ограничивает каждый маршрут собственным меньшим лимитом
+    # даже для Transfer-Encoding: chunked без Content-Length.
+    raw_buffer = bytearray()
+    async for chunk in request.content.iter_chunked(64 * 1024):
+        if len(raw_buffer) + len(chunk) > max_bytes:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=max_bytes,
+                actual_size=len(raw_buffer) + len(chunk),
+            )
+        raw_buffer.extend(chunk)
+    raw = bytes(raw_buffer)
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -293,7 +300,7 @@ def _same_origin(request: web.Request) -> bool:
 
 def _safe_filename(value: object, fallback: str = "file") -> str:
     name = os.path.basename(str(value or fallback)).replace("\x00", "")
-    name = re.sub(r"[\r\n\t]+", " ", name).strip()
+    name = re.sub(r"[\x00-\x1f\x7f]+", " ", name).strip()
     return (name[:100] or fallback)
 
 
@@ -341,9 +348,59 @@ def _decode_data_url(value: object, declared_type: str) -> tuple[bytes, str]:
         raw = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ValueError("Некорректное base64-вложение") from exc
+    if not raw:
+        raise ValueError("Пустое вложение")
     if len(raw) > MAX_ATTACHMENT_BYTES:
         raise ValueError("Вложение слишком большое")
     return raw, media_type
+
+
+def _detect_image_mime(raw: bytes) -> str | None:
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if len(raw) >= 12 and raw.startswith(b"RIFF") and raw[8:12] == b"WEBP":
+        return "image/webp"
+    if raw.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    return None
+
+
+def _looks_like_zip(raw: bytes) -> bool:
+    return raw.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"))
+
+
+def _validate_attachment_signature(raw: bytes, media_type: str) -> str | None:
+    detected_image = _detect_image_mime(raw)
+    if media_type in _ALLOWED_IMAGE_TYPES:
+        if detected_image != media_type:
+            raise ValueError("Содержимое изображения не соответствует MIME-типу")
+        return detected_image
+    if media_type.startswith("image/"):
+        raise ValueError("Этот формат изображения не поддерживается")
+
+    if media_type == "application/pdf" and b"%PDF-" not in raw[:1024]:
+        raise ValueError("Содержимое файла не является PDF")
+
+    ooxml_types = {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+    if media_type in ooxml_types and not _looks_like_zip(raw):
+        raise ValueError("Содержимое файла не является корректным Office-документом")
+
+    legacy_office_types = {
+        "application/msword",
+        "application/vnd.ms-excel",
+        "application/vnd.ms-powerpoint",
+    }
+    if media_type in legacy_office_types and not raw.startswith(
+        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+    ):
+        raise ValueError("Содержимое файла не является корректным Office-документом")
+    return detected_image
 
 
 def _validate_attachments(value: object) -> list[dict]:
@@ -356,9 +413,8 @@ def _validate_attachments(value: object) -> list[dict]:
             raise ValueError("Некорректное вложение")
         declared_type = str(item.get("type") or "").strip().lower()
         raw, media_type = _decode_data_url(item.get("dataUrl"), declared_type)
+        detected_image = _validate_attachment_signature(raw, media_type)
         is_image = media_type in _ALLOWED_IMAGE_TYPES
-        if media_type.startswith("image/") and not is_image:
-            raise ValueError("Этот формат изображения не поддерживается")
         if not is_image and media_type not in _ALLOWED_FILE_TYPES:
             raise ValueError("Этот тип файла не поддерживается")
         total += len(raw)
@@ -366,7 +422,7 @@ def _validate_attachments(value: object) -> list[dict]:
             raise ValueError("Суммарный размер вложений слишком большой")
         validated.append({
             "name": _safe_filename(item.get("name"), "file"),
-            "type": media_type,
+            "type": detected_image if is_image else media_type,
             "raw": raw,
             "is_image": is_image,
         })
@@ -666,7 +722,7 @@ async def _authorize(request: web.Request) -> tuple[int | None, web.Response | N
 
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
     if token:
-        if len(token) > 128:
+        if not db.is_valid_web_session_token(token):
             return None, web.json_response({"error": "unauthorized"}, status=401)
         if request.method not in {"GET", "HEAD", "OPTIONS"} and not _same_origin(request):
             return None, web.json_response({"error": "bad_origin"}, status=403)
@@ -818,6 +874,14 @@ async def api_chat(request: web.Request) -> web.Response:
 
     # === ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ===
     if intent == "image":
+        if len(user_text) > MAX_IMAGE_PROMPT_CHARS:
+            return web.json_response(
+                {
+                    "error": "prompt_too_long",
+                    "message": f"Запрос для изображения длиннее {MAX_IMAGE_PROMPT_CHARS} символов.",
+                },
+                status=400,
+            )
         if _limited(f"image:{user_id}", 5, 10 * 60):
             return web.json_response(
                 {"error": "rate_limited", "message": "Лимит генерации изображений исчерпан. Попробуйте позже."},
@@ -903,7 +967,7 @@ async def api_chat(request: web.Request) -> web.Response:
                     try:
                         file_text = raw_bytes.decode(enc)
                         break
-                    except Exception:
+                    except UnicodeDecodeError:
                         continue
                 if file_text is None:
                     file_text = raw_bytes.decode("utf-8", errors="replace")
@@ -1008,15 +1072,26 @@ async def api_auth_code(request: web.Request) -> web.Response:
     Ответ: {"ok": true, "user_id": ..., "is_admin": bool}.
     Токен возвращается только в защищённой HttpOnly-cookie.
     """
+    if not _same_origin(request):
+        return web.json_response({"error": "bad_origin"}, status=403)
+
+    # Считаем любую попытку до чтения и JSON-разбора тела. Иначе атакующий
+    # мог многократно присылать большие/повреждённые тела, не попадая в лимит.
+    ip = _client_ip(request)
+    if _rate_limited(ip):
+        if _rate_limiter.allow(f"auth-log:{ip}", 1, 60):
+            logger.warning("webapp_api: /api/auth/code — превышен лимит попыток, ip=%s", ip)
+        return web.json_response(
+            {"error": "rate_limited", "message": "Слишком много попыток. Подождите несколько минут."},
+            status=429,
+        )
+
     try:
         payload = await _read_json_object(request, AUTH_BODY_LIMIT)
     except web.HTTPRequestEntityTooLarge:
         return web.json_response({"error": "too_large"}, status=413)
     except web.HTTPBadRequest:
         return web.json_response({"error": "bad_request"}, status=400)
-
-    if not _same_origin(request):
-        return web.json_response({"error": "bad_origin"}, status=403)
 
     raw_code = payload.get("code")
     if not isinstance(raw_code, str):
@@ -1027,15 +1102,6 @@ async def api_auth_code(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": "invalid_code", "message": "Введите 8-значный код из бота."},
             status=400,
-        )
-
-    ip = _client_ip(request)
-    if _rate_limited(ip):
-        if _rate_limiter.allow(f"auth-log:{ip}", 1, 60):
-            logger.warning("webapp_api: /api/auth/code — превышен лимит попыток, ip=%s", ip)
-        return web.json_response(
-            {"error": "rate_limited", "message": "Слишком много попыток. Подождите несколько минут."},
-            status=429,
         )
 
     user_id = await db.consume_login_code(code)
@@ -1049,7 +1115,7 @@ async def api_auth_code(request: web.Request) -> web.Response:
     if err is not None:
         return err
 
-    token = secrets.token_urlsafe(32)
+    token = db.generate_web_session_token()
     await db.create_web_session(token, checked_id, WEB_SESSION_TTL)
     logger.info("webapp_api: пользователь %s вошёл на сайт по коду", checked_id)
 
@@ -1115,7 +1181,7 @@ async def api_image(request: web.Request) -> web.Response:
     prompt = prompt_value.strip() if isinstance(prompt_value, str) else ""
     if not prompt:
         return web.json_response({"error": "empty_prompt"}, status=400)
-    if len(prompt) > MAX_MESSAGE_CHARS:
+    if len(prompt) > MAX_IMAGE_PROMPT_CHARS:
         return web.json_response({"error": "prompt_too_long"}, status=400)
 
     quota_error = await _reserve_ai_quota(
