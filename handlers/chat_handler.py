@@ -3,6 +3,7 @@ import os
 import json
 import base64
 import logging
+import multiprocessing as mp
 import re
 import time
 import zipfile
@@ -57,6 +58,19 @@ MAX_DOCX_EXPANDED_BYTES = 25 * 1024 * 1024
 MAX_DOCX_ENTRIES = 2_000
 MAX_PDF_PAGES = 100
 FILE_PARSE_TIMEOUT_SECONDS = 15
+FILE_PARSE_CONCURRENCY = max(
+    1, min(int(os.getenv("FILE_PARSE_CONCURRENCY", "2")), 4)
+)
+BOT_ATTACHMENT_CONCURRENCY = max(
+    1, min(int(os.getenv("BOT_ATTACHMENT_CONCURRENCY", "2")), 4)
+)
+FILE_PARSE_MEMORY_BYTES = max(
+    128 * 1024 * 1024,
+    min(
+        int(os.getenv("FILE_PARSE_MEMORY_MB", "512")) * 1024 * 1024,
+        1024 * 1024 * 1024,
+    ),
+)
 PROVIDER_RESPONSE_LIMIT = 2 * 1024 * 1024
 BOT_AI_TIMEOUT_SECONDS = max(15, min(int(os.getenv("BOT_AI_TIMEOUT_SECONDS", "120")), 300))
 BOT_AI_CONCURRENCY = max(1, min(int(os.getenv("BOT_AI_CONCURRENCY", "4")), 16))
@@ -64,6 +78,8 @@ DEFAULT_DAILY_AI_LIMIT = max(
     1, min(int(os.getenv("DEFAULT_DAILY_AI_LIMIT", "200")), 10000)
 )
 _bot_ai_semaphore = asyncio.Semaphore(BOT_AI_CONCURRENCY)
+_file_parse_semaphore = asyncio.Semaphore(FILE_PARSE_CONCURRENCY)
+_attachment_semaphore = asyncio.Semaphore(BOT_ATTACHMENT_CONCURRENCY)
 
 TEXT_EXTENSIONS = {
     ".txt", ".md", ".json", ".csv", ".log", ".yaml", ".yml", ".xml", ".html", ".htm",
@@ -181,22 +197,10 @@ async def reserve_bot_ai_request(message: Message, model_id: str) -> bool:
         return False
     return True
 
-def guess_mime_type(file_path: str | None) -> str:
-    if not file_path:
-        return "image/jpeg"
-    path = file_path.lower()
-    if path.endswith(".png"):
-        return "image/png"
-    if path.endswith(".webp"):
-        return "image/webp"
-    if path.endswith(".gif"):
-        return "image/gif"
-    return "image/jpeg"
-
 async def edit_error(status_msg: Message, title: str, error: Exception):
     logger.exception(title)
     await status_msg.edit_text(
-        f"<b>{escape(title)}:</b> {escape(str(error))}",
+        f"<b>{escape(title)}</b>\n\nПопробуй ещё раз или отправь другой файл.",
         parse_mode="HTML",
         reply_markup=cancel_keyboard(),
     )
@@ -272,7 +276,20 @@ async def send_debug_info(status_msg: Message, debug: dict):
     try:
         await status_msg.answer("\n".join(lines), parse_mode="HTML")
     except Exception:
-        pass
+        logger.debug("Не удалось отправить debug-информацию", exc_info=True)
+
+class _LimitedBytesIO(BytesIO):
+    """BytesIO, который прерывает загрузку сразу после достижения лимита."""
+
+    def __init__(self, max_bytes: int):
+        super().__init__()
+        self.max_bytes = max_bytes
+
+    def write(self, data) -> int:
+        if self.tell() + len(data) > self.max_bytes:
+            raise ValueError("Файл превышает допустимый размер.")
+        return super().write(data)
+
 
 async def telegram_file_to_bytes(
     message: Message,
@@ -282,34 +299,115 @@ async def telegram_file_to_bytes(
     tg_file = await message.bot.get_file(file_id)
     if not tg_file.file_path:
         raise Exception("Telegram не вернул путь к файлу.")
-    buffer = BytesIO()
+    buffer = _LimitedBytesIO(max_bytes)
     await message.bot.download_file(tg_file.file_path, destination=buffer)
     raw = buffer.getvalue()
     if len(raw) > max_bytes:
         raise Exception("Файл превышает допустимый размер.")
     return raw
 
-async def telegram_file_to_data_url(message: Message, file_id: str, mime_type: str | None = None) -> str:
-    tg_file = await message.bot.get_file(file_id)
-    if not tg_file.file_path:
-        raise Exception("Telegram не вернул путь к файлу.")
-    buffer = BytesIO()
-    await message.bot.download_file(tg_file.file_path, destination=buffer)
-    image_bytes = buffer.getvalue()
+async def telegram_file_to_data_url(
+    message: Message,
+    file_id: str,
+    mime_type: str | None = None,
+) -> str:
+    image_bytes = await telegram_file_to_bytes(
+        message,
+        file_id,
+        max_bytes=MAX_IMAGE_BYTES,
+    )
+    return image_bytes_to_data_url(image_bytes, mime_type)
+
+
+def detect_image_mime(raw: bytes) -> str | None:
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if len(raw) >= 12 and raw.startswith(b"RIFF") and raw[8:12] == b"WEBP":
+        return "image/webp"
+    if raw.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    return None
+
+
+def image_bytes_to_data_url(
+    image_bytes: bytes,
+    declared_mime: str | None = None,
+) -> str:
     if not image_bytes:
         raise Exception("Не удалось скачать изображение.")
     if len(image_bytes) > MAX_IMAGE_BYTES:
         raise Exception("Изображение слишком большое.")
-    final_mime_type = mime_type or guess_mime_type(tg_file.file_path)
-    if not final_mime_type.startswith("image/"):
-        final_mime_type = guess_mime_type(tg_file.file_path)
+    detected_mime = detect_image_mime(image_bytes)
+    if detected_mime is None:
+        raise Exception("Файл не является поддерживаемым изображением.")
+    declared = (declared_mime or "").strip().lower()
+    if declared and declared != detected_mime:
+        raise Exception("Содержимое изображения не соответствует MIME-типу.")
     encoded = base64.b64encode(image_bytes).decode("utf-8")
-    return f"data:{final_mime_type};base64,{encoded}"
+    return f"data:{detected_mime};base64,{encoded}"
+
+
+def _looks_like_zip(raw: bytes) -> bool:
+    return raw.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"))
+
+
+def validate_document_signature(
+    raw: bytes,
+    filename: str,
+    mime_type: str | None,
+) -> None:
+    if not raw:
+        raise Exception("Файл пуст.")
+    name_lower = (filename or "").lower()
+    mime = (mime_type or "").strip().lower()
+    if name_lower.endswith(".pdf") or mime == "application/pdf":
+        if b"%PDF-" not in raw[:1024]:
+            raise Exception("Содержимое файла не является PDF.")
+    if (
+        name_lower.endswith(".docx")
+        or mime
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ) and not _looks_like_zip(raw):
+        raise Exception("Содержимое файла не является корректным DOCX.")
 
 def make_vision_content(prompt: str, image_data_url: str) -> list:
     prompt = (prompt or "").strip()
     if not prompt: prompt = "Проанализируй изображение и ответь, что на нём изображено."
     return [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": image_data_url}}]
+
+
+async def call_ai_with_telegram_image(
+    message: Message,
+    file_id: str,
+    declared_mime: str,
+    caption: str,
+    history: list,
+    model_id: str,
+) -> tuple[str, dict]:
+    """Держит число загруженных в память изображений под общим лимитом."""
+    async with _attachment_semaphore:
+        image_data_url = await telegram_file_to_data_url(
+            message=message,
+            file_id=file_id,
+            mime_type=declared_mime,
+        )
+        user_content = make_vision_content(
+            prompt=caption,
+            image_data_url=image_data_url,
+        )
+        messages = (
+            [{"role": "system", "content": SYSTEM_PROMPT}]
+            + trim_history(history)
+            + [{"role": "user", "content": user_content}]
+        )
+        async with _bot_ai_semaphore:
+            return await asyncio.wait_for(
+                call_ai(model_id, messages),
+                timeout=BOT_AI_TIMEOUT_SECONDS,
+            )
+
 
 def extract_text_from_bytes(raw: bytes, filename: str, mime_type: str | None) -> str:
     name_lower = (filename or "").lower()
@@ -361,10 +459,159 @@ def extract_text_from_bytes(raw: bytes, filename: str, mime_type: str | None) ->
     if is_text or mime == "":
         for enc in ("utf-8", "cp1251", "latin1"):
             try: return raw.decode(enc)
-            except Exception: continue
+            except UnicodeDecodeError: continue
         return raw.decode("utf-8", errors="replace")
 
     raise Exception(f"Неподдерживаемый формат: {filename or mime_type}. Поддерживаются: TXT, Code, PDF, DOCX, Изображения.")
+
+
+def _apply_parse_resource_limits(timeout_seconds: int) -> None:
+    """Ограничивает память и CPU дочернего парсера на Unix-платформах."""
+    try:
+        import resource
+    except ImportError:
+        return
+    try:
+        resource.setrlimit(
+            resource.RLIMIT_AS,
+            (FILE_PARSE_MEMORY_BYTES, FILE_PARSE_MEMORY_BYTES),
+        )
+    except (OSError, ValueError):
+        logger.warning("Не удалось установить лимит памяти для парсера")
+    try:
+        cpu_soft = max(1, int(timeout_seconds))
+        resource.setrlimit(resource.RLIMIT_CPU, (cpu_soft, cpu_soft + 1))
+    except (OSError, ValueError):
+        logger.warning("Не удалось установить CPU-лимит для парсера")
+
+
+def _document_parse_worker(
+    send_conn,
+    raw: bytes,
+    filename: str,
+    mime_type: str | None,
+    timeout_seconds: int,
+) -> None:
+    try:
+        _apply_parse_resource_limits(timeout_seconds)
+        text = extract_text_from_bytes(raw, filename, mime_type)
+        send_conn.send(("ok", text))
+    except BaseException as exc:
+        safe_error = re.sub(r"[\x00-\x1f\x7f]+", " ", str(exc)).strip()[:500]
+        try:
+            send_conn.send(("error", safe_error or "Не удалось прочитать файл."))
+        except (BrokenPipeError, EOFError, OSError):
+            pass
+    finally:
+        send_conn.close()
+
+
+def extract_text_isolated(
+    raw: bytes,
+    filename: str,
+    mime_type: str | None,
+    timeout_seconds: int = FILE_PARSE_TIMEOUT_SECONDS,
+) -> str:
+    """Парсит документ в завершаемом процессе с лимитами времени и памяти."""
+    timeout_seconds = max(1, int(timeout_seconds))
+    context = mp.get_context("spawn")
+    recv_conn, send_conn = context.Pipe(duplex=False)
+    process = context.Process(
+        target=_document_parse_worker,
+        args=(send_conn, raw, filename, mime_type, timeout_seconds),
+        daemon=True,
+    )
+    result = None
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        process.start()
+        send_conn.close()
+        while time.monotonic() < deadline:
+            remaining = max(0.0, deadline - time.monotonic())
+            if recv_conn.poll(min(0.1, remaining)):
+                try:
+                    result = recv_conn.recv()
+                except EOFError:
+                    result = None
+                break
+            if not process.is_alive():
+                break
+
+        if result is None:
+            if process.is_alive():
+                raise TimeoutError(
+                    f"Чтение файла заняло больше {timeout_seconds} секунд."
+                )
+            raise Exception("Процесс чтения файла завершился с ошибкой.")
+
+        status, payload = result
+        if status != "ok":
+            raise Exception(payload)
+        return payload
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=1)
+        if process.is_alive() and hasattr(process, "kill"):
+            process.kill()
+            process.join(timeout=1)
+        recv_conn.close()
+        try:
+            send_conn.close()
+        except OSError:
+            pass
+        if not process.is_alive():
+            process.close()
+
+
+async def extract_text_bounded(
+    raw: bytes,
+    filename: str,
+    mime_type: str | None,
+) -> str:
+    """Изолирует парсер и ограничивает число одновременно запущенных процессов."""
+    await _file_parse_semaphore.acquire()
+    future = asyncio.create_task(
+        asyncio.to_thread(
+            extract_text_isolated,
+            raw,
+            filename,
+            mime_type,
+            FILE_PARSE_TIMEOUT_SECONDS,
+        )
+    )
+    release_here = True
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(future),
+            timeout=FILE_PARSE_TIMEOUT_SECONDS + 5,
+        )
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        # Поток завершит/убьёт дочерний процесс. До этого момента слот остаётся
+        # занятым, даже если обработчик был отменён клиентом.
+        release_here = False
+        future.add_done_callback(lambda _: _file_parse_semaphore.release())
+        raise
+    finally:
+        if release_here:
+            _file_parse_semaphore.release()
+
+
+async def read_telegram_document_bounded(
+    message: Message,
+    file_id: str,
+    filename: str,
+    mime_type: str | None,
+) -> str:
+    """Ограничивает общий объём одновременно загруженных в память документов."""
+    async with _attachment_semaphore:
+        raw = await telegram_file_to_bytes(
+            message,
+            file_id,
+            max_bytes=MAX_FILE_BYTES,
+        )
+        validate_document_signature(raw, filename, mime_type)
+        return await extract_text_bounded(raw, filename, mime_type)
 
 
 # ------------------ API Вызовы ------------------
@@ -372,11 +619,13 @@ def extract_text_from_bytes(raw: bytes, filename: str, mime_type: str | None) ->
 async def _read_provider_json(resp: aiohttp.ClientResponse, provider: str) -> dict:
     if resp.content_length is not None and resp.content_length > PROVIDER_RESPONSE_LIMIT:
         raise Exception(f"{provider} вернул слишком большой ответ.")
-    raw = await resp.content.read(PROVIDER_RESPONSE_LIMIT + 1)
-    if len(raw) > PROVIDER_RESPONSE_LIMIT:
-        raise Exception(f"{provider} вернул слишком большой ответ.")
+    raw_buffer = bytearray()
+    async for chunk in resp.content.iter_chunked(64 * 1024):
+        if len(raw_buffer) + len(chunk) > PROVIDER_RESPONSE_LIMIT:
+            raise Exception(f"{provider} вернул слишком большой ответ.")
+        raw_buffer.extend(chunk)
     try:
-        data = json.loads(raw.decode("utf-8"))
+        data = json.loads(bytes(raw_buffer).decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise Exception(f"{provider} вернул некорректный ответ.") from exc
     if not isinstance(data, dict):
@@ -399,7 +648,13 @@ async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
     }
     logger.info("call_nvidia -> url=%s model=%s", NVIDIA_CHAT_URL, payload["model"])
     async with aiohttp.ClientSession() as session:
-        async with session.post(NVIDIA_CHAT_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+        async with session.post(
+            NVIDIA_CHAT_URL,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=60),
+            allow_redirects=False,
+        ) as resp:
             data = await _read_provider_json(resp, "NVIDIA")
             if resp.status != 200:
                 logger.warning(
@@ -439,7 +694,13 @@ async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
     logger.info("call_gemini -> url=%s model=%s", url, raw_model)
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+        async with session.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=60),
+            allow_redirects=False,
+        ) as resp:
             data = await _read_provider_json(resp, "Google")
             
             if resp.status != 200:
@@ -578,15 +839,14 @@ async def handle_photo(message: Message, state: FSMContext):
         history = list(get_history(data))
         photo = message.photo[-1]
         caption = message.caption or ""
-        image_data_url = await telegram_file_to_data_url(message=message, file_id=photo.file_id, mime_type="image/jpeg")
-        user_content = make_vision_content(prompt=caption, image_data_url=image_data_url)
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trim_history(history) + [{"role": "user", "content": user_content}]
-        
-        async with _bot_ai_semaphore:
-            reply, debug = await asyncio.wait_for(
-                call_ai(model_id, messages),
-                timeout=BOT_AI_TIMEOUT_SECONDS,
-            )
+        reply, debug = await call_ai_with_telegram_image(
+            message,
+            photo.file_id,
+            "image/jpeg",
+            caption,
+            history,
+            model_id,
+        )
         
         history.append({"role": "user", "content": f"[Фото] {caption}".strip()})
         history.append({"role": "assistant", "content": reply})
@@ -620,15 +880,14 @@ async def handle_document(message: Message, state: FSMContext):
         status_msg = await message.answer("<i>Обрабатываю изображение...</i>", parse_mode="HTML")
         try:
             history = list(get_history(data))
-            image_data_url = await telegram_file_to_data_url(message=message, file_id=document.file_id, mime_type=mime_type)
-            user_content = make_vision_content(prompt=caption, image_data_url=image_data_url)
-            messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trim_history(history) + [{"role": "user", "content": user_content}]
-            
-            async with _bot_ai_semaphore:
-                reply, debug = await asyncio.wait_for(
-                    call_ai(model_id, messages),
-                    timeout=BOT_AI_TIMEOUT_SECONDS,
-                )
+            reply, debug = await call_ai_with_telegram_image(
+                message,
+                document.file_id,
+                mime_type,
+                caption,
+                history,
+                model_id,
+            )
             
             history.append({"role": "user", "content": f"[Изображение-файл] {caption}".strip()})
             history.append({"role": "assistant", "content": reply})
@@ -642,15 +901,12 @@ async def handle_document(message: Message, state: FSMContext):
 
     status_msg = await message.answer("<i>Читаю файл...</i>", parse_mode="HTML")
     try:
-        raw = await telegram_file_to_bytes(
-            message,
-            document.file_id,
-            max_bytes=MAX_FILE_BYTES,
-        )
         try:
-            file_text = await asyncio.wait_for(
-                asyncio.to_thread(extract_text_from_bytes, raw, filename, mime_type),
-                timeout=FILE_PARSE_TIMEOUT_SECONDS,
+            file_text = await read_telegram_document_bounded(
+                message,
+                document.file_id,
+                filename,
+                mime_type,
             )
         except Exception as e:
             await edit_error(status_msg, "Не удалось прочитать файл", e)
