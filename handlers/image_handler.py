@@ -1,6 +1,6 @@
 import asyncio
 import os
-import random
+import secrets
 import base64
 import binascii
 import json
@@ -29,6 +29,7 @@ NVIDIA_OPENAI_BASE = os.getenv("NVIDIA_OPENAI_BASE", "https://integrate.api.nvid
 _ALLOWED_NVIDIA_HOSTS = {"ai.api.nvidia.com", "integrate.api.nvidia.com"}
 PROVIDER_RESPONSE_LIMIT = 30 * 1024 * 1024
 MAX_GENERATED_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_PROMPT_CHARS = 4_000
 IMAGE_TIMEOUT_SECONDS = max(30, min(int(os.getenv("IMAGE_TIMEOUT_SECONDS", "180")), 300))
 BOT_IMAGE_CONCURRENCY = max(1, min(int(os.getenv("BOT_IMAGE_CONCURRENCY", "2")), 8))
 DEFAULT_DAILY_IMAGE_LIMIT = max(
@@ -81,7 +82,14 @@ async def _nvidia_post_full_url(url, payload):
     headers = {"Authorization": f"Bearer {NVIDIA_API_KEY}", "Accept": "application/json", "Content-Type": "application/json"}
     timeout = aiohttp.ClientTimeout(total=90, connect=10, sock_read=60)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(url, json=payload, headers=headers) as resp:
+        # Не следуем редиректам: исходный URL прошёл allowlist, а адрес из
+        # Location уже может указывать на другой узел.
+        async with session.post(
+            url,
+            json=payload,
+            headers=headers,
+            allow_redirects=False,
+        ) as resp:
             raw = await _read_limited_response(resp, PROVIDER_RESPONSE_LIMIT)
             try:
                 data = json.loads(raw.decode("utf-8"))
@@ -132,11 +140,32 @@ def _decode_image_base64(value: object) -> bytes:
 
 
 async def generate_image(prompt: str):
+    if not isinstance(prompt, str):
+        raise ValueError("Промпт должен быть строкой")
+    prompt = prompt.strip()
+    if not prompt:
+        raise ValueError("Промпт не задан")
+    if len(prompt) > MAX_IMAGE_PROMPT_CHARS:
+        raise ValueError("Промпт слишком длинный")
+
     model = IMAGE_MODELS["img_flux2"]
     legacy_url = _validated_nvidia_url(NVIDIA_BASE_URL, model["path"])
-    legacy_payload = {"prompt": prompt, "width": 1024, "height": 1024, "steps": 4, "seed": random.randint(1, 2_147_483_647)}
+    legacy_payload = {
+        "prompt": prompt,
+        "width": 1024,
+        "height": 1024,
+        "steps": 4,
+        "seed": secrets.randbelow(2_147_483_647) + 1,
+    }
     openai_url = _validated_nvidia_url(NVIDIA_OPENAI_BASE, "images/generations")
-    openai_payload = {"model": model["path"], "prompt": prompt, "n": 1, "size": "1024x1024", "response_format": "b64_json", "seed": random.randint(1, 2_147_483_647)}
+    openai_payload = {
+        "model": model["path"],
+        "prompt": prompt,
+        "n": 1,
+        "size": "1024x1024",
+        "response_format": "b64_json",
+        "seed": secrets.randbelow(2_147_483_647) + 1,
+    }
     try:
         data = await _nvidia_post_full_url(legacy_url, legacy_payload)
         return _extract_image_bytes(data)
@@ -201,6 +230,11 @@ async def do_generate(message: Message, state: FSMContext):
     if not prompt:
         await message.answer("Отправь текстовый запрос.")
         return
+    if len(prompt) > MAX_IMAGE_PROMPT_CHARS:
+        await message.answer(
+            f"Запрос слишком длинный. Максимум {MAX_IMAGE_PROMPT_CHARS} символов."
+        )
+        return
     user_id = message.from_user.id
     if not _image_rate_limiter.allow(user_id):
         await message.answer("Лимит генерации изображений исчерпан. Попробуй позже.")
@@ -227,10 +261,13 @@ async def do_generate(message: Message, state: FSMContext):
                 timeout=IMAGE_TIMEOUT_SECONDS,
             )
         await status_msg.delete()
-        await message.answer_photo(photo=BufferedInputFile(image_bytes, filename="generated.png"),
-                                   caption=f"<b>Готово</b>\n\n{escape(prompt)}",
-                                   parse_mode="HTML",
-                                   reply_markup=cancel_keyboard())
+        caption_prompt = prompt[:900] + ("…" if len(prompt) > 900 else "")
+        await message.answer_photo(
+            photo=BufferedInputFile(image_bytes, filename="generated.png"),
+            caption=f"<b>Готово</b>\n\n{escape(caption_prompt)}",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard(),
+        )
     except asyncio.TimeoutError:
         await status_msg.edit_text(
             "❌ Генерация заняла слишком много времени.",
