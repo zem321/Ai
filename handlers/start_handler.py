@@ -16,7 +16,7 @@ try:
     ADMIN_ID = int(os.environ["ADMIN_ID"])
 except (KeyError, TypeError, ValueError) as exc:
     raise RuntimeError("ADMIN_ID должен быть задан положительным целым числом") from exc
-if ADMIN_ID <= 0:
+if ADMIN_ID <= 0 or ADMIN_ID > 2**63 - 1:
     raise RuntimeError("ADMIN_ID должен быть положительным Telegram ID")
 
 WELCOME_TEXT = """
@@ -46,6 +46,19 @@ def _safe_message_html(message: Message) -> str:
     return escape(message.text or "")
 
 
+def _callback_user_id(data: str | None, prefix: str) -> int | None:
+    value = str(data or "")
+    if not value.startswith(prefix):
+        return None
+    try:
+        user_id = int(value[len(prefix):])
+    except (TypeError, ValueError):
+        return None
+    if user_id <= 0 or user_id > 2**63 - 1:
+        return None
+    return user_id
+
+
 async def notify_admin(bot: Bot, user):
     if not ADMIN_ID:
         return
@@ -72,18 +85,20 @@ async def cmd_start(message: Message, state: FSMContext):
         await state.set_state(BotStates.main_menu)
         await message.answer(WELCOME_TEXT, reply_markup=main_menu_keyboard(), parse_mode="HTML")
         return
-    if await db.is_approved(user_id):
+    status = await db.get_user_status(user_id)
+    if status == "approved":
         await state.set_state(BotStates.main_menu)
         await message.answer(WELCOME_TEXT, reply_markup=main_menu_keyboard(), parse_mode="HTML")
         return
-    if await db.is_pending(user_id):
+    if status == "pending":
         await message.answer("⏳ <b>Запрос уже отправлен!</b> Ожидай одобрения.", parse_mode="HTML")
         return
-    if await db.is_rejected(user_id):
+    if status == "rejected":
         await message.answer("🚫 <b>Доступ отклонён.</b>", parse_mode="HTML")
         return
-    await db.add_pending(user_id)
-    await notify_admin(message.bot, message.from_user)
+    inserted = await db.add_pending(user_id)
+    if inserted:
+        await notify_admin(message.bot, message.from_user)
     await message.answer("📨 <b>Запрос отправлен!</b>\n\nОжидай одобрения от администратора.", parse_mode="HTML")
 
 
@@ -127,7 +142,10 @@ async def cb_approve(callback: CallbackQuery, bot: Bot):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("🚫 Нет доступа", show_alert=True)
         return
-    user_id = int(callback.data.split("_")[1])
+    user_id = _callback_user_id(callback.data, "approve_")
+    if user_id is None:
+        await callback.answer("Некорректный ID", show_alert=True)
+        return
     await db.approve_user(user_id)
     await callback.message.edit_text(
         _safe_message_html(callback.message) + "\n\n✅ <b>Одобрен!</b>",
@@ -145,7 +163,10 @@ async def cb_reject(callback: CallbackQuery, bot: Bot):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("🚫 Нет доступа", show_alert=True)
         return
-    user_id = int(callback.data.split("_")[1])
+    user_id = _callback_user_id(callback.data, "reject_")
+    if user_id is None or user_id == ADMIN_ID:
+        await callback.answer("Нельзя отклонить администратора", show_alert=True)
+        return
     await db.reject_user(user_id)
     await callback.message.edit_text(
         _safe_message_html(callback.message) + "\n\n❌ <b>Отклонён.</b>",
@@ -163,7 +184,10 @@ async def cb_revoke(callback: CallbackQuery, bot: Bot):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("🚫 Нет доступа", show_alert=True)
         return
-    user_id = int(callback.data.split("_")[1])
+    user_id = _callback_user_id(callback.data, "revoke_")
+    if user_id is None or user_id == ADMIN_ID:
+        await callback.answer("Нельзя отозвать доступ администратора", show_alert=True)
+        return
     await db.revoke_user(user_id)
     await callback.answer("🚫 Доступ отозван", show_alert=True)
     await callback.message.edit_text(
