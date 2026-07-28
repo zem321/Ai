@@ -16,6 +16,15 @@ from aiogram.fsm.context import FSMContext
 from keyboards import cancel_keyboard
 from states import BotStates
 import database as db
+from request_guard import single_user_ai_request
+from safety import (
+    AI_DISABLED_MESSAGE,
+    AI_REQUESTS_ENABLED,
+    contains_probable_secret,
+    prohibited_image_reason,
+    sanitize_safe_image_payload,
+    safety_response_for_reason,
+)
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -27,8 +36,8 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://ai.api.nvidia.com/v1/genai")
 NVIDIA_OPENAI_BASE = os.getenv("NVIDIA_OPENAI_BASE", "https://integrate.api.nvidia.com/v1")
 _ALLOWED_NVIDIA_HOSTS = {"ai.api.nvidia.com", "integrate.api.nvidia.com"}
-PROVIDER_RESPONSE_LIMIT = 30 * 1024 * 1024
-MAX_GENERATED_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_GENERATED_IMAGE_BYTES = 10 * 1024 * 1024
+PROVIDER_RESPONSE_LIMIT = 15 * 1024 * 1024
 MAX_IMAGE_PROMPT_CHARS = 4_000
 IMAGE_TIMEOUT_SECONDS = max(30, min(int(os.getenv("IMAGE_TIMEOUT_SECONDS", "180")), 300))
 BOT_IMAGE_CONCURRENCY = max(1, min(int(os.getenv("BOT_IMAGE_CONCURRENCY", "2")), 8))
@@ -105,17 +114,19 @@ async def _nvidia_post_full_url(url, payload):
 
 def _extract_image_bytes(data):
     artifacts = data.get("artifacts")
-    if artifacts:
+    if isinstance(artifacts, list) and artifacts and isinstance(artifacts[0], dict):
         b64 = artifacts[0].get("base64")
         if b64:
             return _decode_image_base64(b64)
     arr = data.get("data")
-    if arr:
+    if isinstance(arr, list):
         for item in arr:
+            if not isinstance(item, dict):
+                continue
             b64 = item.get("b64_json") or item.get("base64")
             if b64:
                 return _decode_image_base64(b64)
-    raise Exception("Изображение не найдено")
+    raise RuntimeError("NVIDIA API не вернул изображение")
 
 
 def _decode_image_base64(value: object) -> bytes:
@@ -129,17 +140,23 @@ def _decode_image_base64(value: object) -> bytes:
         raise RuntimeError("NVIDIA API вернул некорректное изображение") from exc
     if not raw or len(raw) > MAX_GENERATED_IMAGE_BYTES:
         raise RuntimeError("NVIDIA API вернул изображение недопустимого размера")
-    is_known_image = (
-        raw.startswith(b"\x89PNG\r\n\x1a\n")
-        or raw.startswith(b"\xff\xd8\xff")
-        or (raw.startswith(b"RIFF") and raw[8:12] == b"WEBP")
-    )
-    if not is_known_image:
+    try:
+        sanitized = sanitize_safe_image_payload(
+            raw,
+            max_output_bytes=MAX_GENERATED_IMAGE_BYTES,
+        )
+    except ValueError as exc:
+        raise RuntimeError(
+            "NVIDIA API вернул небезопасное изображение"
+        ) from exc
+    if sanitized is None:
         raise RuntimeError("NVIDIA API вернул данные неизвестного формата")
-    return raw
+    return sanitized[0]
 
 
 async def generate_image(prompt: str):
+    if not AI_REQUESTS_ENABLED:
+        raise RuntimeError(AI_DISABLED_MESSAGE)
     if not isinstance(prompt, str):
         raise ValueError("Промпт должен быть строкой")
     prompt = prompt.strip()
@@ -147,6 +164,11 @@ async def generate_image(prompt: str):
         raise ValueError("Промпт не задан")
     if len(prompt) > MAX_IMAGE_PROMPT_CHARS:
         raise ValueError("Промпт слишком длинный")
+    if contains_probable_secret(prompt):
+        raise ValueError("Промпт содержит данные, похожие на секрет")
+    prohibited_reason = prohibited_image_reason(prompt)
+    if prohibited_reason:
+        raise ValueError(safety_response_for_reason(prohibited_reason))
 
     model = IMAGE_MODELS["img_flux2"]
     legacy_url = _validated_nvidia_url(NVIDIA_BASE_URL, model["path"])
@@ -219,13 +241,20 @@ _image_rate_limiter = _ImageRateLimiter()
 
 @router.callback_query(F.data == "mode_image_gen")
 async def enter_generation(callback: CallbackQuery, state: FSMContext):
+    if not AI_REQUESTS_ENABLED:
+        await callback.answer(AI_DISABLED_MESSAGE, show_alert=True)
+        return
     await state.set_state(BotStates.image_generate)
     await callback.message.edit_text("<b>Генерация фото</b>\n\nОтправь текстовый запрос.", parse_mode="HTML", reply_markup=cancel_keyboard())
     await callback.answer()
 
 
 @router.message(BotStates.image_generate, F.text)
+@single_user_ai_request
 async def do_generate(message: Message, state: FSMContext):
+    if not AI_REQUESTS_ENABLED:
+        await message.answer(AI_DISABLED_MESSAGE)
+        return
     prompt = message.text.strip()
     if not prompt:
         await message.answer("Отправь текстовый запрос.")
@@ -234,6 +263,13 @@ async def do_generate(message: Message, state: FSMContext):
         await message.answer(
             f"Запрос слишком длинный. Максимум {MAX_IMAGE_PROMPT_CHARS} символов."
         )
+        return
+    if contains_probable_secret(prompt):
+        await message.answer("Запрос похож на секрет и не был отправлен.")
+        return
+    prohibited_reason = prohibited_image_reason(prompt)
+    if prohibited_reason:
+        await message.answer(safety_response_for_reason(prohibited_reason))
         return
     user_id = message.from_user.id
     if not _image_rate_limiter.allow(user_id):
