@@ -1112,8 +1112,36 @@ _PROHIBITED_REQUEST_PATTERNS: tuple[
             (
                 r"\b(?:запусти|организуй|сделай|напиши|создай)\b.{0,80}\b"
                 r"(?:ddos|ддос|dos[- ]атак\w*|флуд[- ]атак\w*)",
+                r"\b(?:дай|покажи|объясни|подскажи|составь|напиши)\b"
+                r".{0,120}\b(?:как|инструкц\w*|способ\w*|метод\w*)\b"
+                r".{0,100}\b(?:провест\w*|устро\w*|запуст\w*|"
+                r"организ\w*|выполн\w*)?.{0,20}\b(?:ddos|ддос|"
+                r"dos[- ]атак\w*|флуд[- ]атак\w*)",
+                r"\b(?:провед\w*|устро\w*|запуст\w*|организ\w*|"
+                r"выполн\w*)\b.{0,80}\b(?:ddos|ддос|dos[- ]атак\w*|"
+                r"флуд[- ]атак\w*)",
+                r"\b(?:полож\w*|обруш\w*|перегруз\w*|вывед\w+\s+из\s+"
+                r"стро\w*)\b.{0,120}\b(?:чуж\w+\s+)?(?:сайт\w*|"
+                r"сервер\w*|api|сервис\w*)\b.{0,120}\b(?:множеств\w*|"
+                r"больш\w+\s+количеств\w*|поток\w*|массов\w*|"
+                r"одновременн\w*)\b.{0,80}\b(?:запрос\w*|соединени\w*|"
+                r"клиент\w*)",
                 r"\b(?:launch|perform|build|write|create)\b.{0,80}\b"
                 r"(?:ddos|denial[- ]of[- ]service|flood\s+attack)\b",
+                r"\b(?:give|show|explain|provide)\b.{0,120}\b(?:how\s+to|"
+                r"instructions?|methods?)\b.{0,100}\b(?:launch|perform|"
+                r"conduct|carry\s+out)?.{0,20}\b(?:ddos|"
+                r"denial[- ]of[- ]service|flood\s+attack)\b",
+                r"\b(?:take|bring|knock)\b.{0,20}\b(?:down|offline)\b"
+                r".{0,100}\b(?:someone\s+else['’]s\s+)?(?:website|site|"
+                r"server|api|service)\b.{0,120}\b(?:many|mass|concurrent|"
+                r"parallel|flood\w*)\b.{0,80}\b(?:requests?|connections?|"
+                r"clients?)\b",
+                r"\b(?:take|bring|knock)\b.{0,120}\b(?:someone\s+"
+                r"else['’]s\s+)?(?:website|site|server|api|service)\b"
+                r".{0,30}\b(?:down|offline)\b.{0,120}\b(?:many|mass|"
+                r"concurrent|parallel|flood\w*)\b.{0,80}\b(?:requests?|"
+                r"connections?|clients?)\b",
                 r"\b(?:удали|уничтожь|зашифруй|повреди)\b.{0,80}\b"
                 r"(?:чуж\w+\s+данн\w*|чуж\w+\s+файл\w*|все\s+файл\w*|"
                 r"резервн\w+\s+коп\w*)",
@@ -2801,6 +2829,12 @@ _KIDNAPPING = re.compile(
 _SELF_HARM_METHOD = re.compile(
     r"\b(?:поконч\w+\s+с\s+собой|соверш\w+\s+самоубийств\w*|"
     r"(?:способ\w*|метод\w*).{0,40}(?:самоубийств\w*|суицид\w*)|"
+    r"(?:способ\w*|метод\w*|инструкц\w*).{0,80}(?:"
+    r"причин\w+\s+себе.{0,30}(?:смертельн\w+|летальн\w+|"
+    r"непоправим\w+)\s+вред\w*|(?:смертельн\w+|летальн\w+)\s+"
+    r"навред\w+\s+себе|уйти\s+из\s+жизн\w*)|"
+    r"(?:methods?|instructions?|how\s+to).{0,80}(?:cause\s+myself\s+"
+    r"(?:fatal|lethal)\s+harm|fatally\s+harm\s+myself|end\s+my\s+life)|"
     r"план\w*.{0,12}(?:самоубийств\w*|суицид\w*)|"
     r"(?:самоубийств\w*|суицид\w*).{0,40}(?:способ\w*|метод\w*)|"
     r"(?:самоубийств\w*|суицид\w*).{0,12}план\w*|"

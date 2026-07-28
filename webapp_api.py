@@ -138,6 +138,7 @@ if any(
         "TRUSTED_PROXY_IPS содержит слишком широкую сеть "
         "(минимум /8 для IPv4 и /32 для IPv6)"
     )
+_RENDER_PROXY_HEADERS = os.getenv("RENDER", "").strip().lower() == "true"
 
 ALLOWED_MODELS = frozenset(BOT_MODELS)
 DEFAULT_MODEL = "gemini/gemini-3.1-flash-lite"
@@ -238,9 +239,30 @@ def _client_ip(request: web.Request) -> str:
         remote_ip = ipaddress.ip_address(remote)
     except ValueError:
         return remote
+    # Render пропускает весь входящий трафик через Cloudflare и свой
+    # load balancer, устанавливает реальный IP первым элементом XFF и
+    # добавляет CF-Ray. Без этой ветки все пользователи production делили
+    # bucket адреса прокси и один клиент мог заблокировать вход остальным.
+    cf_ray = request.headers.get("CF-Ray", "")
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if (
+        _RENDER_PROXY_HEADERS
+        and re.fullmatch(r"[0-9a-f]{16,32}(?:-[a-z]{3})?", cf_ray, re.IGNORECASE)
+        and forwarded
+        and len(forwarded) <= 512
+    ):
+        try:
+            chain = [
+                ipaddress.ip_address(value.strip())
+                for value in forwarded.split(",")
+                if value.strip()
+            ]
+        except ValueError:
+            chain = []
+        if 0 < len(chain) <= 10:
+            return str(chain[0])
     if not any(remote_ip in network for network in _TRUSTED_PROXY_NETWORKS):
         return str(remote_ip)
-    forwarded = request.headers.get("X-Forwarded-For", "")
     if not forwarded or len(forwarded) > 512:
         return str(remote_ip)
     try:
