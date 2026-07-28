@@ -1,32 +1,64 @@
+import asyncio
 import os
 import secrets
 import hashlib
 import hmac
 import logging
 import ssl
+from contextlib import asynccontextmanager, suppress
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import asyncpg
+
+
+def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"{name} должен быть целым числом") from exc
+    if not minimum <= value <= maximum:
+        raise RuntimeError(f"{name} должен быть от {minimum} до {maximum}")
+    return value
+
+
+def _env_float(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"{name} должен быть числом") from exc
+    if not minimum <= value <= maximum:
+        raise RuntimeError(f"{name} должен быть от {minimum} до {maximum}")
+    return value
+
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_SSLMODE = os.getenv("DATABASE_SSLMODE", "verify-full").strip().lower()
 DATABASE_SSL_ROOT_CERT = os.getenv("DATABASE_SSL_ROOT_CERT", "").strip()
-DATABASE_COMMAND_TIMEOUT = float(os.getenv("DATABASE_COMMAND_TIMEOUT", "30"))
-DATABASE_POOL_MIN_SIZE = max(1, int(os.getenv("DATABASE_POOL_MIN_SIZE", "1")))
+DATABASE_COMMAND_TIMEOUT = _env_float("DATABASE_COMMAND_TIMEOUT", 30, 1, 120)
+DATABASE_POOL_MIN_SIZE = _env_int("DATABASE_POOL_MIN_SIZE", 1, 1, 10)
 DATABASE_POOL_MAX_SIZE = max(
     DATABASE_POOL_MIN_SIZE,
-    int(os.getenv("DATABASE_POOL_MAX_SIZE", "10")),
+    _env_int("DATABASE_POOL_MAX_SIZE", 10, 1, 50),
 )
-REQUEST_STATS_RETENTION_DAYS = max(
-    7, min(int(os.getenv("REQUEST_STATS_RETENTION_DAYS", "90")), 365)
+REQUEST_STATS_RETENTION_DAYS = _env_int(
+    "REQUEST_STATS_RETENTION_DAYS", 90, 7, 365
 )
-LOGIN_CODE_MIN_INTERVAL_SECONDS = max(
-    1, int(os.getenv("LOGIN_CODE_MIN_INTERVAL_SECONDS", "30"))
+GLOBAL_DAILY_AI_LIMIT = _env_int(
+    "GLOBAL_DAILY_AI_LIMIT", 5000, 1, 1_000_000
 )
-MAX_WEB_SESSIONS_PER_USER = max(
-    1, int(os.getenv("MAX_WEB_SESSIONS_PER_USER", "5"))
+GLOBAL_DAILY_IMAGE_LIMIT = _env_int(
+    "GLOBAL_DAILY_IMAGE_LIMIT", 500, 1, 100_000
 )
-WEB_SESSION_TOUCH_INTERVAL_SECONDS = max(
-    60, min(int(os.getenv("WEB_SESSION_TOUCH_INTERVAL_SECONDS", "300")), 3600)
+LOGIN_CODE_MIN_INTERVAL_SECONDS = _env_int(
+    "LOGIN_CODE_MIN_INTERVAL_SECONDS", 30, 1, 3600
+)
+MAX_WEB_SESSIONS_PER_USER = _env_int(
+    "MAX_WEB_SESSIONS_PER_USER", 5, 1, 20
+)
+WEB_SESSION_TOUCH_INTERVAL_SECONDS = _env_int(
+    "WEB_SESSION_TOUCH_INTERVAL_SECONDS", 300, 60, 3600
+)
+USER_REQUEST_LEASE_SECONDS = _env_int(
+    "USER_REQUEST_LEASE_SECONDS", 600, 60, 1800
 )
 LOGIN_CODE_PEPPER = os.getenv("LOGIN_CODE_PEPPER", "")
 
@@ -34,6 +66,10 @@ _ALLOWED_SSL_MODES = {"verify-full"}
 logger = logging.getLogger(__name__)
 
 _pool: asyncpg.Pool | None = None
+
+
+class _QuotaExhausted(RuntimeError):
+    """Внутренний сигнал для атомарного отката резервирования квоты."""
 
 
 def _build_ssl_context() -> ssl.SSLContext:
@@ -86,8 +122,43 @@ async def init_db():
         raise RuntimeError(
             "LOGIN_CODE_PEPPER должен быть отдельным случайным секретом длиной не менее 32 байт"
         )
+    if (
+        len(set(LOGIN_CODE_PEPPER)) < 8
+        or LOGIN_CODE_PEPPER.strip().lower()
+        in {"changeme", "change-me", "replace-me", "your-secret-here"}
+    ):
+        raise RuntimeError("LOGIN_CODE_PEPPER выглядит предсказуемым; сгенерируйте случайный секрет")
+    forbidden_peppers = {
+        value
+        for value in (
+            os.getenv("BOT_TOKEN"),
+            os.getenv("GEMINI_API_KEY"),
+            os.getenv("NVIDIA_API_KEY"),
+            DATABASE_URL,
+        )
+        if value
+    }
+    if LOGIN_CODE_PEPPER in forbidden_peppers:
+        raise RuntimeError(
+            "LOGIN_CODE_PEPPER должен отличаться от токенов, API-ключей и DATABASE_URL"
+        )
     if DATABASE_SSLMODE not in _ALLOWED_SSL_MODES:
         raise RuntimeError("DATABASE_SSLMODE должен быть verify-full")
+
+    try:
+        database_parts = urlsplit(DATABASE_URL)
+        database_hostname = database_parts.hostname
+    except ValueError as exc:
+        raise RuntimeError("DATABASE_URL имеет некорректный формат PostgreSQL") from exc
+    if (
+        database_parts.scheme not in {"postgres", "postgresql"}
+        or not database_hostname
+        or not database_parts.username
+        or not database_parts.path
+        or database_parts.path == "/"
+        or database_parts.fragment
+    ):
+        raise RuntimeError("DATABASE_URL имеет некорректный формат PostgreSQL")
 
     # Используем системные доверенные CA вместо несуществующего
     # ~/.postgresql/root.crt, который asyncpg ищет для строкового verify-full.
@@ -121,6 +192,22 @@ async def init_db():
             """
         )
         await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS active_user_requests (
+                user_id BIGINT PRIMARY KEY,
+                lease_token TEXT NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_active_user_requests_expires
+            ON active_user_requests(expires_at)
+            """
+        )
+        await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_rs_user ON request_stats(user_id)"
         )
         await conn.execute(
@@ -151,6 +238,23 @@ async def init_db():
         )
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_usage_daily_date ON request_usage_daily(usage_date)"
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS global_request_usage_daily (
+                quota_class TEXT NOT NULL
+                    CHECK (quota_class IN ('ai', 'image')),
+                usage_date DATE NOT NULL,
+                request_count INTEGER NOT NULL CHECK (request_count >= 0),
+                PRIMARY KEY (quota_class, usage_date)
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_global_usage_daily_date
+            ON global_request_usage_daily(usage_date)
+            """
         )
 
         # ─── Вход на сайт по коду (вне Telegram Mini App) ──────────────────
@@ -227,33 +331,35 @@ async def init_db():
         await cleanup_expired_auth(conn=conn)
 
 
-async def _get_status(user_id: int) -> str | None:
+async def get_user_status(user_id: int) -> str | None:
     async with _pool.acquire() as conn:
         row = await conn.fetchrow("SELECT status FROM users WHERE user_id = $1", user_id)
         return row["status"] if row else None
 
 
 async def is_approved(user_id: int) -> bool:
-    return await _get_status(user_id) == "approved"
+    return await get_user_status(user_id) == "approved"
 
 
 async def is_pending(user_id: int) -> bool:
-    return await _get_status(user_id) == "pending"
+    return await get_user_status(user_id) == "pending"
 
 
 async def is_rejected(user_id: int) -> bool:
-    return await _get_status(user_id) == "rejected"
+    return await get_user_status(user_id) == "rejected"
 
 
-async def add_pending(user_id: int):
+async def add_pending(user_id: int) -> bool:
     async with _pool.acquire() as conn:
-        await conn.execute(
+        inserted = await conn.fetchval(
             """
             INSERT INTO users (user_id, status) VALUES ($1, 'pending')
             ON CONFLICT (user_id) DO NOTHING
+            RETURNING user_id
             """,
             user_id,
         )
+    return inserted is not None
 
 
 async def approve_user(user_id: int):
@@ -279,6 +385,13 @@ async def reject_user(user_id: int):
             )
             await conn.execute("DELETE FROM login_codes WHERE user_id = $1", user_id)
             await conn.execute("DELETE FROM web_sessions WHERE user_id = $1", user_id)
+            # Отзыв доступа должен останавливать и уже выполняющийся AI-запрос.
+            # Heartbeat активного обработчика увидит потерю аренды и отменит
+            # операцию до выдачи результата.
+            await conn.execute(
+                "DELETE FROM active_user_requests WHERE user_id = $1",
+                user_id,
+            )
 
 
 async def revoke_user(user_id: int):
@@ -305,6 +418,241 @@ async def get_all_rejected() -> list[int]:
 
 # ─── Статистика запросов ───────────────────────────────────────────────────────
 
+async def acquire_user_request(
+    user_id: int,
+    ttl_seconds: int = USER_REQUEST_LEASE_SECONDS,
+) -> str | None:
+    """Атомарно занимает единственный AI-слот пользователя.
+
+    Запись хранится в PostgreSQL, поэтому запрет работает между Telegram,
+    сайтом, процессами и несколькими экземплярами Render. Истёкшую аренду
+    можно безопасно заменить после аварийного завершения процесса.
+    """
+    if (
+        isinstance(user_id, bool)
+        or not isinstance(user_id, int)
+        or user_id <= 0
+        or user_id > 2**63 - 1
+    ):
+        raise ValueError("Некорректный user_id")
+    checked_ttl = max(60, min(int(ttl_seconds), 1800))
+    lease_token = secrets.token_urlsafe(32)
+    async with _pool.acquire() as conn:
+        acquired = await conn.fetchval(
+            """
+            INSERT INTO active_user_requests(user_id, lease_token, expires_at)
+            VALUES (
+                $1,
+                $2,
+                NOW() + ($3::integer * INTERVAL '1 second')
+            )
+            ON CONFLICT (user_id)
+            DO UPDATE SET
+                lease_token = EXCLUDED.lease_token,
+                expires_at = EXCLUDED.expires_at
+            WHERE active_user_requests.expires_at <= NOW()
+            RETURNING lease_token
+            """,
+            user_id,
+            lease_token,
+            checked_ttl,
+        )
+    return lease_token if acquired == lease_token else None
+
+
+async def release_user_request(user_id: int, lease_token: str) -> None:
+    """Освобождает только ту аренду, которую получил текущий обработчик."""
+    if not isinstance(lease_token, str) or not lease_token:
+        return
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            """
+            DELETE FROM active_user_requests
+            WHERE user_id = $1 AND lease_token = $2
+            """,
+            user_id,
+            lease_token,
+        )
+
+
+async def _renew_user_request(
+    user_id: int,
+    lease_token: str,
+    ttl_seconds: int,
+) -> bool:
+    """Продлевает только всё ещё принадлежащую обработчику аренду."""
+    async with _pool.acquire() as conn:
+        renewed = await conn.fetchval(
+            """
+            UPDATE active_user_requests
+            SET expires_at = NOW() + ($3::integer * INTERVAL '1 second')
+            WHERE user_id = $1 AND lease_token = $2
+            RETURNING user_id
+            """,
+            user_id,
+            lease_token,
+            ttl_seconds,
+        )
+    return renewed == user_id
+
+
+async def _is_user_request_owned(user_id: int, lease_token: str) -> bool:
+    """Проверяет владение и актуальный статус доступа перед выдачей ответа."""
+    async with _pool.acquire() as conn:
+        owned = await conn.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1
+                FROM active_user_requests AS active
+                JOIN users ON users.user_id = active.user_id
+                WHERE active.user_id = $1
+                  AND active.lease_token = $2
+                  AND active.expires_at > NOW()
+                  AND users.status = 'approved'
+            )
+            """,
+            user_id,
+            lease_token,
+        )
+    return bool(owned)
+
+
+async def _request_lease_heartbeat(
+    user_id: int,
+    lease_token: str,
+    ttl_seconds: int,
+    lost_event: asyncio.Event,
+) -> None:
+    # Частые короткие heartbeat-запросы дают время безопасно остановить
+    # обработчик до истечения аренды даже после временного сбоя БД.
+    interval = max(5, min(30, ttl_seconds // 3))
+    retry_delay = interval
+    valid_until = asyncio.get_running_loop().time() + ttl_seconds
+    while True:
+        await asyncio.sleep(retry_delay)
+        try:
+            renewed = await _renew_user_request(
+                user_id,
+                lease_token,
+                ttl_seconds,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Не удалось продлить аренду AI-запроса user_id=%s",
+                user_id,
+            )
+            remaining = valid_until - asyncio.get_running_loop().time()
+            if remaining <= 2:
+                lost_event.set()
+                return
+            # После ошибки повторяем быстрее, а не ждём полный обычный интервал.
+            retry_delay = max(1, min(5, int(remaining / 2)))
+            continue
+        if not renewed:
+            logger.error(
+                "Аренда AI-запроса потеряна до завершения user_id=%s",
+                user_id,
+            )
+            lost_event.set()
+            return
+        valid_until = asyncio.get_running_loop().time() + ttl_seconds
+        retry_delay = interval
+
+
+class RequestLeaseLostError(RuntimeError):
+    """Эксклюзивная аренда была потеряна до завершения AI-операции."""
+
+
+class UserRequestLease:
+    """Запускает операцию вместе с наблюдением за её PostgreSQL-арендой."""
+
+    def __init__(
+        self,
+        user_id: int,
+        lease_token: str,
+        lost_event: asyncio.Event,
+    ):
+        self.user_id = user_id
+        self.lease_token = lease_token
+        self._lost_event = lost_event
+
+    async def run(self, awaitable):
+        operation_task = asyncio.create_task(awaitable)
+        lost_task = asyncio.create_task(self._lost_event.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                {operation_task, lost_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if lost_task in done and self._lost_event.is_set():
+                operation_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await operation_task
+                raise RequestLeaseLostError(
+                    "Эксклюзивная аренда AI-запроса потеряна"
+                )
+            result = await operation_task
+            # Повторная проверка закрывает окно между последним heartbeat и
+            # выдачей ответа, в том числе при отзыве доступа администратором.
+            if (
+                self._lost_event.is_set()
+                or not await _is_user_request_owned(
+                    self.user_id,
+                    self.lease_token,
+                )
+            ):
+                raise RequestLeaseLostError(
+                    "Эксклюзивная аренда AI-запроса потеряна"
+                )
+            return result
+        finally:
+            lost_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await lost_task
+
+
+@asynccontextmanager
+async def user_request_slot(
+    user_id: int,
+    ttl_seconds: int = USER_REQUEST_LEASE_SECONDS,
+):
+    """Контекст единственного одновременно выполняемого AI-запроса."""
+    checked_ttl = max(60, min(int(ttl_seconds), 1800))
+    lease_token = await acquire_user_request(user_id, checked_ttl)
+    heartbeat_task = None
+    lease = None
+    if lease_token is not None:
+        lost_event = asyncio.Event()
+        lease = UserRequestLease(user_id, lease_token, lost_event)
+        heartbeat_task = asyncio.create_task(
+            _request_lease_heartbeat(
+                user_id,
+                lease_token,
+                checked_ttl,
+                lost_event,
+            )
+        )
+    try:
+        yield lease
+    finally:
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat_task
+        if lease_token is not None:
+            try:
+                await release_user_request(user_id, lease_token)
+            except Exception:
+                # Не маскируем успешный ответ ошибкой очистки: короткая аренда
+                # всё равно истечёт и будет удалена фоновым сборщиком.
+                logger.exception(
+                    "Не удалось освободить аренду AI-запроса user_id=%s",
+                    user_id,
+                )
+
+
 async def reserve_request(
     user_id: int,
     model: str,
@@ -322,49 +670,80 @@ async def reserve_request(
     if not safe_model:
         raise ValueError("Модель не задана")
     limit = max(1, min(int(default_daily_limit), 10000))
+    quota_class = "image" if safe_model == "image-generation" else "ai"
+    global_limit = (
+        GLOBAL_DAILY_IMAGE_LIMIT
+        if quota_class == "image"
+        else GLOBAL_DAILY_AI_LIMIT
+    )
 
     async with _pool.acquire() as conn:
-        async with conn.transaction():
-            configured_limit = await conn.fetchval(
-                """
-                SELECT daily_limit
-                FROM model_limits
-                WHERE user_id = $1 AND model = $2
-                """,
-                user_id,
-                safe_model,
-            )
-            effective_limit = int(configured_limit or limit)
-            reserved = await conn.fetchval(
-                """
-                INSERT INTO request_usage_daily (
-                    user_id, model, usage_date, request_count
+        try:
+            async with conn.transaction():
+                global_reserved = await conn.fetchval(
+                    """
+                    INSERT INTO global_request_usage_daily (
+                        quota_class, usage_date, request_count
+                    )
+                    VALUES (
+                        $1, (NOW() AT TIME ZONE 'UTC')::date, 1
+                    )
+                    ON CONFLICT (quota_class, usage_date)
+                    DO UPDATE SET request_count =
+                        global_request_usage_daily.request_count + 1
+                    WHERE global_request_usage_daily.request_count < $2
+                    RETURNING request_count
+                    """,
+                    quota_class,
+                    global_limit,
                 )
-                VALUES (
-                    $1, $2, (NOW() AT TIME ZONE 'UTC')::date, 1
+                if global_reserved is None:
+                    raise _QuotaExhausted
+
+                configured_limit = await conn.fetchval(
+                    """
+                    SELECT daily_limit
+                    FROM model_limits
+                    WHERE user_id = $1 AND model = $2
+                    """,
+                    user_id,
+                    safe_model,
                 )
-                ON CONFLICT (user_id, model, usage_date)
-                DO UPDATE SET request_count =
-                    request_usage_daily.request_count + 1
-                WHERE request_usage_daily.request_count < $3
-                RETURNING request_count
-                """,
-                user_id,
-                safe_model,
-                effective_limit,
-            )
-            if reserved is None:
-                return False
-            await conn.execute(
-                """
-                INSERT INTO request_stats (user_id, model, source)
-                VALUES ($1, $2, $3)
-                """,
-                user_id,
-                safe_model,
-                source,
-            )
-            return True
+                effective_limit = int(configured_limit or limit)
+                reserved = await conn.fetchval(
+                    """
+                    INSERT INTO request_usage_daily (
+                        user_id, model, usage_date, request_count
+                    )
+                    VALUES (
+                        $1, $2, (NOW() AT TIME ZONE 'UTC')::date, 1
+                    )
+                    ON CONFLICT (user_id, model, usage_date)
+                    DO UPDATE SET request_count =
+                        request_usage_daily.request_count + 1
+                    WHERE request_usage_daily.request_count < $3
+                    RETURNING request_count
+                    """,
+                    user_id,
+                    safe_model,
+                    effective_limit,
+                )
+                if reserved is None:
+                    raise _QuotaExhausted
+                await conn.execute(
+                    """
+                    INSERT INTO request_stats (user_id, model, source)
+                    VALUES ($1, $2, $3)
+                    """,
+                    user_id,
+                    safe_model,
+                    source,
+                )
+        except _QuotaExhausted:
+            # Исключение покидает transaction-блок, поэтому возможный первый
+            # инкремент тоже откатывается и не расходует другую квоту.
+            return False
+    return True
 
 
 async def set_user_model_limit(
@@ -397,6 +776,24 @@ async def set_user_model_limit(
             safe_model,
             checked_limit,
         )
+
+
+async def get_global_usage_today() -> dict[str, int]:
+    """Возвращает агрегированное потребление без данных запросов."""
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT quota_class, request_count
+            FROM global_request_usage_daily
+            WHERE usage_date = (NOW() AT TIME ZONE 'UTC')::date
+            """
+        )
+    usage = {"ai": 0, "image": 0}
+    for row in rows:
+        quota_class = str(row["quota_class"])
+        if quota_class in usage:
+            usage[quota_class] = max(0, int(row["request_count"]))
+    return usage
 
 
 async def get_user_model_limits(user_id: int) -> dict[str, int]:
@@ -507,10 +904,10 @@ async def get_all_users_with_stats(limit: int = 200, offset: int = 0) -> list[di
 _CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"  # без 0/O/1/I/L
 
 
-async def create_login_code(user_id: int, length: int = 8, ttl_seconds: int = 600) -> str:
+async def create_login_code(user_id: int, length: int = 10, ttl_seconds: int = 600) -> str:
     """Создаёт один активный код. В БД сохраняется только HMAC-SHA-256 кода."""
-    if length < 8:
-        raise ValueError("Код входа должен содержать минимум 8 символов")
+    if length < 10:
+        raise ValueError("Код входа должен содержать минимум 10 символов")
     ttl_seconds = max(60, min(int(ttl_seconds), 1800))
 
     async with _pool.acquire() as conn:
@@ -737,8 +1134,18 @@ async def cleanup_expired_auth(conn=None) -> None:
         await conn.execute("DELETE FROM login_codes WHERE expires_at < NOW()")
         await conn.execute("DELETE FROM web_sessions WHERE expires_at < NOW()")
         await conn.execute(
+            "DELETE FROM active_user_requests WHERE expires_at <= NOW()"
+        )
+        await conn.execute(
             """
             DELETE FROM request_usage_daily
+            WHERE usage_date < (NOW() AT TIME ZONE 'UTC')::date - $1::integer
+            """,
+            REQUEST_STATS_RETENTION_DAYS,
+        )
+        await conn.execute(
+            """
+            DELETE FROM global_request_usage_daily
             WHERE usage_date < (NOW() AT TIME ZONE 'UTC')::date - $1::integer
             """,
             REQUEST_STATS_RETENTION_DAYS,
