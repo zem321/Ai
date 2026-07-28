@@ -1,0 +1,9 @@
+Source: https://telegram.org/js/telegram-web-app.js?63
+Retrieved: 2026-07-28
+SHA-256: 3549138a7934039fe7dfd1291a4ee739bd2b705a614308053a8b08a87d85c451
+SRI: sha256-NUkTink0A5/n39EpGk7nOb0rcFphQwgFOosIqH2FxFE=
+
+The application serves this reviewed, hash-pinned copy from its own origin
+through a content-addressed URL. When updating it, review the upstream diff
+and update the URL, hash constants, SRI attribute, this metadata file, and
+the corresponding regression tests.
