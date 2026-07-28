@@ -584,7 +584,11 @@
     .input-card{max-width:670px; margin:0 auto;}
   }
 </style>
-<script src="https://telegram.org/js/telegram-web-app.js?63"></script>
+<script
+  src="/static/telegram-web-app.3549138a7934039f.js"
+  integrity="sha256-NUkTink0A5/n39EpGk7nOb0rcFphQwgFOosIqH2FxFE="
+  crossorigin="anonymous"
+></script>
 </head>
 <body>
 <div class="app">
@@ -801,16 +805,39 @@
     return headers;
   }
 
-  function grantAccess(isAdminFlag){
+  let serverCapabilities = {
+    ai: false,
+    file_uploads: false,
+    image_uploads: false
+  };
+
+  function grantAccess(isAdminFlag, capabilities){
     accessGranted = true;
     isAdmin = !!isAdminFlag;
+    if(capabilities && typeof capabilities === 'object'){
+      serverCapabilities = {
+        ai: capabilities.ai === true,
+        file_uploads: capabilities.file_uploads === true,
+        image_uploads: capabilities.image_uploads === true
+      };
+    }
     if(isAdmin) document.getElementById('adminPanelBlock').style.display = 'block';
     const logoutRow = document.getElementById('webLogoutRow');
     if(logoutRow) logoutRow.style.display = (AUTH_MODE === 'web') ? 'flex' : 'none';
     hideLoginScreen();
     document.getElementById('access-overlay')?.remove();
     const taEl = document.getElementById('ta');
-    if(taEl) taEl.disabled = false;
+    if(taEl) taEl.disabled = !serverCapabilities.ai;
+    const attachEl = document.getElementById('attachBtn');
+    if(attachEl){
+      attachEl.disabled = !serverCapabilities.ai || (
+        !serverCapabilities.file_uploads &&
+        !serverCapabilities.image_uploads
+      );
+    }
+    if(!serverCapabilities.ai){
+      showToast('AI-функции временно отключены');
+    }
     if(typeof toggleSend === 'function') toggleSend();
   }
 
@@ -832,7 +859,7 @@
         .then(r=>{if(!r.ok)return r.json().then(d=>{throw d;}).catch(()=>{throw {message:'Нет доступа.'};});return r.json();})
         .then(data=>{
           if(data&&data.ok===true){
-            grantAccess(data.is_admin);
+            grantAccess(data.is_admin, data.capabilities);
           }else{
             showAccessDenied((data&&data.message)||'Нет доступа. Откройте бота в Telegram и отправьте /start.');
           }
@@ -851,7 +878,7 @@
     fetch('/api/me',{headers:apiHeaders()})
       .then(r=>{if(!r.ok) throw new Error('expired'); return r.json();})
       .then(data=>{
-        if(data&&data.ok===true) grantAccess(data.is_admin);
+        if(data&&data.ok===true) grantAccess(data.is_admin, data.capabilities);
         else showLoginScreen();
       })
       .catch(()=>showLoginScreen());
@@ -900,8 +927,8 @@
       <div style="font-size:36px;">🔐</div>
       <div style="font-size:18px;font-weight:600;">Вход по коду</div>
       <div style="font-size:14px;color:var(--ink-soft);line-height:1.6;max-width:280px;">Откройте бота в Telegram, отправьте команду <b>/code</b> и введите полученный код здесь.</div>
-      <input id="loginCodeInput" maxlength="8" autocomplete="one-time-code" placeholder="XXXXXXXX"
-        style="text-align:center;letter-spacing:4px;font-size:20px;font-weight:600;text-transform:uppercase;padding:12px 16px;border-radius:14px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--ink);width:220px;outline:none;">
+      <input id="loginCodeInput" maxlength="10" autocomplete="one-time-code" placeholder="XXXXXXXXXX"
+        style="text-align:center;letter-spacing:4px;font-size:20px;font-weight:600;text-transform:uppercase;padding:12px 16px;border-radius:14px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--ink);width:250px;outline:none;">
       <div id="loginErr" style="font-size:13px;color:#E0524D;min-height:16px;">${errorMsg?x(errorMsg):''}</div>
       <button id="loginSubmitBtn" style="padding:11px 26px;border-radius:20px;border:none;background:var(--coral);color:var(--bg);font-size:14.5px;font-weight:600;cursor:pointer;">Войти</button>
     `;
@@ -934,7 +961,7 @@
       });
       const data=await r.json().catch(()=>({}));
       if(r.ok&&data.ok){
-        grantAccess(data.is_admin);
+        grantAccess(data.is_admin, data.capabilities);
       }else{
         if(err) err.textContent=data.message||'Неверный код.';
       }
@@ -1487,7 +1514,7 @@
     const input = document.getElementById('modalInput');
     setTimeout(() => { input.focus(); input.select(); }, 50);
     input.onkeydown = (e) => { if(e.key === 'Enter'){ doSave(); } };
-    function doSave(){ const v = input.value.trim(); closeModal(); if(v) onSave(v); }
+    function doSave(){ const v = input.value.trim().slice(0, 100); closeModal(); if(v) onSave(v); }
     document.getElementById('modalSave').onclick = doSave;
     document.getElementById('modalCancel').onclick = closeModal;
   }
@@ -1518,6 +1545,10 @@
   const CHATS_KEY = 'oracle_chats_v3_session';
   const ACTIVE_KEY = 'oracle_active_chat_v3_session';
   const CHAT_TTL_MS = 24 * 60 * 60 * 1000;
+  const MAX_STORED_CHATS = 50;
+  const MAX_CLIENT_HISTORY_ITEMS = 40;
+  const MAX_CLIENT_HISTORY_ITEM_CHARS = 10000;
+  const MAX_CLIENT_HISTORY_TOTAL_CHARS = 10000;
   const chatStore = sessionStorage;
   // Не оставляем переписку и вложения старой версии в постоянном хранилище.
   try{
@@ -1530,24 +1561,90 @@
   let currentChatId = null;
   let incognitoChat = null;
 
+  function isSafeChatId(value){
+    return typeof value === 'string' && /^c\d{10,16}$/.test(value);
+  }
+
+  function sanitizeClientHistory(value){
+    if(!Array.isArray(value)) return [];
+    const result = [];
+    let total = 0;
+    const source = value.slice(-MAX_CLIENT_HISTORY_ITEMS);
+    for(let i=source.length-1; i>=0; i--){
+      const item = source[i];
+      if(!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      if(item.role !== 'user' && item.role !== 'assistant') continue;
+      if(typeof item.content !== 'string') continue;
+      const remaining = MAX_CLIENT_HISTORY_TOTAL_CHARS - total;
+      if(remaining <= 0) break;
+      const content = item.content.slice(
+        0,
+        Math.min(MAX_CLIENT_HISTORY_ITEM_CHARS, remaining)
+      );
+      result.unshift({role:item.role, content});
+      total += content.length;
+    }
+    return result;
+  }
+
+  function sanitizeStoredChat(value){
+    if(!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const history = sanitizeClientHistory(value.history);
+    if(!history.length) return null;
+    const now = Date.now();
+    const createdRaw = Number(value.created);
+    const updatedRaw = Number(value.updated);
+    const created = Number.isFinite(createdRaw)
+      ? Math.max(0, Math.min(now, createdRaw))
+      : now;
+    const updated = Number.isFinite(updatedRaw)
+      ? Math.max(created, Math.min(now, updatedRaw))
+      : created;
+    return {
+      title: typeof value.title === 'string'
+        ? (value.title.slice(0, 100) || 'Новый разговор')
+        : 'Новый разговор',
+      history,
+      created,
+      updated,
+    };
+  }
+
   function loadChats(){
     try{
       const s = chatStore.getItem(CHATS_KEY);
       if(s){
         const parsed = JSON.parse(s);
-        const storedChats = parsed.chats || {};
-        chats = {};
-        for(const id of Object.keys(storedChats)){
-          const chat = storedChats[id];
-          if(chat && (chat.history || []).length){
-            const {draft, ...persistentChat} = chat;
-            chats[id] = persistentChat;
-          }
+        if(!parsed || typeof parsed !== 'object' || Array.isArray(parsed)){
+          throw new Error('invalid chat storage');
         }
-        chatOrder = (parsed.order || []).filter(id => chats[id]);
+        const storedChats = (
+          parsed.chats
+          && typeof parsed.chats === 'object'
+          && !Array.isArray(parsed.chats)
+        ) ? parsed.chats : {};
+        chats = {};
+        chatOrder = [];
+        const seen = new Set();
+        const storedOrder = Array.isArray(parsed.order) ? parsed.order : [];
+        for(const id of storedOrder.slice(0, MAX_STORED_CHATS)){
+          if(!isSafeChatId(id) || seen.has(id)) continue;
+          const chat = sanitizeStoredChat(storedChats[id]);
+          if(!chat) continue;
+          seen.add(id);
+          chats[id] = chat;
+          chatOrder.push(id);
+        }
         saveChats();
       }
-    }catch(e){}
+    }catch(e){
+      chats = {};
+      chatOrder = [];
+      try{
+        chatStore.removeItem(CHATS_KEY);
+        chatStore.removeItem(ACTIVE_KEY);
+      }catch(ignore){}
+    }
   }
   function saveChats(){
     try{
@@ -1561,12 +1658,13 @@
         // base64-картинок не копируется даже в sessionStorage.
         persistentChats[id] = {
           ...persistentChat,
-          history: (persistentChat.history || []).map(item => {
-            const {files, file_data, image_base64, ...safeItem} = item;
-            if(item.is_file) return {role:'assistant', content:'[Файл был доступен до перезагрузки вкладки]'};
-            if(item.is_image) return {role:'assistant', content:'[Изображение было доступно до перезагрузки вкладки]'};
-            return safeItem;
-          })
+          history: sanitizeClientHistory(
+            (persistentChat.history || []).map(item => {
+              if(item.is_file) return {role:'assistant', content:'[Файл был доступен до перезагрузки вкладки]'};
+              if(item.is_image) return {role:'assistant', content:'[Изображение было доступно до перезагрузки вкладки]'};
+              return {role:item.role, content:item.content};
+            })
+          )
         };
         persistentOrder.push(id);
       }
@@ -1665,7 +1763,7 @@
     function group(label, list){
       if(!list.length) return '';
       return `<div class="side-label">${label}</div>` + list.map(id => `
-        <div class="side-item${id===currentChatId?' active':''}" data-id="${id}">
+        <div class="side-item${id===currentChatId?' active':''}" data-id="${mdEscapeAttr(id)}">
           <span class="t">${x(chats[id].title)}</span>
         </div>`).join('');
     }
@@ -1842,7 +1940,7 @@
         if(m.is_file && m.file_data){
            appendBotFile(messages, m.file_data);
         } else if(m.is_image && m.image_base64) {
-           appendBotImage(messages, m.image_base64, m.content);
+           appendBotImage(messages, m.image_base64, m.content, m.image_mime);
         } else {
            messages.appendChild(buildAiBlock(m.content || ''));
         }
@@ -1855,22 +1953,34 @@
     const wrap = document.createElement('div');
     wrap.className = 'bubble-attachments';
     files.forEach(f => {
-      if(f.kind === 'image' && f.dataUrl){
+      const safeImageUrl = safeClientImageDataUrl(f.dataUrl);
+      if(f.kind === 'image' && safeImageUrl){
         const img = document.createElement('img');
-        img.className = 'bubble-img'; img.src = f.dataUrl; img.alt = f.name;
-        img.onclick = () => openLightbox(f.dataUrl);
+        img.className = 'bubble-img'; img.src = safeImageUrl; img.alt = String(f.name || '');
+        img.onclick = () => openLightbox(safeImageUrl);
         wrap.appendChild(img);
       } else {
         const chip = document.createElement('div');
         chip.className = 'bubble-file';
-        chip.innerHTML = `<div class="bubble-file-icon">📎</div><div class="bubble-file-name">${x(f.name)}</div>`;
+        const icon = document.createElement('div');
+        icon.className = 'bubble-file-icon';
+        icon.textContent = '📎';
+        const name = document.createElement('div');
+        name.className = 'bubble-file-name';
+        name.textContent = String(f.name || 'file');
+        chip.append(icon, name);
         wrap.appendChild(chip);
       }
     });
     return wrap;
   }
   
-  function openLightbox(url){ document.getElementById('lightboxImg').src = url; document.getElementById('lightbox').classList.add('show'); }
+  function openLightbox(url){
+    const safeUrl = safeClientImageDataUrl(url);
+    if(!safeUrl) return;
+    document.getElementById('lightboxImg').src = safeUrl;
+    document.getElementById('lightbox').classList.add('show');
+  }
   document.getElementById('lightbox').onclick = () => document.getElementById('lightbox').classList.remove('show');
 
   function buildAiBlock(text){
@@ -1966,21 +2076,46 @@
     URL.revokeObjectURL(url);
   }
 
-  function appendBotImage(msgEl, base64, caption) {
+  const GENERATED_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+  const GENERATED_IMAGE_MAX_B64_CHARS = 14 * 1024 * 1024;
+
+  function safeGeneratedImageRecord(base64, mime='image/png') {
+    const safeMime = typeof mime === 'string' ? mime.toLowerCase() : '';
+    if(
+      typeof base64 !== 'string' ||
+      !base64 ||
+      base64.length > GENERATED_IMAGE_MAX_B64_CHARS ||
+      base64.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(base64) ||
+      !GENERATED_IMAGE_MIMES.has(safeMime)
+    ) return null;
+    const extension = safeMime === 'image/jpeg' ? 'jpg' : safeMime.split('/')[1];
+    return {base64, mime: safeMime, extension};
+  }
+
+  function appendBotImage(msgEl, base64, caption, mime='image/png') {
+    const record = safeGeneratedImageRecord(base64, mime);
+    if(!record){
+      appendBotError(msgEl, 'Получено некорректное изображение.');
+      return;
+    }
     const container = document.createElement('div');
     container.className = 'ai-block';
-    
+
     window.__generatedImages = window.__generatedImages || {};
     const imgId = 'gen_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-    window.__generatedImages[imgId] = base64;
-    const imgUrl = `data:image/png;base64,${base64}`;
-    
-    container.innerHTML = `
-      <div class="generated-image-thumb" style="display:block;max-width:240px;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.14);cursor:pointer;-webkit-tap-highlight-color:transparent; margin-bottom: 8px;">
-        <img src="${imgUrl}" style="width:100%;display:block;" alt="">
-      </div>
-    `;
-    container.querySelector('.generated-image-thumb')?.addEventListener(
+    window.__generatedImages[imgId] = record;
+
+    const thumbnail = document.createElement('div');
+    thumbnail.className = 'generated-image-thumb';
+    thumbnail.style.cssText = 'display:block;max-width:240px;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.14);cursor:pointer;-webkit-tap-highlight-color:transparent;margin-bottom:8px;';
+    const image = document.createElement('img');
+    image.src = `data:${record.mime};base64,${record.base64}`;
+    image.style.cssText = 'width:100%;display:block;';
+    image.alt = '';
+    thumbnail.appendChild(image);
+    container.appendChild(thumbnail);
+    thumbnail.addEventListener(
       'click',
       () => openGeneratedImage(imgId)
     );
@@ -2003,14 +2138,15 @@
     return new Blob([bytes],{type});
   }
   async function saveGeneratedImage(id){
-    const base64=window.__generatedImages?.[id];
-    if(!base64)return;
-    const blob=b64ToBlob(base64,'image/png');
-    const file=new File([blob],'oracle-image.png',{type:'image/png'});
+    const record=window.__generatedImages?.[id];
+    if(!record)return;
+    const filename=`oracle-image.${record.extension}`;
+    const blob=b64ToBlob(record.base64,record.mime);
+    const file=new File([blob],filename,{type:record.mime});
 
     try{
       if(navigator.canShare && navigator.canShare({files:[file]}) && navigator.share){
-        await navigator.share({files:[file],title:'oracle-image.png'});
+        await navigator.share({files:[file],title:filename});
         return;
       }
     }catch(e){}
@@ -2018,7 +2154,7 @@
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
     a.href=url;
-    a.download='oracle-image.png';
+    a.download=filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2028,31 +2164,33 @@
     document.getElementById('generated-image-viewer')?.remove();
   }
   function openGeneratedImage(id){
-    const base64=window.__generatedImages?.[id];
-    if(!base64)return;
+    const record=window.__generatedImages?.[id];
+    if(!record)return;
     closeGeneratedImage();
-    const imgUrl=`data:image/png;base64,${base64}`;
     const viewer=document.createElement('div');
     viewer.id='generated-image-viewer';
     viewer.addEventListener('click', e => {
       if(e.target===viewer) closeGeneratedImage();
     });
     viewer.style.cssText='position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;';
-    viewer.innerHTML=`
-      <img src="${imgUrl}" style="max-width:94vw;max-height:78vh;border-radius:14px;display:block;object-fit:contain;box-shadow:0 10px 40px rgba(0,0,0,.35);" alt="">
-      <div style="display:flex;gap:10px;margin-top:16px;">
-        <button data-image-action="save" style="border:none;border-radius:999px;padding:11px 16px;background:#fff;color:#111;font:600 15px -apple-system,BlinkMacSystemFont,'Inter',sans-serif;">Сохранить</button>
-        <button data-image-action="close" style="border:none;border-radius:999px;padding:11px 16px;background:rgba(255,255,255,.18);color:#fff;font:600 15px -apple-system,BlinkMacSystemFont,'Inter',sans-serif;">Закрыть</button>
-      </div>
-    `;
-    viewer.querySelector('[data-image-action="save"]')?.addEventListener(
-      'click',
-      () => saveGeneratedImage(id)
-    );
-    viewer.querySelector('[data-image-action="close"]')?.addEventListener(
-      'click',
-      closeGeneratedImage
-    );
+    const image=document.createElement('img');
+    image.src=`data:${record.mime};base64,${record.base64}`;
+    image.style.cssText='max-width:94vw;max-height:78vh;border-radius:14px;display:block;object-fit:contain;box-shadow:0 10px 40px rgba(0,0,0,.35);';
+    image.alt='';
+    const controls=document.createElement('div');
+    controls.style.cssText='display:flex;gap:10px;margin-top:16px;';
+    const saveButton=document.createElement('button');
+    saveButton.type='button';
+    saveButton.textContent='Сохранить';
+    saveButton.style.cssText="border:none;border-radius:999px;padding:11px 16px;background:#fff;color:#111;font:600 15px -apple-system,BlinkMacSystemFont,'Inter',sans-serif;";
+    saveButton.addEventListener('click', () => saveGeneratedImage(id));
+    const closeButton=document.createElement('button');
+    closeButton.type='button';
+    closeButton.textContent='Закрыть';
+    closeButton.style.cssText="border:none;border-radius:999px;padding:11px 16px;background:rgba(255,255,255,.18);color:#fff;font:600 15px -apple-system,BlinkMacSystemFont,'Inter',sans-serif;";
+    closeButton.addEventListener('click', closeGeneratedImage);
+    controls.append(saveButton, closeButton);
+    viewer.append(image, controls);
     document.body.appendChild(viewer);
   }
 
@@ -2343,9 +2481,21 @@
   let pendingFiles = [];
   const MAX_UI_ATTACHMENTS = 4;
   const MAX_UI_FILE_BYTES = 6 * 1024 * 1024;
-  const SAFE_IMAGE_TYPES = new Set(['image/jpeg','image/png','image/webp','image/gif']);
-  function openFilePicker(){ document.getElementById('file-input').click(); }
+  const SAFE_IMAGE_TYPES = new Set(['image/jpeg','image/png','image/webp']);
+  function openFilePicker(){
+    if(!serverCapabilities.file_uploads && !serverCapabilities.image_uploads){
+      showToast('Загрузка вложений отключена');
+      return;
+    }
+    document.getElementById('file-input').click();
+  }
   function readAsDataURL(file){ return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
+  function safeClientImageDataUrl(value){
+    if(typeof value !== 'string' || value.length > (MAX_UI_FILE_BYTES * 4 / 3) + 4096) return '';
+    return /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(value)
+      ? value
+      : '';
+  }
   async function onFilesChosen(input){
     for(const file of Array.from(input.files)){
       if(pendingFiles.length >= MAX_UI_ATTACHMENTS){
@@ -2353,6 +2503,14 @@
         break;
       }
       const isImg = file.type.startsWith('image/');
+      if(isImg && !serverCapabilities.image_uploads){
+        showToast('Загрузка изображений отключена');
+        continue;
+      }
+      if(!isImg && !serverCapabilities.file_uploads){
+        showToast('Загрузка файлов отключена');
+        continue;
+      }
       if(file.size > MAX_UI_FILE_BYTES){
         showToast(`Файл «${file.name}» больше 6 МБ`);
         continue;
@@ -2362,7 +2520,16 @@
         continue;
       }
       const item = { name:file.name, type: file.type || '', kind:isImg?'image':'file', dataUrl:null };
-      try{ item.dataUrl = await readAsDataURL(file); }catch(e){}
+      try{
+        item.dataUrl = await readAsDataURL(file);
+      }catch(e){
+        showToast(`Не удалось прочитать файл «${file.name}»`);
+        continue;
+      }
+      if(isImg && !safeClientImageDataUrl(item.dataUrl)){
+        showToast(`Изображение «${file.name}» имеет некорректный формат`);
+        continue;
+      }
       pendingFiles.push(item);
     }
     input.value = ''; renderAttachStrip(); toggleSend();
@@ -2371,11 +2538,33 @@
   function clearPendingFiles(){ pendingFiles = []; renderAttachStrip(); }
   function renderAttachStrip(){
     const strip = document.getElementById('attachStrip');
-    strip.innerHTML = pendingFiles.map((f,i) => `<div class="attach-thumb">${
-      f.kind==='image' && f.dataUrl ? `<img src="${f.dataUrl}" alt="">` : `<div class="file-icon">📎<div class="file-name">${x(f.name)}</div></div>`
-    }<button class="rm-btn" data-remove-index="${i}">×</button></div>`).join('');
-    strip.querySelectorAll('[data-remove-index]').forEach(button => {
-      button.addEventListener('click', () => removePendingFile(Number(button.dataset.removeIndex)));
+    strip.replaceChildren();
+    pendingFiles.forEach((f, i) => {
+      const thumb = document.createElement('div');
+      thumb.className = 'attach-thumb';
+      const safeImageUrl = safeClientImageDataUrl(f.dataUrl);
+      if(f.kind === 'image' && safeImageUrl){
+        const image = document.createElement('img');
+        image.src = safeImageUrl;
+        image.alt = '';
+        thumb.appendChild(image);
+      }else{
+        const file = document.createElement('div');
+        file.className = 'file-icon';
+        file.appendChild(document.createTextNode('📎'));
+        const name = document.createElement('div');
+        name.className = 'file-name';
+        name.textContent = String(f.name || 'file');
+        file.appendChild(name);
+        thumb.appendChild(file);
+      }
+      const remove = document.createElement('button');
+      remove.className = 'rm-btn';
+      remove.type = 'button';
+      remove.textContent = '×';
+      remove.addEventListener('click', () => removePendingFile(i));
+      thumb.appendChild(remove);
+      strip.appendChild(thumb);
     });
     document.querySelector('.input-card')?.classList.toggle('has-attachments', pendingFiles.length > 0);
     if(pendingFiles.length) setComposerExpanded(true);
@@ -2655,7 +2844,10 @@
   }
   function scrollElementAboveInput(el, gap=18, delay=30){ setTimeout(() => scrollElementAboveInputNow(el, gap), delay); }
   window.addEventListener('resize', syncMessagesBottomInset);
-  function toggleSend(){ sendBtn.disabled = !(ta.value.trim() || pendingFiles.length); }
+  let requestInFlight = false;
+  function toggleSend(){
+    sendBtn.disabled = requestInFlight || !(ta.value.trim() || pendingFiles.length);
+  }
   function handleComposerInput(){
     setComposerExpanded(true);
     if(currentChatId && currentChatId !== 'incognito'){
@@ -2664,7 +2856,12 @@
     }
     toggleSend();
   }
-  function onKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); if(ta.value.trim() || pendingFiles.length) send(); } }
+  function onKey(e){
+    if(e.key==='Enter' && !e.shiftKey){
+      e.preventDefault();
+      if(!requestInFlight && (ta.value.trim() || pendingFiles.length)) send();
+    }
+  }
 
   function currentViewportScale(){
     const vv = window.visualViewport;
@@ -2707,10 +2904,16 @@
 
   async function send(){
     if(!accessGranted){showAccessDenied('Нет доступа. Откройте бота в Telegram и отправьте /start.');return;}
+    if(requestInFlight){
+      showToast('Дождитесь завершения текущего запроса');
+      return;
+    }
     
     const text = ta.value.trim();
     const files = pendingFiles.slice();
     if(!text && !files.length) return;
+    requestInFlight = true;
+    toggleSend();
     
     ta.value=''; resize(ta); clearPendingFiles(); toggleSend();
     ta.blur();
@@ -2760,7 +2963,7 @@
     scrollElementAboveInput(thinkBlock, 18);
 
     try{
-      const apiHistory = chat.history.slice(0, -1).map(h => ({role: h.role, content: h.content}));
+      const apiHistory = sanitizeClientHistory(chat.history.slice(0, -1));
 
       const resp=await fetch('/api/chat',{
         method:'POST',
@@ -2802,8 +3005,8 @@
         appendBotFile(messages, data.file);
         chat.history.push({role:'assistant', content:`[Файл отправлен: ${data.file.name}]`, is_file: true, file_data: data.file});
       } else if(data.intent==='image'){
-        appendBotImage(messages, data.image_base64, data.prompt);
-        chat.history.push({role:'assistant', content: data.prompt, is_image: true, image_base64: data.image_base64});
+        appendBotImage(messages, data.image_base64, data.prompt, data.image_mime);
+        chat.history.push({role:'assistant', content: data.prompt, is_image: true, image_base64: data.image_base64, image_mime: data.image_mime});
       } else {
         const reply=data.reply||'';
         appendBotTextAnimated(messages, reply);
@@ -2815,6 +3018,9 @@
     }catch(e){
       document.getElementById('tr')?.remove();
       appendBotError(messages,'Не удалось связаться с сервером. Проверь подключение.');
+    }finally{
+      requestInFlight = false;
+      toggleSend();
     }
   }
 
@@ -3067,7 +3273,7 @@
 
     if(isReload){
       const savedActive = chatStore.getItem(ACTIVE_KEY);
-      if(savedActive && chats[savedActive]){
+      if(isSafeChatId(savedActive) && chats[savedActive]){
         currentChatId = savedActive;
       } else if(chatOrder.length > 0){
         currentChatId = chatOrder[0];
