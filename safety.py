@@ -1361,7 +1361,9 @@ _MINOR_TARGET = re.compile(
 )
 _EXPLICIT_IMAGE_CONTENT = re.compile(
     r"\b(?:порнограф\w*|явн\w+\s+секс\w*|обнаженн\w+\s+генитал\w*|"
+    r"полностью\s+обнаж[её]нн\w*|видим\w+\s+генитал\w*|"
     r"sexually\s+explicit|pornograph\w*|hardcore\s+porn|explicit\s+sex|"
+    r"sexual\s+intercourse|explicit\s+sexual\s+acts?|fully\s+nude|"
     r"visible\s+genitals?)\b",
     re.IGNORECASE,
 )
@@ -1374,13 +1376,28 @@ _NONCONSENSUAL_INTIMATE_IMAGE = re.compile(
     r"non[- ]?consensual|revenge\s+porn)\b|"
     r"\b(?:intimate|sexual|nude|naked)\b.{0,80}\b"
     r"(?:fake|image|portrait)\b.{0,120}\b(?:did\s+not\s+consent|"
-    r"without\s+consent|non[- ]?consensual)\b)",
+    r"never\s+agreed|without\s+(?:consent|permission)|"
+    r"non[- ]?consensual)\b|"
+    r"\b(?:раздень\w*|сними\s+одежд\w*|undress\w*|remove\s+(?:her|his|"
+    r"their)\s+clothes)\b.{0,160}\b(?:согласи\w+\s+не\s+спрашива\w*|"
+    r"без\s+согласи\w*|never\s+agreed|without\s+(?:consent|permission)|"
+    r"did\s+not\s+consent)\b)",
+    re.IGNORECASE,
+)
+_SAFE_NONCONSENSUAL_IMAGE_CONTEXT = re.compile(
+    r"\b(?:против\s+(?:интимн\w+\s+)?дипфейк\w*|борьб\w+\s+с\s+"
+    r"(?:интимн\w+\s+)?дипфейк\w*|предотвращ\w*|профилактик\w*|"
+    r"защит\w+\s+от|awareness|prevention|prevent\w*|campaign\s+against|"
+    r"protect\w+\s+against|report\w+\s+abuse)\b",
     re.IGNORECASE,
 )
 _GRAPHIC_GORE_IMAGE = re.compile(
     r"\b(?:графическ\w+\s+насили\w*|расчленен\w*|выпотрошен\w*|"
-    r"оторванн\w+\s+конечност\w*|graphic\s+gore|dismember\w*|"
-    r"disembowel\w*|severed\s+limbs?)\b",
+    r"оторванн\w+\s+конечност\w*|разорванн\w+\s+тел\w*|"
+    r"выпавш\w+\s+внутренност\w*|graphic\s+gore|dismember\w*|"
+    r"disembowel\w*|severed\s+limbs?|torn[- ]open\s+bod\w*|"
+    r"bod\w*.{0,40}torn[- ]open|(?:exposed|spilling)\s+organs?|"
+    r"organs?\s+spilling\s+out)\b",
     re.IGNORECASE,
 )
 _EXTREMIST_PROPAGANDA_IMAGE = re.compile(
@@ -2577,6 +2594,28 @@ _RESOURCE_EXHAUSTION = re.compile(
     r".{0,100}(?:parallel|concurrent|many\s+clients?|requests?))\b",
     re.IGNORECASE | re.DOTALL,
 )
+_SERVICE_DISRUPTION = re.compile(
+    r"(?:\b(?:множеств\w*|больш\w+\s+количеств\w*|одновременн\w*|"
+    r"параллельн\w*)\b.{0,100}\b(?:подключени\w*|запрос\w*|клиент\w*)\b"
+    r".{0,180}\b(?:чуж\w+\s+)?(?:сервис\w*|сервер\w*|api|сайт\w*)\b"
+    r".{0,120}\b(?:переста\w+\s+отвеча\w*|недоступ\w*|отказ\w*|"
+    r"вывест\w+\s+из\s+стро\w*)\b|"
+    r"\b(?:скрипт\w*|программ\w*|утилит\w*)\b.{0,180}\b"
+    r"(?:одновременн\w*|параллельн\w*)\b.{0,80}\b"
+    r"(?:подключени\w*|запрос\w*)\b.{0,180}\b(?:переста\w+\s+"
+    r"отвеча\w*|недоступ\w*|вывест\w+\s+из\s+стро\w*)\b|"
+    r"\bисчерпа\w*\b.{0,80}\b(?:пул\w*\s+соединени\w*|лимит\w+\s+"
+    r"подключени\w*|ресурс\w+\s+(?:чуж\w+\s+)?сервер\w*)\b|"
+    r"\b(?:many|massive|parallel|concurrent)\b.{0,100}\b"
+    r"(?:requests?|connections?|clients?)\b.{0,180}\b(?:target\s+)?"
+    r"(?:api|service|server|website|site)\b.{0,120}\b(?:unavailable|"
+    r"offline|stop\w*\s+responding|service\s+failure)\b|"
+    r"\b(?:overwhelm\w*|exhaust\w*|saturat\w*)\b.{0,80}\b"
+    r"(?:target\s+)?(?:api|service|server|connection\s+pool)\b"
+    r".{0,160}\b(?:parallel|concurrent|many|requests?|connections?|"
+    r"clients?|unavailable|offline)\b)",
+    re.IGNORECASE | re.DOTALL,
+)
 _KEYSTROKE_CAPTURE = re.compile(
     r"\b(?:запис\w*|фиксир\w*|перехват\w*|собира\w*|"
     r"record\w*|captur\w*|logg\w*|observ\w*|monitor\w*)\b.{0,80}\b"
@@ -2586,13 +2625,17 @@ _KEYSTROKE_CAPTURE = re.compile(
     r"keyboard\s+(?:input|events?))\b.{0,80}\b"
     r"(?:запис\w*|фиксир\w*|перехват\w*|собира\w*|"
     r"record\w*|captur\w*|logg\w*|observ\w*|monitor\w*)\b|"
+    r"\b(?:запис\w*|перехват\w*|собира\w*|record\w*|captur\w*|"
+    r"logg\w*|monitor\w*)\b.{0,80}\b(?:пользовательск\w+\s+ввод\w*|"
+    r"user\s+input)\b|"
     r"\b(?:key\s*logg\w*|кей\s*логг\w*)\b",
     re.IGNORECASE | re.DOTALL,
 )
 _CREDENTIAL_DATA = re.compile(
     r"\b(?:парол\w*|уч[её]тн\w+\s+данн\w*|credential\w*|password\w*|"
     r"логин\w*|cookies?|куки|(?:session\s+)?tokens?|токен\w*|секрет\w*|"
-    r"secrets?|browser\s+data|"
+    r"secrets?|browser\s+data|login\s+data|одноразов\w+\s+код\w*|"
+    r"код\w+\s+подтверждени\w*|one[- ]time\s+codes?|otp\s+codes?|"
     r"данн\w+\s+браузер\w*|chrome|firefox|login\s+data)\b",
     re.IGNORECASE,
 )
@@ -2610,11 +2653,28 @@ _FILE_ENCRYPTION = re.compile(
     r"(?:зашифр\w*|encrypt\w*)\b",
     re.IGNORECASE | re.DOTALL,
 )
+_FILE_LOCKOUT = re.compile(
+    r"(?:\b(?:заблокир\w*|сдела\w*)\b.{0,100}\b(?:файл\w*|"
+    r"документ\w*|данн\w*)\b.{0,100}\b(?:недоступ\w*|нечитаем\w*)\b|"
+    r"\b(?:файл\w*|документ\w*|данн\w*)\b.{0,100}\b(?:недоступ\w*|"
+    r"заблокирован\w*)\b|"
+    r"\b(?:lock\w*|make\w*)\b.{0,100}\b(?:every|all|user\w*|personal)\b"
+    r".{0,60}\b(?:files?|documents?|data)\b.{0,100}\b(?:inaccessible|"
+    r"unreadable|locked)?\b)",
+    re.IGNORECASE | re.DOTALL,
+)
 _RANSOM_OR_DESTRUCTION = re.compile(
     r"\b(?:выкуп\w*|требовани\w+\s+оплат\w*|плат[её]ж\w*|"
     r"удален\w+\s+оригинал\w*|стер\w+\s+оригинал\w*|ransom\w*|"
-    r"payment\s+demand\w*|delete\w*\s+(?:the\s+)?original\w*)\b",
-    re.IGNORECASE,
+    r"payment\s+demand\w*|delete\w*\s+(?:the\s+)?original\w*|"
+    r"(?:восстанов\w*|верн\w+\s+доступ\w*|разблокир\w*)\b.{0,100}\b"
+    r"(?:после\s+(?:оплат\w*|перевод\w*)|до\s+(?:оплат\w*|"
+    r"перевод\w*))|(?:restore\w*|unlock\w*|return\s+access)\b"
+    r".{0,100}\b(?:after|until)\s+(?:payment|money\s+transfer)|"
+    r"(?:недоступ\w*|заблокирован\w*)\b.{0,80}\bдо\s+"
+    r"(?:оплат\w*|перевод\w+\s+ден\w*)|(?:inaccessible|locked)\b"
+    r".{0,80}\buntil\s+(?:payment|money\s+transfer))\b",
+    re.IGNORECASE | re.DOTALL,
 )
 _PERSISTENCE = re.compile(
     r"\b(?:автозагруз\w*|закреп\w*.{0,30}перезагруз\w*|"
@@ -2657,10 +2717,28 @@ _PHISHING_BEHAVIOR = re.compile(
     r"clone\w*.{0,40}(?:bank|login)|bank\s+impersonat\w*)\b",
     re.IGNORECASE | re.DOTALL,
 )
+_DECEPTIVE_CREDENTIAL_PAGE = re.compile(
+    r"(?:\b(?:поддельн\w*|имитаци\w*|копи\w*|двойник\w*|шаблон\w*|"
+    r"lookalike|convincing|fake|clone\w*|impersonat\w*)\b.{0,120}\b"
+    r"(?:страниц\w*|форм\w*|портал\w*|сайт\w*|page|form|portal|site)\b"
+    r".{0,220}\b(?:парол\w*|логин\w*|уч[её]тн\w+\s+данн\w*|"
+    r"одноразов\w+\s+код\w*|код\w+\s+подтверждени\w*|password\w*|"
+    r"credential\w*|login\s+data|one[- ]time\s+codes?|otp\s+codes?)\b|"
+    r"\b(?:account\s+verification|password\s+recovery|support|bank\w*|"
+    r"восстановлени\w+\s+доступ\w*|поддержк\w*|банк\w*)\b.{0,100}\b"
+    r"(?:страниц\w*|форм\w*|портал\w*|page|form|portal)\b.{0,220}\b"
+    r"(?:forward\w*|captur\w*|collect\w*|harvest\w*|собира\w*|"
+    r"пересыла\w*|перехват\w*)\b.{0,100}\b(?:submitted\s+)?"
+    r"(?:парол\w*|логин\w*|код\w*|password\w*|credential\w*|"
+    r"login\s+data|one[- ]time\s+codes?|otp\s+codes?)\b)",
+    re.IGNORECASE | re.DOTALL,
+)
 _SURVEILLANCE_CAPTURE = re.compile(
-    r"\b(?:снимк\w+\s+экрана|скриншот\w*|микрофон\w*|веб[- ]?камер\w*|"
+    r"\b(?:снимк\w+\s+экрана|снима\w+\s+экран\w*|скриншот\w*|"
+    r"пользовательск\w+\s+ввод\w*|микрофон\w*|веб[- ]?камер\w*|"
     r"буфер\w+\s+обмен\w*|геолокаци\w*|местоположени\w*|gps\b|"
-    r"screen\s*capture|screenshots?|microphone|webcam|clipboard|"
+    r"screen\s*capture|screen\s+record\w*|screenshots?|user\s+input|"
+    r"microphone|webcam|clipboard|"
     r"geo[- ]?location|live\s+location|location\s+tracking)\b",
     re.IGNORECASE,
 )
@@ -2726,6 +2804,22 @@ _WEAPON_BUILD_DETAIL = re.compile(
     r"components?|materials?|blueprint|dimensions?|mixture|proportions?|"
     r"remote\s+detonat\w*)\b",
     re.IGNORECASE,
+)
+_EUPHEMISTIC_WEAPON = re.compile(
+    r"(?:\b(?:самодельн\w*|homemade|improvised)\b.{0,100}\b"
+    r"(?:устройств\w*|механизм\w*|device|mechanism)\b.{0,180}\b"
+    r"(?:дистанцион\w+\s+(?:срабатыва\w*|подрыв\w*)|разрыва\w+\s+цель\w*|"
+    r"detonat\w*|remote\w+\s+(?:trigger|activation))\b|"
+    r"\b(?:част\w*|детал\w*|компонент\w*|размер\w*|parts?|components?|"
+    r"dimensions?)\b.{0,160}\b(?:самодельн\w*|homemade|improvised)\b"
+    r".{0,100}\b(?:устройств\w*|device)\b.{0,120}\b(?:детонир\w*|"
+    r"detonat\w*|remote\w+\s+trigger)\b|"
+    r"\b(?:собра\w*|сдела\w*|изготов\w*|build|make|assemble)\b"
+    r".{0,140}\b(?:пробива\w+\s+брон\w*|пробит\w+\s+брон\w*|"
+    r"armor[- ]piercing|"
+    r"penetrat\w+\s+armou?r)\b.{0,140}\b(?:материал\w*|детал\w*|"
+    r"components?|materials?)\b)",
+    re.IGNORECASE | re.DOTALL,
 )
 _POISON_OR_LETHAL_DOSE = re.compile(
     r"\b(?:отрав\w*|яд\w*|смертельн\w+\s+доз\w*|летальн\w+\s+доз\w*|"
@@ -2839,6 +2933,12 @@ _SELF_HARM_METHOD = re.compile(
     r"(?:самоубийств\w*|суицид\w*).{0,40}(?:способ\w*|метод\w*)|"
     r"(?:самоубийств\w*|суицид\w*).{0,12}план\w*|"
     r"безболезненн\w+\s+(?:способ\w*\s+уйти|вариант\w*\s+смерт\w*)|"
+    r"(?:безболезненн\w+\s+)?(?:навсегда\s+)?уснуть\b.{0,40}\b"
+    r"(?:не\s+проснут\w*|никогда\s+не\s+просып\w*)|"
+    r"(?:most\s+reliable\s+|painless\s+)?(?:way\s+to\s+)?"
+    r"go\s+to\s+sleep\b.{0,40}\bnever\s+wake\s+up|"
+    r"(?:окончательн\w+\s+)?прекрат\w+\s+(?:сво[её]\s+)?"
+    r"существован\w*|end\s+my\s+existence|"
     r"предсмертн\w+\s+письм\w*|"
     r"убить\s+себя|commit\s+suicide|kill\s+myself|painless\s+way\s+"
     r"to\s+die|end\s+my\s+life|suicide\s+note|self[- ]harm\s+method)\b",
@@ -2899,6 +2999,20 @@ _DRUG_PRODUCTION = re.compile(
     r"реагент\w*|температур\w*|synthesi[sz]\w*|cook\w*|manufactur\w*|"
     r"produc\w*|reagents?|temperature)\b",
     re.IGNORECASE,
+)
+_EUPHEMISTIC_DRUG_PRODUCTION = re.compile(
+    r"(?:\b(?:рецепт\w*|реагент\w*|температур\w*|свар\w*|"
+    r"приготов\w*|изготов\w*|recipe|reagents?|temperatures?|cook\w*|"
+    r"produc\w*)\b.{0,180}\b(?:кристаллическ\w+\s+стимулятор\w*|"
+    r"нелегальн\w+\s+(?:стимулятор\w*|порош\w*)|"
+    r"potent\s+street\s+stimulant\w*|illegal\s+(?:stimulant\w*|"
+    r"powder\w*))\b|"
+    r"\b(?:кристаллическ\w+\s+стимулятор\w*|нелегальн\w+\s+"
+    r"(?:стимулятор\w*|порош\w*)|potent\s+street\s+stimulant\w*|"
+    r"illegal\s+(?:stimulant\w*|powder\w*))\b.{0,180}\b(?:рецепт\w*|"
+    r"реагент\w*|температур\w*|свар\w*|приготов\w*|изготов\w*|"
+    r"recipe|reagents?|temperatures?|cook\w*|produc\w*)\b)",
+    re.IGNORECASE | re.DOTALL,
 )
 _FINANCIAL_CRIME = re.compile(
     r"\b(?:обналич\w+\s+чуж\w+\s+карт\w*|отмыва\w+\s+ден\w*|"
@@ -3089,7 +3203,7 @@ _SAFE_MINOR_CONTEXT = re.compile(
 _NON_OPERATIONAL_DISCLAIMER = re.compile(
     r"\b(?:без\s+(?:практическ\w+\s+|рабоч\w+\s+)?"
     r"(?:инструкц\w*|детал\w*|рецепт\w*|кода|команд\w*)"
-    r"(?:\s+по\s+(?:изготовлени\w*|синтез\w*|применени\w*))?|"
+    r"(?:\s+(?:по\s+)?(?:изготовлени\w*|синтез\w*|применени\w*))?|"
     r"только\s+на\s+высоком\s+уровне|"
     r"without\s+(?:practical\s+|actionable\s+|working\s+)?"
     r"(?:instructions?|details?|recipes?|code|commands?)|"
@@ -3182,7 +3296,10 @@ def _behavioral_rule_reason(
         return "policy_bypass"
     if _MULTILINGUAL_HIGH_RISK.search(text):
         return "malware"
-    if _NONCONSENSUAL_INTIMATE_IMAGE.search(text):
+    if (
+        _NONCONSENSUAL_INTIMATE_IMAGE.search(text)
+        and not _SAFE_NONCONSENSUAL_IMAGE_CONTEXT.search(text)
+    ):
         return "nonconsensual_intimate_image"
     cyber_safe = _is_clearly_safe_context("cyber_abuse", text)
     malicious_log_context = bool(
@@ -3259,9 +3376,15 @@ def _behavioral_rule_reason(
             and _NETWORK_TRANSFER.search(text)
         ):
             return "malware"
-        if _RESOURCE_EXHAUSTION.search(text):
+        if (
+            _RESOURCE_EXHAUSTION.search(text)
+            or _SERVICE_DISRUPTION.search(text)
+        ):
             return "service_abuse"
-        if _FILE_ENCRYPTION.search(text) and _RANSOM_OR_DESTRUCTION.search(text):
+        if (
+            _FILE_ENCRYPTION.search(text)
+            or _FILE_LOCKOUT.search(text)
+        ) and _RANSOM_OR_DESTRUCTION.search(text):
             return "malware"
         if _PERSISTENCE.search(text) and (
             _REMOTE_CONTROL.search(text)
@@ -3275,6 +3398,8 @@ def _behavioral_rule_reason(
             or _CREDENTIAL_COLLECTION.search(text)
             or re.search(r"\b(?:ссылк\w*|link\w*)\b", text, re.IGNORECASE)
         ):
+            return "credential_theft"
+        if _DECEPTIVE_CREDENTIAL_PAGE.search(text):
             return "credential_theft"
         if _SURVEILLANCE_CAPTURE.search(text) and (
             _NETWORK_TRANSFER.search(text)
@@ -3325,6 +3450,8 @@ def _behavioral_rule_reason(
 
     general_safe = _is_clearly_safe_context("physical_harm", text)
     if not general_safe:
+        if _EUPHEMISTIC_WEAPON.search(text):
+            return "weapons"
         if _WEAPON_TARGET.search(text) and (
             _WEAPON_BUILD_DETAIL.search(text)
             or _OPERATIONAL_DETAIL.search(text)
@@ -3376,7 +3503,11 @@ def _behavioral_rule_reason(
             return "biological_harm"
         if _VIOLENT_ATTACK_PLAN.search(text):
             return "physical_harm"
-        if _ILLEGAL_DRUG_TARGET.search(text) and _DRUG_PRODUCTION.search(text):
+        drug_scope = _NON_OPERATIONAL_DISCLAIMER.sub("", text)
+        if (
+            _ILLEGAL_DRUG_TARGET.search(drug_scope)
+            and _DRUG_PRODUCTION.search(drug_scope)
+        ) or _EUPHEMISTIC_DRUG_PRODUCTION.search(drug_scope):
             return "illegal_drugs"
         if _EXTREMIST_RECRUITMENT.search(text):
             return "extremist_recruitment"
@@ -3485,7 +3616,10 @@ def prohibited_image_reason(value: object) -> str | None:
     for text in _security_text_variants(value):
         if _EXPLICIT_IMAGE_CONTENT.search(text):
             return "explicit_sexual_image"
-        if _NONCONSENSUAL_INTIMATE_IMAGE.search(text):
+        if (
+            _NONCONSENSUAL_INTIMATE_IMAGE.search(text)
+            and not _SAFE_NONCONSENSUAL_IMAGE_CONTEXT.search(text)
+        ):
             return "nonconsensual_intimate_image"
         if _GRAPHIC_GORE_IMAGE.search(text):
             return "graphic_gore"
