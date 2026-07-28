@@ -15,7 +15,7 @@ async def _build_code_message(user_id: int) -> str:
     проверка оставлена как дополнительная подстраховка.
     """
     if not await db.is_approved(user_id):
-        return "У тебя пока нет доступа. Напиши /start и дождись одобрения."
+        return "У Вас пока нет доступа. Напишите /start и дождитесь одобрения."
 
     try:
         code = await db.create_login_code(user_id)
@@ -25,7 +25,7 @@ async def _build_code_message(user_id: int) -> str:
         "🔑 Код для входа на сайт (вне Telegram):\n\n"
         f"`{code}`\n\n"
         "Действует 10 минут и одноразовый. Предыдущий код уже отключён. "
-        "Никому не пересылай этот код."
+        "Никому не пересылайте этот код."
     )
 
 
