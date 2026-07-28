@@ -239,28 +239,26 @@ def _client_ip(request: web.Request) -> str:
         remote_ip = ipaddress.ip_address(remote)
     except ValueError:
         return remote
-    # Render пропускает весь входящий трафик через Cloudflare и свой
-    # load balancer, устанавливает реальный IP первым элементом XFF и
-    # добавляет CF-Ray. Без этой ветки все пользователи production делили
-    # bucket адреса прокси и один клиент мог заблокировать вход остальным.
+    # Render пропускает входящий трафик через Cloudflare. Первый элемент
+    # X-Forwarded-For недоверенный: Cloudflare сохраняет присланную клиентом
+    # цепочку и дописывает адрес, поэтому выбор chain[0] позволял менять
+    # rate-limit identity каждым запросом. CF-Connecting-IP — одиночный
+    # заголовок, который Cloudflare формирует из фактического соединения.
     cf_ray = request.headers.get("CF-Ray", "")
+    connecting_ip = request.headers.get("CF-Connecting-IP", "").strip()
     forwarded = request.headers.get("X-Forwarded-For", "")
     if (
         _RENDER_PROXY_HEADERS
         and re.fullmatch(r"[0-9a-f]{16,32}(?:-[a-z]{3})?", cf_ray, re.IGNORECASE)
-        and forwarded
-        and len(forwarded) <= 512
+        and connecting_ip
+        and len(connecting_ip) <= 64
     ):
         try:
-            chain = [
-                ipaddress.ip_address(value.strip())
-                for value in forwarded.split(",")
-                if value.strip()
-            ]
+            cloudflare_ip = ipaddress.ip_address(connecting_ip)
         except ValueError:
-            chain = []
-        if 0 < len(chain) <= 10:
-            return str(chain[0])
+            cloudflare_ip = None
+        if cloudflare_ip is not None:
+            return str(cloudflare_ip)
     if not any(remote_ip in network for network in _TRUSTED_PROXY_NETWORKS):
         return str(remote_ip)
     if not forwarded or len(forwarded) > 512:
@@ -1619,9 +1617,9 @@ async def api_auth_code(request: web.Request) -> web.Response:
 
 async def api_auth_logout(request: web.Request) -> web.Response:
     """POST /api/auth/logout — завершить текущую cookie-сессию."""
-    token = request.cookies.get(SESSION_COOKIE_NAME, "")
-    if token and not _same_origin(request):
+    if not _same_origin(request):
         return web.json_response({"error": "bad_origin"}, status=403)
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
     if token:
         await db.delete_web_session(token)
     response = web.json_response({"ok": True})
