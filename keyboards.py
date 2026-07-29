@@ -9,9 +9,14 @@ GEMINI_MODELS = {
 
 # Остальные модели (Other)
 OTHER_MODELS = {
-    "meta/llama-4-maverick-17b-128e-instruct": "Llama 4 Maverick 17B",
+    "moonshotai/kimi-k2.6": "Kimi K2.6",
     "z-ai/glm-5.2": "GLM-5.2",
+    "deepseek-ai/deepseek-v4-pro": "DeepSeek V4 Pro",
+    "deepseek-ai/deepseek-v4-flash": "DeepSeek V4 Flash",
+    "nvidia/nemotron-3-ultra-550b-a55b": "Nemotron 3 Ultra 550B",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
+    "nvidia/nemotron-3-nano-30b-a3b": "Nemotron 3 Nano 30B",
+    "meta/llama-3.3-70b-instruct": "Llama 3.3 70B",
 }
 
 MODELS = {**GEMINI_MODELS, **OTHER_MODELS}
