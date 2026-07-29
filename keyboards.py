@@ -17,6 +17,9 @@ OTHER_MODELS = {
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
     "nvidia/nemotron-3-nano-30b-a3b": "Nemotron 3 Nano 30B",
     "meta/llama-3.3-70b-instruct": "Llama 3.3 70B",
+    "meta/llama-3.2-11b-vision-instruct": "Llama 3.2 Vision 11B",
+    "meta/llama-3.2-90b-vision-instruct": "Llama 3.2 Vision 90B",
+    "stepfun-ai/step-3.7-flash": "Step 3.7 Flash",
 }
 
 MODELS = {**GEMINI_MODELS, **OTHER_MODELS}
