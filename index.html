@@ -51,6 +51,11 @@
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{height:100%; margin:0; background:var(--bg); color:var(--ink); overflow:hidden; -webkit-text-size-adjust:100%; text-size-adjust:100%;}
+  body.auth-pending .app{visibility:hidden;}
+  .auth-bootstrap{position:fixed; inset:0; z-index:10000; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:12px; padding:32px; text-align:center; background:var(--bg); color:var(--ink);}
+  .auth-bootstrap-icon{font-size:36px;}
+  .auth-bootstrap-text{font-size:14px; color:var(--ink-soft);}
   @media (prefers-reduced-motion: reduce){ *{animation-duration:.001ms !important; transition-duration:.001ms !important;} }
 
   .glass, .glass-strong{background:var(--glass-a-grad); backdrop-filter:var(--glass-a-blur); -webkit-backdrop-filter:var(--glass-a-blur);
@@ -590,7 +595,11 @@
   crossorigin="anonymous"
 ></script>
 </head>
-<body>
+<body class="auth-pending">
+<div class="auth-bootstrap" id="auth-bootstrap" role="status" aria-live="polite">
+  <div class="auth-bootstrap-icon">🔐</div>
+  <div class="auth-bootstrap-text">Проверяем вход…</div>
+</div>
 <div class="app">
 
   <aside class="sidebar" id="sidebar">
@@ -811,6 +820,11 @@
     image_uploads: false
   };
 
+  function finishAuthBootstrap(){
+    document.getElementById('auth-bootstrap')?.remove();
+    document.body.classList.remove('auth-pending');
+  }
+
   function grantAccess(isAdminFlag, capabilities){
     accessGranted = true;
     isAdmin = !!isAdminFlag;
@@ -839,6 +853,7 @@
       showToast('AI-функции временно отключены');
     }
     if(typeof toggleSend === 'function') toggleSend();
+    finishAuthBootstrap();
   }
 
   (function initAccess(){
@@ -899,12 +914,16 @@
     const sendBtnEl = document.getElementById('send-btn');
     if(taEl) taEl.disabled=true;
     if(sendBtnEl) sendBtnEl.disabled=true;
-    if(document.getElementById('access-overlay')) return;
+    if(document.getElementById('access-overlay')){
+      finishAuthBootstrap();
+      return;
+    }
     const overlay=document.createElement('div');
     overlay.id='access-overlay';
     overlay.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:32px;text-align:center;background:var(--bg);color:var(--ink)';
     overlay.innerHTML=`<div style="font-size:40px;">🚫</div><div style="font-size:18px;font-weight:600;">Доступ закрыт</div><div style="font-size:14px;color:var(--ink-soft);line-height:1.6;max-width:270px;">${x(message)}</div>`;
     document.body.appendChild(overlay);
+    finishAuthBootstrap();
   }
 
   function showLoginScreen(errorMsg){
@@ -917,6 +936,7 @@
     if(overlay){
       const err=overlay.querySelector('#loginErr');
       if(err) err.textContent=errorMsg||'';
+      finishAuthBootstrap();
       overlay.querySelector('#loginCodeInput')?.focus();
       return;
     }
@@ -933,6 +953,7 @@
       <button id="loginSubmitBtn" style="padding:11px 26px;border-radius:20px;border:none;background:var(--coral);color:var(--bg);font-size:14.5px;font-weight:600;cursor:pointer;">Войти</button>
     `;
     document.body.appendChild(overlay);
+    finishAuthBootstrap();
 
     const input=overlay.querySelector('#loginCodeInput');
     const btn=overlay.querySelector('#loginSubmitBtn');
