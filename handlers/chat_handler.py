@@ -166,6 +166,8 @@ FILE_RESEND_COMMANDS = [
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+NVIDIA_MODELS_URL = "https://integrate.api.nvidia.com/v1/models"
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
@@ -756,6 +758,40 @@ async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
             return str(content), debug
 
 
+async def get_nvidia_models() -> list[str]:
+    """Возвращает модели, реально доступные текущему NVIDIA_API_KEY."""
+    if not NVIDIA_API_KEY:
+        raise Exception("NVIDIA_API_KEY не задан.")
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Accept": "application/json",
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            NVIDIA_MODELS_URL,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=30),
+            allow_redirects=False,
+        ) as resp:
+            data = await _read_provider_json(resp, "NVIDIA")
+            if resp.status != 200:
+                logger.warning(
+                    "NVIDIA models API error status=%s",
+                    resp.status,
+                )
+                raise Exception("Не удалось получить список моделей NVIDIA.")
+
+    models = data.get("data")
+    if not isinstance(models, list):
+        raise Exception("NVIDIA вернул некорректный список моделей.")
+    model_ids = {
+        str(item["id"]).strip()
+        for item in models
+        if isinstance(item, dict) and item.get("id")
+    }
+    return sorted(model_id for model_id in model_ids if model_id)
+
+
 async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
     if not GEMINI_API_KEY:
         raise Exception("GEMINI_API_KEY не задан.")
@@ -919,6 +955,37 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
 
 
 # ------------------ Обработчики выбора моделей ------------------
+
+@router.message(F.text == "/nvidia_models")
+async def show_nvidia_models(message: Message):
+    if not message.from_user or message.from_user.id != ADMIN_ID:
+        return
+
+    status_msg = await message.answer("<i>Проверяю модели NVIDIA...</i>", parse_mode="HTML")
+    try:
+        model_ids = await get_nvidia_models()
+        if not model_ids:
+            await status_msg.edit_text("NVIDIA не вернул доступных моделей.")
+            return
+
+        await status_msg.edit_text(
+            f"<b>Доступно моделей NVIDIA: {len(model_ids)}</b>",
+            parse_mode="HTML",
+        )
+        for start in range(0, len(model_ids), 40):
+            chunk = model_ids[start:start + 40]
+            await message.answer(
+                "\n".join(f"<code>{escape(model_id)}</code>" for model_id in chunk),
+                parse_mode="HTML",
+            )
+    except Exception:
+        logger.exception("Ошибка получения списка моделей NVIDIA")
+        await status_msg.edit_text(
+            "<b>Не удалось получить список моделей NVIDIA.</b>\n\n"
+            "Посмотрите журнал Render — там будет HTTP-статус.",
+            parse_mode="HTML",
+        )
+
 
 @router.callback_query(F.data == "select_model")
 async def select_model_group(callback: CallbackQuery):
