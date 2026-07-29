@@ -17,6 +17,11 @@ OTHER_MODELS = {
 
 MODELS = {**GEMINI_MODELS, **OTHER_MODELS}
 
+# Llama Vision используется как визуальный адаптер для текстовых Other-моделей.
+# Модели из этого набора получают изображение напрямую.
+VISION_BRIDGE_MODEL = "meta/llama-3.2-11b-vision-instruct"
+DIRECT_VISION_MODELS = frozenset((*GEMINI_MODELS, VISION_BRIDGE_MODEL))
+
 # Человекочитаемые названия групп моделей
 GROUP_TITLES = {
     "gemini": "Gemini",
