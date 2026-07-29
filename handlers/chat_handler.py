@@ -121,7 +121,7 @@ DOCUMENT_PARSER_PATH = (
     Path(__file__).resolve().parent.parent / "document_parser_worker.py"
 )
 PROVIDER_RESPONSE_LIMIT = 2 * 1024 * 1024
-BOT_AI_TIMEOUT_SECONDS = max(15, min(int(os.getenv("BOT_AI_TIMEOUT_SECONDS", "120")), 300))
+BOT_AI_TIMEOUT_SECONDS = max(15, min(int(os.getenv("BOT_AI_TIMEOUT_SECONDS", "180")), 300))
 BOT_AI_CONCURRENCY = max(1, min(int(os.getenv("BOT_AI_CONCURRENCY", "4")), 16))
 DEFAULT_DAILY_AI_LIMIT = max(
     1, min(int(os.getenv("DEFAULT_DAILY_AI_LIMIT", "200")), 10000)
@@ -728,7 +728,7 @@ async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
     payload = {
         "model": model_id,
         "messages": messages,
-        "max_tokens": 2048,
+        "max_tokens": 8192,
         "temperature": 0.7,
     }
     logger.info("call_nvidia -> url=%s model=%s", NVIDIA_CHAT_URL, payload["model"])
@@ -737,7 +737,7 @@ async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
             NVIDIA_CHAT_URL,
             json=payload,
             headers=headers,
-            timeout=aiohttp.ClientTimeout(total=60),
+            timeout=aiohttp.ClientTimeout(total=BOT_AI_TIMEOUT_SECONDS),
             allow_redirects=False,
         ) as resp:
             data = await _read_provider_json(resp, "NVIDIA")
