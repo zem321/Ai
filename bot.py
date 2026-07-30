@@ -16,7 +16,7 @@ from handlers.start_handler import router as start_router
 from handlers.chat_handler import router as chat_router
 from handlers.image_handler import router as image_router
 from handlers.webapp_login_handler import router as webapp_login_router
-from handlers.vk_handler import run_vk_channel_from_environment
+from handlers.vk_handler import setup_vk_callback_routes
 from middleware import AccessMiddleware
 from webapp_api import api_rate_limit_middleware, setup_webapp_routes
 
@@ -160,7 +160,12 @@ async def security_headers(request: web.Request, handler):
     response.headers.setdefault(
         "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
     )
-    if request.path == "/" or request.path == "/app" or request.path.startswith("/api/"):
+    if (
+        request.path == "/"
+        or request.path == "/app"
+        or request.path.startswith("/api/")
+        or request.path == "/vk/callback"
+    ):
         response.headers.setdefault("Cache-Control", "no-store")
         response.headers.setdefault("Pragma", "no-cache")
     response.headers["Server"] = "web"
@@ -216,6 +221,7 @@ async def start_web() -> web.AppRunner:
     # Логика внутри переиспользует call_ai()/generate_image() из тех же
     # модулей, что использует и сам бот — никакой новой бизнес-логики.
     setup_webapp_routes(app)
+    setup_vk_callback_routes(app)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -252,17 +258,6 @@ async def set_commands(bot: Bot):
     ])
 
 
-def _vk_task_done(task: asyncio.Task) -> None:
-    if task.cancelled():
-        return
-    error = task.exception()
-    if error is not None:
-        logger.error(
-            "VK-канал остановлен; Telegram продолжает работать",
-            exc_info=(type(error), error, error.__traceback__),
-        )
-
-
 async def main():
     await db.init_db()
 
@@ -271,7 +266,6 @@ async def main():
 
     web_runner = await start_web()
     cleanup_task = asyncio.create_task(cleanup_auth_loop())
-    vk_task: asyncio.Task | None = None
 
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
@@ -288,21 +282,11 @@ async def main():
         await set_commands(bot)
         await bot.delete_webhook(drop_pending_updates=True)
 
-        vk_task = asyncio.create_task(
-            run_vk_channel_from_environment(),
-            name="vk-channel",
-        )
-        vk_task.add_done_callback(_vk_task_done)
-
         logger.info(
-            "Бот запущен: Telegram; VK подключается независимо"
+            "Бот запущен: Telegram; VK Callback API работает независимо"
         )
         await dp.start_polling(bot, skip_updates=True)
     finally:
-        if vk_task is not None:
-            vk_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await vk_task
         cleanup_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cleanup_task
