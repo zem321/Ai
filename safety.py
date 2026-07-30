@@ -1220,7 +1220,7 @@ _HIGH_RISK_PAYLOAD_PATTERNS = _compile_patterns(
         r"(?i)\b(?:invoke-mimikatz|lsadump::sam)\b",
         r"(?i)\bIEX\s*\(.{0,80}(?:DownloadString|Net\.WebClient)",
         r"(?i)\bpowershell(?:\.exe)?\b.{0,80}\s-(?:enc|encodedcommand)\b",
-        r"(?i)/bin/(?:ba)?sh\s+-i\s+>&\s*/dev/tcp/",
+        r"(?i)(?:/bin/)?(?:ba)?sh\s+-i\s+>&?\s*/dev/(?:tcp|udp)/",
         r"(?i)\bnc\s+-e\s+/bin/(?:ba)?sh\b",
         r"(?i)\b(?:pynput|keyboard)\b.{0,120}\b(?:on_press|keylogger|"
         r"log_keys)\b",
@@ -1281,6 +1281,18 @@ _HIGH_RISK_PAYLOAD_PATTERNS = _compile_patterns(
         r"(?:os\.(?:remove|unlink)|path\.unlink|shutil\.rmtree)\b",
         r"(?i):\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;?\s*:",
         r"(?i)\b(?:curl|wget)\b.{0,300}\|\s*(?:ba)?sh\b",
+        r"(?i)\b(?:curl|wget|invoke-webrequest|iwr|"
+        r"requests?\.(?:get|post)|fetch)\b.{0,240}\b"
+        r"(?:169\.254\.169\.254|100\.100\.100\.200|"
+        r"metadata\.google\.internal)\b",
+        r"(?i)\bselect\b.{0,240}\b(?:password(?:_hash)?|passwd|"
+        r"credentials?|api_?keys?|session_?tokens?)\b.{0,240}\b"
+        r"from\s+[`\"\[]?(?:users?|accounts?|credentials?|"
+        r"auth(?:entication)?(?:_data)?)\b",
+        r"(?i)\b(?:socket(?:\.socket)?|tcpclient)\b.{0,500}\b"
+        r"(?:send|sendall|write)\s*\(.{0,240}\b"
+        r"(?:GET|POST|HEAD)\s+/.{0,500}\b"
+        r"(?:sleep|time\.sleep)\s*\(",
     )
 )
 
@@ -2616,18 +2628,30 @@ _SERVICE_DISRUPTION = re.compile(
     r"clients?|unavailable|offline)\b)",
     re.IGNORECASE | re.DOTALL,
 )
+_SLOW_HTTP_EXHAUSTION = re.compile(
+    r"(?:\b(?:очень\s+)?медленн\w+\s+(?:http[- ]?)?"
+    r"(?:заголовк\w*|запрос\w*)\b.{0,180}\b"
+    r"(?:заня\w*|удерж\w*|исчерпа\w*|заблокир\w*)\b.{0,120}\b"
+    r"(?:все\s+)?соединени\w*\b.{0,160}\b(?:чуж\w+\s+)?"
+    r"(?:сервер\w*|сервис\w*|сайт\w*)\b|"
+    r"\b(?:slowloris|slow[- ]headers?|partial\s+http\s+requests?)\b"
+    r".{0,220}\b(?:occup\w*|hold\w*|exhaust\w*|keep\w*)\b"
+    r".{0,140}\b(?:connections?|sockets?)\b.{0,160}\b"
+    r"(?:target\s+)?(?:server|service|website|site)\b)",
+    re.IGNORECASE | re.DOTALL,
+)
 _KEYSTROKE_CAPTURE = re.compile(
-    r"\b(?:запис\w*|фиксир\w*|перехват\w*|собира\w*|"
+    r"\b(?:запис\w*|фиксир\w*|перехват\w*|собира\w*|наблюд\w*|"
     r"record\w*|captur\w*|logg\w*|observ\w*|monitor\w*)\b.{0,80}\b"
     r"(?:нажати\w+\s+клавиш\w*|клавиатур\w+|keystrokes?|"
     r"keyboard\s+(?:input|events?))\b|"
     r"\b(?:нажати\w+\s+клавиш\w*|клавиатур\w+|keystrokes?|"
     r"keyboard\s+(?:input|events?))\b.{0,80}\b"
-    r"(?:запис\w*|фиксир\w*|перехват\w*|собира\w*|"
+    r"(?:запис\w*|фиксир\w*|перехват\w*|собира\w*|наблюд\w*|"
     r"record\w*|captur\w*|logg\w*|observ\w*|monitor\w*)\b|"
-    r"\b(?:запис\w*|перехват\w*|собира\w*|record\w*|captur\w*|"
+    r"\b(?:запис\w*|перехват\w*|собира\w*|наблюд\w*|record\w*|captur\w*|"
     r"logg\w*|monitor\w*)\b.{0,80}\b(?:пользовательск\w+\s+ввод\w*|"
-    r"user\s+input)\b|"
+    r"ввод\w*\s+пользовател\w*|user\s+input)\b|"
     r"\b(?:key\s*logg\w*|кей\s*логг\w*)\b",
     re.IGNORECASE | re.DOTALL,
 )
@@ -2756,6 +2780,33 @@ _EXPLOIT_IMPACT = re.compile(
     r"обход\w+\s+аутентификац\w*|dump\w+(?:\s+the)?\s+(?:database|"
     r"table)|gain\s+access|bypass\s+authentication|working\s+chain)\b",
     re.IGNORECASE,
+)
+_SQL_CREDENTIAL_EXFIL = re.compile(
+    r"(?:\b(?:union\s+select|information_schema|sql[- ]?инъекц\w*|"
+    r"sql\s+injection)\b.{0,260}\b(?:парол\w*|логин\w*|"
+    r"уч[её]тн\w+\s+данн\w*|password(?:_hash)?|credentials?|"
+    r"session_?tokens?|users?)\b.{0,220}\b(?:чуж\w+\s+баз\w*|"
+    r"вытащ\w*|извлеч\w*|выгруз\w*|дамп\w*|украд\w*|dump\w*|"
+    r"extract\w*|exfiltrat\w*|steal\w*)\b|"
+    r"\b(?:вытащ\w*|извлеч\w*|выгруз\w*|дамп\w*|украд\w*|dump\w*|"
+    r"extract\w*|exfiltrat\w*|steal\w*)\b.{0,220}\b"
+    r"(?:парол\w*|логин\w*|password(?:_hash)?|credentials?|"
+    r"session_?tokens?)\b.{0,260}\b(?:union\s+select|"
+    r"information_schema|sql[- ]?инъекц\w*|sql\s+injection)\b)",
+    re.IGNORECASE | re.DOTALL,
+)
+_CLOUD_METADATA_ABUSE = re.compile(
+    r"(?:\b(?:ssrf|server[- ]side\s+request\s+forgery|"
+    r"через\s+(?:url[- ]?параметр|параметр\w*\s+url)|"
+    r"подмен\w+\s+url)\b.{0,240}\b(?:169\.254\.169\.254|"
+    r"100\.100\.100\.200|metadata\.google\.internal|"
+    r"/latest/meta-data/|/computeMetadata/v1/)\b|"
+    r"\b(?:169\.254\.169\.254|100\.100\.100\.200|"
+    r"metadata\.google\.internal|/latest/meta-data/|"
+    r"/computeMetadata/v1/)\b.{0,240}\b(?:iam/security-credentials|"
+    r"service-accounts?|instance\s+identity|токен\w*|"
+    r"уч[её]тн\w+\s+данн\w*|credentials?)\b)",
+    re.IGNORECASE | re.DOTALL,
 )
 _ACCESS_BYPASS = re.compile(
     r"\b(?:вскры\w+\s+зам\w*|отмычк\w*|чуж\w+\s+(?:карт\w*|"
@@ -3321,6 +3372,12 @@ def _behavioral_rule_reason(
         return "unauthorized_access"
 
     if not cyber_safe:
+        if _CLOUD_METADATA_ABUSE.search(text):
+            return "unauthorized_access"
+        if _SQL_CREDENTIAL_EXFIL.search(text):
+            return "credential_theft"
+        if _SLOW_HTTP_EXHAUSTION.search(text):
+            return "service_abuse"
         if _CLIPBOARD_HIJACK.search(text):
             return "credential_theft"
         if _PAYMENT_REDIRECTION.search(text):
