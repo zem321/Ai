@@ -83,7 +83,7 @@ SYSTEM_PROMPT = (
     "- При запрещённом запросе кратко откажись и предложи безопасную "
     "защитную альтернативу.\n\n"
     "ВАЖНО ПРО ФАЙЛЫ:\n"
-    "- Ты работаешь в Telegram-боте, который УМЕЕТ отправлять файлы пользователю. "
+    "- Ты работаешь в боте для Telegram и VK, который УМЕЕТ отправлять файлы пользователю. "
     "Никогда не пиши, что ты не можешь создать/отправить файл.\n"
     "- Если пользователь просит сделать файл, сгенерировать код, таблицу, документ и т.п. - "
     "просто выдай ПОЛНОЕ содержимое файла, без лишних комментариев до и после. "
@@ -590,65 +590,86 @@ async def call_ai_with_telegram_image(
 ) -> tuple[str, dict]:
     """Держит число загруженных в память изображений под общим лимитом."""
     async with _attachment_semaphore:
-        image_data_url = await telegram_file_to_data_url(
-            message=message,
-            file_id=file_id,
-            mime_type=declared_mime,
+        image_bytes = await telegram_file_to_bytes(
+            message,
+            file_id,
+            max_bytes=MAX_IMAGE_BYTES,
         )
-        async with _bot_ai_semaphore:
-            if model_accepts_images(model_id):
-                user_content = make_vision_content(
-                    prompt=caption,
-                    image_data_url=image_data_url,
-                )
-                messages = (
-                    [{"role": "system", "content": SYSTEM_PROMPT}]
-                    + trim_history(history)
-                    + [{"role": "user", "content": user_content}]
-                )
-                reply, debug = await asyncio.wait_for(
-                    call_ai(model_id, messages),
-                    timeout=BOT_AI_TIMEOUT_SECONDS,
-                )
-                debug["_image_history_content"] = (
-                    f"[Фото] {(caption or '').strip()}".strip()
-                )
-                return reply, debug
+        return await call_ai_with_image_bytes(
+            image_bytes=image_bytes,
+            declared_mime=declared_mime,
+            caption=caption,
+            history=history,
+            model_id=model_id,
+        )
 
-            bridge_messages = [
-                {"role": "system", "content": VISION_BRIDGE_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": make_vision_content(
-                        prompt=make_vision_bridge_prompt(caption),
-                        image_data_url=image_data_url,
-                    ),
-                },
-            ]
-            description, bridge_debug = await asyncio.wait_for(
-                call_ai(VISION_BRIDGE_MODEL, bridge_messages),
-                timeout=BOT_AI_TIMEOUT_SECONDS,
-            )
-            if not description.strip():
-                raise Exception("Llama Vision не смогла описать изображение.")
 
-            text_model_prompt = make_text_model_image_prompt(
-                caption=caption,
-                description=description,
+async def call_ai_with_image_bytes(
+    image_bytes: bytes,
+    declared_mime: str | None,
+    caption: str,
+    history: list,
+    model_id: str,
+) -> tuple[str, dict]:
+    """Общий безопасный vision-путь для Telegram, VK и HTTP-интерфейса."""
+    image_data_url = image_bytes_to_data_url(
+        image_bytes=image_bytes,
+        declared_mime=declared_mime,
+    )
+    async with _bot_ai_semaphore:
+        if model_accepts_images(model_id):
+            user_content = make_vision_content(
+                prompt=caption,
+                image_data_url=image_data_url,
             )
-            text_messages = (
+            messages = (
                 [{"role": "system", "content": SYSTEM_PROMPT}]
                 + trim_history(history)
-                + [{"role": "user", "content": text_model_prompt}]
+                + [{"role": "user", "content": user_content}]
             )
             reply, debug = await asyncio.wait_for(
-                call_ai(model_id, text_messages),
+                call_ai(model_id, messages),
                 timeout=BOT_AI_TIMEOUT_SECONDS,
             )
-            debug["vision_bridge_model"] = VISION_BRIDGE_MODEL
-            debug["vision_provider_model"] = bridge_debug.get("provider_model")
-            debug["_image_history_content"] = text_model_prompt
+            debug["_image_history_content"] = (
+                f"[Фото] {(caption or '').strip()}".strip()
+            )
             return reply, debug
+
+        bridge_messages = [
+            {"role": "system", "content": VISION_BRIDGE_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": make_vision_content(
+                    prompt=make_vision_bridge_prompt(caption),
+                    image_data_url=image_data_url,
+                ),
+            },
+        ]
+        description, bridge_debug = await asyncio.wait_for(
+            call_ai(VISION_BRIDGE_MODEL, bridge_messages),
+            timeout=BOT_AI_TIMEOUT_SECONDS,
+        )
+        if not description.strip():
+            raise Exception("Llama Vision не смогла описать изображение.")
+
+        text_model_prompt = make_text_model_image_prompt(
+            caption=caption,
+            description=description,
+        )
+        text_messages = (
+            [{"role": "system", "content": SYSTEM_PROMPT}]
+            + trim_history(history)
+            + [{"role": "user", "content": text_model_prompt}]
+        )
+        reply, debug = await asyncio.wait_for(
+            call_ai(model_id, text_messages),
+            timeout=BOT_AI_TIMEOUT_SECONDS,
+        )
+        debug["vision_bridge_model"] = VISION_BRIDGE_MODEL
+        debug["vision_provider_model"] = bridge_debug.get("provider_model")
+        debug["_image_history_content"] = text_model_prompt
+        return reply, debug
 
 
 def extract_text_isolated(
