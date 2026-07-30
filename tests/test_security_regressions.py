@@ -1,10 +1,11 @@
 import importlib
+import json
 import os
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import database as db
 from safety import (
@@ -12,6 +13,8 @@ from safety import (
     prohibited_output_reason,
     prohibited_request_reason,
 )
+
+STRONG_CALLBACK_SECRET = "C8Fv4gJ2pQ7mN1xR6tY9uK3wD5sH0aZbL_eP-oI"
 
 
 class ContentSafetyRegressionTests(unittest.TestCase):
@@ -413,39 +416,41 @@ class VKChannelRegressionTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     self.vk_handler._validated_https_url(url, allowed)
 
-    def test_vk_long_poll_url_rejects_embedded_query(self):
+    def test_vk_callback_secrets_are_required_and_strict(self):
+        environment = {
+            "VK_ENABLED": "1",
+            "VK_GROUP_TOKEN": "t" * 64,
+            "VK_GROUP_ID": "123",
+            "VK_ADMIN_ID": "456",
+            "VK_API_VERSION": "5.199",
+            "VK_CALLBACK_SECRET": STRONG_CALLBACK_SECRET,
+            "VK_CALLBACK_CONFIRMATION_CODE": "confirm_123",
+        }
+        with patch.dict(os.environ, environment, clear=False):
+            config = self.vk_handler.VKConfig.from_environment()
+        self.assertEqual(config.callback_secret, STRONG_CALLBACK_SECRET)
         self.assertEqual(
-            self.vk_handler._validated_https_url(
-                "https://lp.vk.com/wh123",
-                self.vk_handler._VK_LONG_POLL_HOSTS,
-                allow_query=False,
-            ),
-            "https://lp.vk.com/wh123",
+            config.callback_confirmation_code,
+            "confirm_123",
         )
-        with self.assertRaises(RuntimeError):
-            self.vk_handler._validated_https_url(
-                "https://lp.vk.com/wh123?key=attacker",
-                self.vk_handler._VK_LONG_POLL_HOSTS,
-                allow_query=False,
-            )
 
-    def test_vk_long_poll_key_and_ts_are_strict(self):
-        self.assertEqual(
-            self.vk_handler._validated_long_poll_key("a" * 32),
-            "a" * 32,
-        )
-        self.assertEqual(
-            self.vk_handler._validated_long_poll_ts("123456789"),
-            "123456789",
-        )
-        for value in ("short", "a" * 15 + "&", "a" * 15 + "\n"):
-            with self.subTest(key=value):
-                with self.assertRaises(RuntimeError):
-                    self.vk_handler._validated_long_poll_key(value)
-        for value in ("", "-1", "1&key=bad", True, object()):
-            with self.subTest(ts=value):
-                with self.assertRaises(RuntimeError):
-                    self.vk_handler._validated_long_poll_ts(value)
+        for bad_secret in (
+            "short",
+            "x" * 31,
+            "x" * 32,
+            "x" * 51,
+            "x" * 31 + " ",
+            "0123456789abcdef" * 2,
+            "changeMe_CallbackSecret_1234567890",
+        ):
+            with self.subTest(secret=bad_secret):
+                environment["VK_CALLBACK_SECRET"] = bad_secret
+                with patch.dict(os.environ, environment, clear=False):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "VK_CALLBACK_SECRET",
+                    ):
+                        self.vk_handler.VKConfig.from_environment()
 
     def test_vk_rejects_replayed_and_stale_events(self):
         config = self.vk_handler.VKConfig(
@@ -468,6 +473,12 @@ class VKChannelRegressionTests(unittest.TestCase):
         )
         self.assertFalse(
             bot._accept_fresh_event_once(update, current_message)
+        )
+        self.assertFalse(
+            bot._accept_fresh_event_once(
+                {"event_id": "different-event-id"},
+                current_message,
+            )
         )
 
         stale_message = {
@@ -512,19 +523,25 @@ class VKChannelRegressionTests(unittest.TestCase):
         )
 
     def test_telegram_startup_is_not_blocked_by_vk_initialization(self):
-        bot_path = Path(__file__).with_name("bot.py")
+        project_root = Path(__file__).resolve().parents[1]
+        bot_path = project_root / "bot.py"
         if not bot_path.exists():
-            bot_path = Path(__file__).with_name("bot 8.py")
+            bot_path = project_root / "bot 8.py"
         source = bot_path.read_text(encoding="utf-8")
         self.assertIn(
-            "asyncio.create_task(\n"
-            "            run_vk_channel_from_environment()",
+            "setup_vk_callback_routes(app)",
             source,
         )
         self.assertNotIn(
             "await create_vk_bot_from_environment()",
             source,
         )
+        self.assertNotIn("run_vk_channel_from_environment", source)
+
+    def test_long_poll_transport_is_not_present(self):
+        source = Path(self.vk_handler.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("groups.getLongPollServer", source)
+        self.assertNotIn("groups.getLongPollSettings", source)
 
 
 class VKChannelAsyncRegressionTests(unittest.IsolatedAsyncioTestCase):
@@ -542,11 +559,85 @@ class VKChannelAsyncRegressionTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    def _channel(self):
+        return self.vk_handler.VKCallbackChannel(
+            self.vk_handler.VKConfig(
+                token="x" * 64,
+                group_id=123,
+                admin_id=456,
+                api_version="5.199",
+                callback_secret=STRONG_CALLBACK_SECRET,
+                callback_confirmation_code="confirm_123",
+            )
+        )
+
+    @staticmethod
+    def _request(payload, *, content_type="application/json"):
+        raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+        class FakeContent:
+            async def _iterate(self):
+                yield raw
+
+            def iter_chunked(self, _):
+                return self._iterate()
+
+        return SimpleNamespace(
+            query_string="",
+            headers={},
+            content_type=content_type,
+            content_length=len(raw),
+            content=FakeContent(),
+        )
+
     async def test_vk_user_id_must_match_official_api_response(self):
         bot = self._bot()
         bot.api = AsyncMock(return_value=[{"id": 999}])
         self.assertFalse(await bot._verify_vk_user_id(456))
         bot.api.assert_awaited_once_with("users.get", user_ids="456")
+
+    async def test_vk_startup_checks_minimal_token_permissions(self):
+        bot = self._bot()
+        bot.api = AsyncMock(
+            side_effect=[
+                {"groups": [{"id": 123}]},
+                {
+                    "mask": 1,
+                    "permissions": [
+                        {"name": "messages", "setting": 4096},
+                        {"name": "photos", "setting": 4},
+                        {"name": "docs", "setting": 131072},
+                    ],
+                },
+                [{"id": 456}],
+            ]
+        )
+        await bot._verify_group_identity_and_permissions()
+        self.assertEqual(
+            [call.args[0] for call in bot.api.await_args_list],
+            [
+                "groups.getById",
+                "groups.getTokenPermissions",
+                "users.get",
+            ],
+        )
+
+    async def test_vk_startup_rejects_missing_message_permission(self):
+        bot = self._bot()
+        bot.api = AsyncMock(
+            side_effect=[
+                {"groups": [{"id": 123}]},
+                {
+                    "mask": 1,
+                    "permissions": [
+                        {"name": "photos", "setting": 4},
+                        {"name": "docs", "setting": 131072},
+                    ],
+                },
+            ]
+        )
+        with self.assertRaisesRegex(RuntimeError, "messages"):
+            await bot._verify_group_identity_and_permissions()
 
     async def test_verified_vk_user_id_is_cached_briefly(self):
         bot = self._bot()
@@ -555,12 +646,339 @@ class VKChannelAsyncRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await bot._verify_vk_user_id(456))
         bot.api.assert_awaited_once_with("users.get", user_ids="456")
 
+    async def test_callback_uses_only_message_refetched_from_official_vk_api(self):
+        bot = self._bot()
+        now = int(time.time())
+        callback_update = {
+            "type": "message_new",
+            "group_id": 123,
+            "event_id": "event_verified",
+            "v": "5.199",
+            "object": {
+                "message": {
+                    "id": 10,
+                    "conversation_message_id": 20,
+                    "date": now,
+                    "from_id": 456,
+                    "peer_id": 456,
+                    "text": "подменённая команда",
+                    "out": 0,
+                }
+            },
+        }
+        official_message = {
+            "id": 10,
+            "conversation_message_id": 20,
+            "date": now,
+            "from_id": 456,
+            "peer_id": 456,
+            "text": "настоящее сообщение",
+            "out": 0,
+        }
+        bot.api = AsyncMock(
+            return_value={"count": 1, "items": [official_message]}
+        )
+
+        verified, identity = await bot.verify_callback_update(
+            callback_update
+        )
+
+        self.assertEqual(
+            verified["object"]["message"]["text"],
+            "настоящее сообщение",
+        )
+        self.assertEqual(identity, (123, 456, 20, 10))
+        bot.api.assert_awaited_once_with(
+            "messages.getByConversationMessageId",
+            peer_id=456,
+            conversation_message_ids="20",
+            group_id=123,
+            extended=0,
+        )
+
+    async def test_callback_rejects_user_id_not_matching_official_message(self):
+        bot = self._bot()
+        now = int(time.time())
+        callback_update = {
+            "type": "message_new",
+            "group_id": 123,
+            "event_id": "event_spoofed_user",
+            "v": "5.199",
+            "object": {
+                "message": {
+                    "id": 10,
+                    "conversation_message_id": 20,
+                    "date": now,
+                    "from_id": 456,
+                    "peer_id": 456,
+                    "out": 0,
+                }
+            },
+        }
+        bot.api = AsyncMock(
+            return_value={
+                "count": 1,
+                "items": [
+                    {
+                        "id": 10,
+                        "conversation_message_id": 20,
+                        "date": now,
+                        "from_id": 999,
+                        "peer_id": 999,
+                        "out": 0,
+                    }
+                ],
+            }
+        )
+
+        with self.assertRaises(
+            self.vk_handler.VKCallbackMessageMismatch
+        ):
+            await bot.verify_callback_update(callback_update)
+
     async def test_vk_send_rejects_non_private_peer_before_api_call(self):
         bot = self._bot()
         bot.api = AsyncMock()
         with self.assertRaises(ValueError):
             await bot.send_message(db.VK_MAX_EXTERNAL_USER_ID + 1, "test")
         bot.api.assert_not_awaited()
+
+    async def test_callback_confirmation_requires_exact_secret_and_group(self):
+        channel = self._channel()
+        valid = {
+            "type": "confirmation",
+            "group_id": 123,
+            "secret": STRONG_CALLBACK_SECRET,
+        }
+        response = await channel.handle(self._request(valid))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.text, "confirm_123")
+
+        for field, value in (
+            ("secret", "x" * 32),
+            ("secret", "я" * 32),
+            ("group_id", 999),
+            ("group_id", True),
+        ):
+            with self.subTest(field=field, value=value):
+                invalid = {**valid, field: value}
+                response = await channel.handle(self._request(invalid))
+                self.assertEqual(response.status, 403)
+                self.assertNotIn("confirm_123", response.text)
+
+    async def test_callback_accepts_authenticated_message_without_secret_leak(self):
+        channel = self._channel()
+        submitted = Mock(return_value=True)
+        now = int(time.time())
+        verified_update = {
+            "type": "message_new",
+            "group_id": 123,
+            "event_id": "event_123",
+            "v": "5.199",
+            "object": {
+                "message": {
+                    "id": 10,
+                    "conversation_message_id": 20,
+                    "date": now,
+                    "from_id": 456,
+                    "peer_id": 456,
+                    "out": 0,
+                }
+            },
+        }
+        verify = AsyncMock(
+            return_value=(verified_update, (123, 456, 20, 10))
+        )
+        channel.bot = SimpleNamespace(
+            can_accept_update=Mock(return_value=True),
+            verify_callback_update=verify,
+            submit_update=submitted,
+        )
+        payload = {
+            "type": "message_new",
+            "group_id": 123,
+            "secret": STRONG_CALLBACK_SECRET,
+            "event_id": "event_123",
+            "v": "5.199",
+            "object": {
+                "message": {
+                    "id": 10,
+                    "conversation_message_id": 20,
+                    "date": now,
+                    "from_id": 456,
+                    "peer_id": 456,
+                    "out": 0,
+                }
+            },
+        }
+        with patch.object(
+            db,
+            "claim_vk_callback_message",
+            AsyncMock(return_value=True),
+        ) as claim:
+            response = await channel.handle(self._request(payload))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.text, "ok")
+        claim.assert_awaited_once()
+        verify.assert_awaited_once()
+        submitted.assert_called_once()
+        queued_update = submitted.call_args.args[0]
+        self.assertNotIn("secret", queued_update)
+        self.assertEqual(queued_update["group_id"], 123)
+        self.assertIs(queued_update, verified_update)
+
+    async def test_callback_replay_is_acknowledged_but_not_dispatched(self):
+        channel = self._channel()
+        submitted = Mock(return_value=True)
+        now = int(time.time())
+        verified_update = {
+            "type": "message_new",
+            "group_id": 123,
+            "event_id": "event_replayed",
+            "v": "5.199",
+            "object": {
+                "message": {
+                    "id": 10,
+                    "conversation_message_id": 20,
+                    "date": now,
+                    "from_id": 456,
+                    "peer_id": 456,
+                    "out": 0,
+                }
+            },
+        }
+        channel.bot = SimpleNamespace(
+            can_accept_update=Mock(return_value=True),
+            verify_callback_update=AsyncMock(
+                return_value=(verified_update, (123, 456, 20, 10))
+            ),
+            submit_update=submitted,
+        )
+        payload = {
+            "type": "message_new",
+            "group_id": 123,
+            "secret": STRONG_CALLBACK_SECRET,
+            "event_id": "event_replayed",
+            "v": "5.199",
+            "object": {
+                "message": {
+                    "id": 10,
+                    "conversation_message_id": 20,
+                    "date": now,
+                    "from_id": 456,
+                    "peer_id": 456,
+                }
+            },
+        }
+        with patch.object(
+            db,
+            "claim_vk_callback_message",
+            AsyncMock(return_value=False),
+        ):
+            response = await channel.handle(self._request(payload))
+        self.assertEqual(response.status, 200)
+        submitted.assert_not_called()
+
+    async def test_callback_outgoing_message_is_ignored_without_retry(self):
+        channel = self._channel()
+        submitted = Mock(return_value=True)
+        channel.bot = SimpleNamespace(
+            can_accept_update=Mock(return_value=True),
+            submit_update=submitted,
+        )
+        payload = {
+            "type": "message_new",
+            "group_id": 123,
+            "secret": STRONG_CALLBACK_SECRET,
+            "event_id": "event_outgoing",
+            "v": "5.199",
+            "object": {
+                "message": {
+                    "id": 10,
+                    "conversation_message_id": 20,
+                    "date": int(time.time()),
+                    "from_id": -123,
+                    "peer_id": 456,
+                    "out": 1,
+                }
+            },
+        }
+        response = await channel.handle(self._request(payload))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.text, "ok")
+        submitted.assert_not_called()
+
+    async def test_callback_rejects_wrong_schema_version_and_content_type(self):
+        channel = self._channel()
+        payload = {
+            "type": "message_new",
+            "group_id": 123,
+            "secret": STRONG_CALLBACK_SECRET,
+            "event_id": "event_123",
+            "v": "5.131",
+            "object": {},
+        }
+        response = await channel.handle(self._request(payload))
+        self.assertEqual(response.status, 400)
+        response = await channel.handle(
+            self._request(payload, content_type="text/plain")
+        )
+        self.assertEqual(response.status, 415)
+
+        oversized = self._request(payload)
+        oversized.content_length = (
+            self.vk_handler.VK_CALLBACK_MAX_BODY_BYTES + 1
+        )
+        response = await channel.handle(oversized)
+        self.assertEqual(response.status, 413)
+
+    async def test_callback_returns_retry_when_vk_worker_is_not_ready(self):
+        channel = self._channel()
+        payload = {
+            "type": "message_new",
+            "group_id": 123,
+            "secret": STRONG_CALLBACK_SECRET,
+            "event_id": "event_123",
+            "v": "5.199",
+            "object": {
+                "message": {
+                    "id": 10,
+                    "conversation_message_id": 20,
+                    "date": int(time.time()),
+                    "from_id": 456,
+                    "peer_id": 456,
+                }
+            },
+        }
+        response = await channel.handle(self._request(payload))
+        self.assertEqual(response.status, 503)
+        self.assertEqual(response.headers.get("Retry-After"), "5")
+
+    async def test_callback_message_claim_is_atomic_in_database(self):
+        connection = SimpleNamespace(
+            fetchval=AsyncMock(return_value="event_atomic")
+        )
+
+        class Acquire:
+            async def __aenter__(self):
+                return connection
+
+            async def __aexit__(self, *_):
+                return False
+
+        pool = SimpleNamespace(acquire=lambda: Acquire())
+        with patch.object(db, "_pool", pool):
+            claimed = await db.claim_vk_callback_message(
+                event_id="event_atomic",
+                group_id=123,
+                peer_id=456,
+                conversation_message_id=20,
+                message_id=10,
+            )
+        self.assertTrue(claimed)
+        sql = connection.fetchval.await_args.args[0]
+        self.assertIn("conversation_message_id", sql)
+        self.assertIn("ON CONFLICT DO NOTHING", sql)
 
 
 if __name__ == "__main__":
