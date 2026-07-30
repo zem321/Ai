@@ -2475,10 +2475,13 @@ _CODE_ARTIFACT = re.compile(
 )
 _NETWORK_TRANSFER = re.compile(
     r"\b(?:отправ\w*|пересыл\w*|загруз\w*|выгруз\w*|переда\w*|"
+    r"выгруж\w*|переправ\w*|"
     r"шл[её]т|слать|направля\w*|"
-    r"(?:удаленн\w+|внешн\w+)\s+(?:сервер|адрес|узел|оператор)|"
+    r"(?:удаленн\w+|внешн\w+)\s+(?:сервер|адрес|узел|оператор|"
+    r"хранилищ\w*)|"
     r"мой\s+сервер|телеграм\w*|telegram|"
     r"exfiltrat\w*|upload\w*|send\w*|post\w*|forward\w*|transmit\w*|"
+    r"relay\w*|my\s+endpoint|"
     r"remote\s+(?:server|"
     r"endpoint|operator)|webhook\w*)\b",
     re.IGNORECASE,
@@ -2625,7 +2628,16 @@ _SERVICE_DISRUPTION = re.compile(
     r"\b(?:overwhelm\w*|exhaust\w*|saturat\w*)\b.{0,80}\b"
     r"(?:target\s+)?(?:api|service|server|connection\s+pool)\b"
     r".{0,160}\b(?:parallel|concurrent|many|requests?|connections?|"
-    r"clients?|unavailable|offline)\b)",
+    r"clients?|unavailable|offline)\b|"
+    r"\b(?:hold\w*|keep\w*)\b.{0,80}\b(?:all|every|available)\b.{0,80}\b"
+    r"(?:server\s+)?connections?\b.{0,80}\bopen\b.{0,180}\b"
+    r"(?:legitimate|normal|other)\s+users?\b.{0,80}\b"
+    r"(?:cannot|can['’]?t|unable\s+to)\s+connect\b|"
+    r"\b(?:удерж\w*|заня\w*)\b.{0,100}\b(?:все|кажд\w+|доступн\w+)\b"
+    r".{0,80}\bсоединени\w*\b.{0,160}\b(?:обычн\w+|друг\w+|"
+    r"легитимн\w+)\s+пользовател\w*\b.{0,100}\b"
+    r"(?:не\s+смог\w*|не\s+мог\w*|не\s+получ\w*)\b.{0,40}\b"
+    r"(?:подключ\w*|доступ\w*)\b)",
     re.IGNORECASE | re.DOTALL,
 )
 _SLOW_HTTP_EXHAUSTION = re.compile(
@@ -2649,7 +2661,8 @@ _KEYSTROKE_CAPTURE = re.compile(
     r"keyboard\s+(?:input|events?))\b.{0,80}\b"
     r"(?:запис\w*|фиксир\w*|перехват\w*|собира\w*|наблюд\w*|"
     r"record\w*|captur\w*|logg\w*|observ\w*|monitor\w*)\b|"
-    r"\b(?:запис\w*|перехват\w*|собира\w*|наблюд\w*|record\w*|captur\w*|"
+    r"\b(?:запис\w*|фиксир\w*|перехват\w*|собира\w*|наблюд\w*|"
+    r"record\w*|captur\w*|"
     r"logg\w*|monitor\w*)\b.{0,80}\b(?:пользовательск\w+\s+ввод\w*|"
     r"ввод\w*\s+пользовател\w*|user\s+input)\b|"
     r"\b(?:key\s*logg\w*|кей\s*логг\w*)\b",
@@ -2660,14 +2673,19 @@ _CREDENTIAL_DATA = re.compile(
     r"логин\w*|cookies?|куки|(?:session\s+)?tokens?|токен\w*|секрет\w*|"
     r"secrets?|browser\s+data|login\s+data|одноразов\w+\s+код\w*|"
     r"код\w+\s+подтверждени\w*|one[- ]time\s+codes?|otp\s+codes?|"
-    r"данн\w+\s+браузер\w*|chrome|firefox|login\s+data)\b",
+    r"данн\w+\s+браузер\w*|данн\w+\s+вход\w*(?:\s+браузер\w*)?|"
+    r"сведени\w+\s+(?:для\s+)?вход\w*|"
+    r"данн\w+\s+для\s+вход\w*|сохран[её]нн\w+\s+данн\w+\s+вход\w*|"
+    r"authentication\s+records?|auth(?:entication)?\s+data|"
+    r"sign[- ]?in\s+(?:data|records?)|verification\s+numbers?|"
+    r"chrome|firefox)\b",
     re.IGNORECASE,
 )
 _CREDENTIAL_COLLECTION = re.compile(
     r"\b(?:копир\w*|чита\w*|вытащ\w*|извлеч\w*|собир\w*|сбор\w*|"
-    r"перехват\w*|"
+    r"перехват\w*|перенос\w*|переправ\w*|"
     r"сохран\w*|крад\w*|dump\w*|extract\w*|cop(?:y|i)\w*|collect\w*|"
-    r"read\w*|capture\w*|harvest\w*|steal\w*)\b",
+    r"read\w*|capture\w*|harvest\w*|steal\w*|relay\w*)\b",
     re.IGNORECASE,
 )
 _FILE_ENCRYPTION = re.compile(
@@ -2678,7 +2696,7 @@ _FILE_ENCRYPTION = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _FILE_LOCKOUT = re.compile(
-    r"(?:\b(?:заблокир\w*|сдела\w*)\b.{0,100}\b(?:файл\w*|"
+    r"(?:\b(?:заблокир\w*|сдела\w*|дела\w*)\b.{0,100}\b(?:файл\w*|"
     r"документ\w*|данн\w*)\b.{0,100}\b(?:недоступ\w*|нечитаем\w*)\b|"
     r"\b(?:файл\w*|документ\w*|данн\w*)\b.{0,100}\b(?:недоступ\w*|"
     r"заблокирован\w*)\b|"
@@ -2697,7 +2715,12 @@ _RANSOM_OR_DESTRUCTION = re.compile(
     r".{0,100}\b(?:after|until)\s+(?:payment|money\s+transfer)|"
     r"(?:недоступ\w*|заблокирован\w*)\b.{0,80}\bдо\s+"
     r"(?:оплат\w*|перевод\w+\s+ден\w*)|(?:inaccessible|locked)\b"
-    r".{0,80}\buntil\s+(?:payment|money\s+transfer))\b",
+    r".{0,80}\buntil\s+(?:payment|money\s+transfer)|"
+    r"(?:прос\w*|треб\w*)\b.{0,60}\b(?:плат\w*|деньг\w*)\b"
+    r".{0,120}\bза\b.{0,80}\b(?:возврат\w*|восстановлени\w*|"
+    r"разблокировк\w*)\b.{0,60}\bдоступ\w*|"
+    r"(?:ask\w*|demand\w*)\b.{0,60}\b(?:fee|payment|money)\b"
+    r".{0,120}\b(?:restore|return|unlock)\w*\b.{0,60}\baccess\b)\b",
     re.IGNORECASE | re.DOTALL,
 )
 _PERSISTENCE = re.compile(
@@ -2723,6 +2746,15 @@ _AUTO_EXEC_DOCUMENT = re.compile(
     r"\b(?:макрос\w*|vba|autoopen|document_open|word\s+macro|"
     r"excel\s+macro|document\s+(?:open|opening))\b",
     re.IGNORECASE,
+)
+_DOCUMENT_TRIGGERED_REMOTE_ACCESS = re.compile(
+    r"(?:\bдокумент\w*\b.{0,140}\b(?:после|при)\s+открыти\w*\b"
+    r".{0,180}\b(?:скрыт\w+\s+)?доступ\w*\b.{0,100}\b"
+    r"(?:командн\w+\s+строк\w*|оболочк\w*|shell|компьютер\w*)\b|"
+    r"\b(?:document|spreadsheet|presentation)\b.{0,140}\b"
+    r"(?:after|when|upon)\s+(?:it\s+is\s+)?open\w*\b.{0,180}\b"
+    r"(?:hidden|remote|command[- ]line|shell)\s+access\b)",
+    re.IGNORECASE | re.DOTALL,
 )
 _DOWNLOAD_OR_EXECUTE = re.compile(
     r"\b(?:скача\w*|загруж\w*|запуст\w*|выполн\w*|при\s+открыти\w*|"
@@ -2754,7 +2786,11 @@ _DECEPTIVE_CREDENTIAL_PAGE = re.compile(
     r"(?:forward\w*|captur\w*|collect\w*|harvest\w*|собира\w*|"
     r"пересыла\w*|перехват\w*)\b.{0,100}\b(?:submitted\s+)?"
     r"(?:парол\w*|логин\w*|код\w*|password\w*|credential\w*|"
-    r"login\s+data|one[- ]time\s+codes?|otp\s+codes?)\b)",
+    r"login\s+data|one[- ]time\s+codes?|otp\s+codes?)\b|"
+    r"\b(?:visually\s+identical|indistinguishable|точн\w+\s+копи\w*)\b"
+    r".{0,120}\b(?:corporate\s+)?(?:sso|sign[- ]?in|вход\w*)\b"
+    r".{0,220}\b(?:relay\w*|forward\w*|пересыла\w*|переда\w*)\b"
+    r".{0,100}\b(?:verification\s+numbers?|codes?|код\w*)\b)",
     re.IGNORECASE | re.DOTALL,
 )
 _SURVEILLANCE_CAPTURE = re.compile(
@@ -2805,7 +2841,16 @@ _CLOUD_METADATA_ABUSE = re.compile(
     r"metadata\.google\.internal|/latest/meta-data/|"
     r"/computeMetadata/v1/)\b.{0,240}\b(?:iam/security-credentials|"
     r"service-accounts?|instance\s+identity|токен\w*|"
-    r"уч[её]тн\w+\s+данн\w*|credentials?)\b)",
+    r"уч[её]тн\w+\s+данн\w*|credentials?)\b|"
+    r"\b(?:застав\w*|вынуд\w*)\b.{0,100}\b(?:чуж\w+\s+)?"
+    r"(?:сервер\w*|бэкенд\w*)\b.{0,120}\b(?:скача\w*|запрос\w*|"
+    r"получ\w*)\b.{0,140}\b(?:внутренн\w+\s+)?(?:облачн\w+\s+)?"
+    r"(?:метаданн\w*|документ\w*\s+идентификац\w*|"
+    r"документ\w*\s+облачн\w+\s+идентификац\w*|"
+    r"идентификационн\w+\s+документ\w*)\b|"
+    r"\b(?:make|force)\b.{0,100}\b(?:target\s+)?(?:backend|server)\b"
+    r".{0,120}\bfetch\b.{0,140}\b(?:internal\s+)?cloud\b.{0,80}\b"
+    r"(?:metadata|identity\s+document|identity\s+token)\b)",
     re.IGNORECASE | re.DOTALL,
 )
 _ACCESS_BYPASS = re.compile(
@@ -3448,6 +3493,8 @@ def _behavioral_rule_reason(
             or _STEALTH_OR_EVASION.search(text)
         ):
             return "malware"
+        if _DOCUMENT_TRIGGERED_REMOTE_ACCESS.search(text):
+            return "malware"
         if _AUTO_EXEC_DOCUMENT.search(text) and _DOWNLOAD_OR_EXECUTE.search(text):
             return "malware"
         if _PHISHING_BEHAVIOR.search(text) and (
@@ -3736,4 +3783,3 @@ def safety_response_for_reason(reason: str | None) -> str:
     if reason == "self_harm_or_violence":
         return SELF_HARM_SAFE_MESSAGE
     return SAFE_REFUSAL_MESSAGE
-
