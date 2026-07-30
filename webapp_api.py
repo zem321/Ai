@@ -123,6 +123,18 @@ _API_CLIENT_LIMIT = max(
     30, min(int(os.getenv("API_CLIENT_RATE_LIMIT", "120")), 2_000)
 )
 try:
+    _VK_CALLBACK_CLIENT_LIMIT = int(
+        os.getenv("VK_CALLBACK_CLIENT_RATE_LIMIT", "120")
+    )
+except (TypeError, ValueError) as exc:
+    raise RuntimeError(
+        "VK_CALLBACK_CLIENT_RATE_LIMIT должен быть целым числом"
+    ) from exc
+if not 30 <= _VK_CALLBACK_CLIENT_LIMIT <= 2_000:
+    raise RuntimeError(
+        "VK_CALLBACK_CLIENT_RATE_LIMIT должен быть от 30 до 2000"
+    )
+try:
     _TRUSTED_PROXY_NETWORKS = tuple(
         ipaddress.ip_network(value.strip(), strict=False)
         for value in os.getenv("TRUSTED_PROXY_IPS", "").split(",")
@@ -293,11 +305,29 @@ def _rate_limit_identity(request: web.Request) -> str:
 @web.middleware
 async def api_rate_limit_middleware(request: web.Request, handler):
     """Отсекает HTTP-flood до HMAC-проверки и запросов к PostgreSQL."""
-    if not request.path.startswith("/api/"):
+    is_api = request.path.startswith("/api/")
+    is_vk_callback = request.path == "/vk/callback"
+    if not is_api and not is_vk_callback:
         return await handler(request)
 
     identity = _rate_limit_identity(request)
     request["rate_limit_identity"] = identity
+    if is_vk_callback:
+        client_ok = _rate_limiter.allow(
+            f"vk:callback:client:{identity}",
+            _VK_CALLBACK_CLIENT_LIMIT,
+            60,
+        )
+        if not client_ok:
+            response = web.Response(
+                text="rate limited",
+                status=429,
+                content_type="text/plain",
+            )
+            response.headers["Retry-After"] = "60"
+            return response
+        return await handler(request)
+
     if request.path == "/api/auth/code":
         route_limit = 12
         route_bucket = "auth-code"
