@@ -1,4 +1,4 @@
-"""VK Bot Long Poll channel for the shared AI assistant.
+"""VK Callback API channel for the shared AI assistant.
 
 The module intentionally uses aiohttp that is already present in the locked
 requirements. AI providers, content safety, quotas and request leases are
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import json
 import logging
 import mimetypes
@@ -25,6 +26,7 @@ from itertools import islice
 from urllib.parse import urlsplit
 
 import aiohttp
+from aiohttp import web
 
 import database as db
 from keyboards import GEMINI_MODELS, GROUP_TITLES, MODELS, OTHER_MODELS
@@ -108,10 +110,14 @@ VK_MAX_VERIFIED_USERS = 20_000
 VK_VERIFIED_USER_TTL_SECONDS = 60 * 60
 VK_DOWNLOAD_CONCURRENCY = 2
 VK_API_CONCURRENCY = 12
-VK_LONG_POLL_WAIT = 25
 VK_DEFAULT_API_VERSION = "5.199"
+VK_CALLBACK_PATH = "/vk/callback"
+VK_CALLBACK_MAX_BODY_BYTES = 256 * 1024
+VK_CALLBACK_REPLAY_RETENTION_SECONDS = 24 * 60 * 60
+VK_CALLBACK_VERIFY_TIMEOUT_SECONDS = 8
+VK_CALLBACK_VERIFY_CONCURRENCY = 8
+VK_CALLBACK_VERIFY_RATE_PER_MINUTE = 600
 
-_VK_LONG_POLL_HOSTS = ("vk.com", "vk.ru")
 _VK_UPLOAD_HOSTS = ("vk.com", "vk.ru", "vk.me", "userapi.com")
 _VK_MEDIA_HOSTS = (
     "vk.com",
@@ -176,12 +182,38 @@ def _required_positive_int(name: str) -> int:
     return value
 
 
+def _strong_callback_secret(value: str) -> bool:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,50}", value):
+        return False
+    if len(set(value)) < 16:
+        return False
+    lowered = value.lower()
+    if any(
+        marker in lowered
+        for marker in (
+            "callbacksecret",
+            "changeme",
+            "password",
+            "secretkey",
+        )
+    ):
+        return False
+    for period in range(1, len(value) // 2 + 1):
+        if len(value) % period == 0 and value == value[:period] * (
+            len(value) // period
+        ):
+            return False
+    return True
+
+
 @dataclass(frozen=True)
 class VKConfig:
     token: str
     group_id: int
     admin_id: int
     api_version: str
+    callback_secret: str = ""
+    callback_confirmation_code: str = ""
 
     @classmethod
     def from_environment(cls) -> VKConfig | None:
@@ -209,11 +241,48 @@ class VKConfig:
         ).strip()
         if not re.fullmatch(r"5\.\d{2,3}", api_version):
             raise RuntimeError("VK_API_VERSION должен иметь формат 5.xxx")
+        if api_version != VK_DEFAULT_API_VERSION:
+            raise RuntimeError(
+                f"VK_API_VERSION должен быть {VK_DEFAULT_API_VERSION}"
+            )
+        callback_secret = os.getenv("VK_CALLBACK_SECRET", "").strip()
+        if not _strong_callback_secret(callback_secret):
+            raise RuntimeError(
+                "VK_CALLBACK_SECRET должен содержать 32–50 действительно "
+                "случайных URL-safe символов без повторяющегося шаблона"
+            )
+        callback_confirmation_code = os.getenv(
+            "VK_CALLBACK_CONFIRMATION_CODE",
+            "",
+        ).strip()
+        if not re.fullmatch(
+            r"[A-Za-z0-9_-]{4,128}",
+            callback_confirmation_code,
+        ):
+            raise RuntimeError(
+                "VK_CALLBACK_CONFIRMATION_CODE имеет некорректный формат"
+            )
+        callback_secrets = {
+            token,
+            callback_secret,
+            callback_confirmation_code,
+        }
+        callback_secrets.update(secret for secret in other_secrets if secret)
+        expected_secret_count = 3 + sum(
+            1 for secret in other_secrets if secret
+        )
+        if len(callback_secrets) != expected_secret_count:
+            raise RuntimeError(
+                "Секреты VK Callback, ключ сообщества и остальные "
+                "секреты должны различаться"
+            )
         return cls(
             token=token,
             group_id=_required_positive_int("VK_GROUP_ID"),
             admin_id=_required_positive_int("VK_ADMIN_ID"),
             api_version=api_version,
+            callback_secret=callback_secret,
+            callback_confirmation_code=callback_confirmation_code,
         )
 
 
@@ -223,6 +292,10 @@ class VKAPIError(RuntimeError):
         self.method = method
         self.code = code
         self.public_message = message[:200]
+
+
+class VKCallbackMessageMismatch(RuntimeError):
+    """The Callback body does not match the message stored by VK."""
 
 
 class _SlidingRateLimiter:
@@ -312,28 +385,6 @@ def _validated_https_url(
     ):
         raise RuntimeError("VK вернул URL вне разрешённых HTTPS-доменов")
     return url
-
-
-def _validated_long_poll_key(value: object) -> str:
-    if (
-        not isinstance(value, str)
-        or not 16 <= len(value) <= 1_024
-        or any(ord(char) < 0x21 or ord(char) > 0x7E for char in value)
-        or any(char in value for char in "&#?")
-    ):
-        raise RuntimeError("VK вернул некорректный Long Poll key")
-    return value
-
-
-def _validated_long_poll_ts(value: object) -> str:
-    checked = str(value) if isinstance(value, (str, int)) else ""
-    if (
-        isinstance(value, bool)
-        or not re.fullmatch(r"\d{1,32}", checked)
-        or int(checked) < 0
-    ):
-        raise RuntimeError("VK вернул некорректный Long Poll ts")
-    return checked
 
 
 def _vk_ssl_context() -> ssl.SSLContext:
@@ -448,9 +499,6 @@ class VKBot:
     def __init__(self, config: VKConfig):
         self.config = config
         self.session: aiohttp.ClientSession | None = None
-        self.long_poll_server = ""
-        self.long_poll_key = ""
-        self.long_poll_ts = ""
         self._closing = False
         self._tasks: set[asyncio.Task] = set()
         self._event_semaphore = asyncio.Semaphore(VK_EVENT_CONCURRENCY)
@@ -495,12 +543,11 @@ class VKBot:
         )
         try:
             await self._verify_group_identity_and_permissions()
-            await self._refresh_long_poll_server()
         except BaseException:
             await self.close()
             raise
         logger.info(
-            "VK channel initialized for group_id=%s",
+            "VK API client initialized for Callback API, group_id=%s",
             self.config.group_id,
         )
 
@@ -643,70 +690,6 @@ class VKBot:
                 await asyncio.sleep(min(0.5 * 2**attempt, 4))
         raise RuntimeError("Не удалось выполнить запрос к VK API")
 
-    async def _refresh_long_poll_server(self) -> None:
-        response = await self.api(
-            "groups.getLongPollServer",
-            group_id=self.config.group_id,
-        )
-        if not isinstance(response, dict):
-            raise RuntimeError("VK не вернул параметры Long Poll")
-        server = _validated_https_url(
-            response.get("server"),
-            _VK_LONG_POLL_HOSTS,
-            allow_query=False,
-        )
-        key = _validated_long_poll_key(response.get("key"))
-        ts = _validated_long_poll_ts(response.get("ts"))
-        self.long_poll_server = server
-        self.long_poll_key = key
-        self.long_poll_ts = ts
-
-    async def run(self) -> None:
-        if self.session is None:
-            raise RuntimeError("Сначала вызовите VKBot.start()")
-        backoff = 1.0
-        while not self._closing:
-            try:
-                data = await self._poll_once()
-                backoff = 1.0
-                failed = data.get("failed")
-                if failed is not None:
-                    try:
-                        failed_code = int(failed)
-                    except (TypeError, ValueError) as exc:
-                        raise RuntimeError(
-                            "VK вернул некорректный код Long Poll"
-                        ) from exc
-                    if failed_code == 1 and data.get("ts") is not None:
-                        self.long_poll_ts = _validated_long_poll_ts(data["ts"])
-                    else:
-                        await self._refresh_long_poll_server()
-                    continue
-                if data.get("ts") is not None:
-                    self.long_poll_ts = _validated_long_poll_ts(data["ts"])
-                updates = data.get("updates")
-                if not isinstance(updates, list):
-                    continue
-                for update in updates[:1_000]:
-                    if not isinstance(update, dict):
-                        continue
-                    if len(self._tasks) >= VK_MAX_PENDING_EVENTS:
-                        await asyncio.wait(
-                            self._tasks,
-                            return_when=asyncio.FIRST_COMPLETED,
-                        )
-                    task = asyncio.create_task(self._dispatch_update(update))
-                    self._tasks.add(task)
-                    task.add_done_callback(self._event_task_done)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Ошибка VK Long Poll; повторное подключение")
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 30)
-                with contextlib.suppress(Exception):
-                    await self._refresh_long_poll_server()
-
     def _event_task_done(self, task: asyncio.Task) -> None:
         self._tasks.discard(task)
         if task.cancelled():
@@ -719,29 +702,23 @@ class VKBot:
                     exc_info=(type(error), error, error.__traceback__),
                 )
 
-    async def _poll_once(self) -> dict:
-        if self.session is None:
-            raise RuntimeError("VK-клиент не запущен")
-        async with self.session.get(
-            self.long_poll_server,
-            params={
-                "act": "a_check",
-                "key": self.long_poll_key,
-                "ts": self.long_poll_ts,
-                "wait": VK_LONG_POLL_WAIT,
-            },
-            allow_redirects=False,
-            timeout=aiohttp.ClientTimeout(
-                total=VK_LONG_POLL_WAIT + 15,
-                connect=10,
-                sock_read=VK_LONG_POLL_WAIT + 10,
-            ),
-        ) as response:
-            if response.status < 200 or response.status >= 300:
-                raise RuntimeError(
-                    f"VK Long Poll вернул HTTP {response.status}"
-                )
-            return await self._read_json(response, VK_API_RESPONSE_LIMIT)
+    def can_accept_update(self) -> bool:
+        return (
+            not self._closing
+            and self.session is not None
+            and len(self._tasks) < VK_MAX_PENDING_EVENTS
+        )
+
+    def submit_update(self, update: dict) -> bool:
+        if not self.can_accept_update() or not isinstance(update, dict):
+            return False
+        task = asyncio.create_task(
+            self._dispatch_update(update),
+            name="vk-callback-event",
+        )
+        self._tasks.add(task)
+        task.add_done_callback(self._event_task_done)
+        return True
 
     async def _dispatch_update(self, update: dict) -> None:
         async with self._event_semaphore:
@@ -803,6 +780,12 @@ class VKBot:
     def _accept_fresh_event_once(self, update: dict, message: dict) -> bool:
         try:
             message_date = int(message.get("date") or 0)
+            message_id = int(message.get("id") or 0)
+            conversation_message_id = int(
+                message.get("conversation_message_id") or 0
+            )
+            from_id = int(message.get("from_id") or 0)
+            peer_id = int(message.get("peer_id") or 0)
         except (TypeError, ValueError):
             return False
         now_wall = time.time()
@@ -813,6 +796,16 @@ class VKBot:
         ):
             return False
 
+        if (
+            from_id <= 0
+            or peer_id <= 0
+            or conversation_message_id <= 0
+        ):
+            return False
+        message_key = (
+            f"message:{self.config.group_id}:{peer_id}:"
+            f"{conversation_message_id}"
+        )
         raw_event_id = update.get("event_id")
         if (
             isinstance(raw_event_id, str)
@@ -820,25 +813,11 @@ class VKBot:
         ):
             event_key = f"event:{raw_event_id}"
         else:
-            try:
-                message_id = int(message.get("id") or 0)
-                conversation_message_id = int(
-                    message.get("conversation_message_id") or 0
-                )
-                from_id = int(message.get("from_id") or 0)
-                peer_id = int(message.get("peer_id") or 0)
-            except (TypeError, ValueError):
-                return False
-            if (
-                from_id <= 0
-                or peer_id <= 0
-                or (message_id <= 0 and conversation_message_id <= 0)
-            ):
-                return False
             event_key = (
                 f"message:{from_id}:{peer_id}:"
                 f"{message_id}:{conversation_message_id}"
             )
+        event_keys = (event_key, message_key)
 
         now_monotonic = time.monotonic()
         retention = self._event_max_age_seconds * 2
@@ -847,12 +826,125 @@ class VKBot:
             if now_monotonic - seen_at <= retention:
                 break
             self._seen_events.pop(old_key, None)
-        if event_key in self._seen_events:
+        if any(key in self._seen_events for key in event_keys):
             return False
-        if len(self._seen_events) >= VK_MAX_SEEN_EVENTS:
+        if len(self._seen_events) + len(event_keys) > VK_MAX_SEEN_EVENTS:
             return False
-        self._seen_events[event_key] = now_monotonic
+        for key in event_keys:
+            self._seen_events[key] = now_monotonic
         return True
+
+    async def verify_callback_update(
+        self,
+        update: dict,
+    ) -> tuple[dict, tuple[int, int, int, int]]:
+        """Re-fetches a message from VK and returns only VK-authored data."""
+        event_object = update.get("object")
+        callback_message = (
+            event_object.get("message")
+            if isinstance(event_object, dict)
+            else None
+        )
+        if not isinstance(callback_message, dict):
+            raise VKCallbackMessageMismatch("Callback message is missing")
+        try:
+            callback_from_id = int(callback_message.get("from_id") or 0)
+            callback_peer_id = int(callback_message.get("peer_id") or 0)
+            callback_date = int(callback_message.get("date") or 0)
+            callback_message_id = int(callback_message.get("id") or 0)
+            callback_cmid = int(
+                callback_message.get("conversation_message_id") or 0
+            )
+            db.vk_user_key(callback_from_id)
+            db.vk_user_key(callback_peer_id)
+        except (TypeError, ValueError) as exc:
+            raise VKCallbackMessageMismatch(
+                "Callback identity is invalid"
+            ) from exc
+        if (
+            callback_peer_id != callback_from_id
+            or callback_date <= 0
+            or callback_cmid <= 0
+            or bool(callback_message.get("out"))
+        ):
+            raise VKCallbackMessageMismatch(
+                "Callback is not a private incoming message"
+            )
+
+        official_message: dict | None = None
+        for attempt in range(3):
+            response = await self.api(
+                "messages.getByConversationMessageId",
+                peer_id=callback_peer_id,
+                conversation_message_ids=str(callback_cmid),
+                group_id=self.config.group_id,
+                extended=0,
+            )
+            if not isinstance(response, dict):
+                raise RuntimeError(
+                    "VK API вернул некорректное подтверждение сообщения"
+                )
+            items = response.get("items")
+            if not isinstance(items, list):
+                raise RuntimeError(
+                    "VK API вернул некорректное подтверждение сообщения"
+                )
+            if len(items) == 1 and isinstance(items[0], dict):
+                official_message = dict(items[0])
+                break
+            if items:
+                raise RuntimeError(
+                    "VK API вернул неоднозначное подтверждение сообщения"
+                )
+            if attempt < 2:
+                await asyncio.sleep(0.2 * (attempt + 1))
+        if official_message is None:
+            raise RuntimeError(
+                "VK API пока не вернул подтверждаемое сообщение"
+            )
+
+        try:
+            official_from_id = int(official_message.get("from_id") or 0)
+            official_peer_id = int(official_message.get("peer_id") or 0)
+            official_date = int(official_message.get("date") or 0)
+            official_message_id = int(official_message.get("id") or 0)
+            official_cmid = int(
+                official_message.get("conversation_message_id") or 0
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "VK API вернул некорректную идентификацию сообщения"
+            ) from exc
+        if (
+            official_from_id != callback_from_id
+            or official_peer_id != callback_peer_id
+            or official_date != callback_date
+            or official_cmid != callback_cmid
+            or official_peer_id != official_from_id
+            or bool(official_message.get("out"))
+            or (
+                callback_message_id > 0
+                and official_message_id != callback_message_id
+            )
+        ):
+            raise VKCallbackMessageMismatch(
+                "Callback body does not match the official VK message"
+            )
+
+        verified_update = {
+            "type": "message_new",
+            "group_id": self.config.group_id,
+            "event_id": update.get("event_id"),
+            "v": self.config.api_version,
+            "object": {"message": official_message},
+        }
+        identity = (
+            self.config.group_id,
+            official_peer_id,
+            official_cmid,
+            official_message_id,
+        )
+        return verified_update, identity
 
     async def _verify_vk_user_id(self, vk_user_id: int) -> bool:
         try:
@@ -2182,27 +2274,318 @@ async def create_vk_bot_from_environment() -> VKBot | None:
     return bot
 
 
-async def run_vk_channel_from_environment() -> None:
-    config = VKConfig.from_environment()
-    if config is None:
-        logger.info("VK channel is disabled")
-        return
-    backoff = 2.0
-    while True:
-        bot = VKBot(config)
-        try:
-            await bot.start()
-            backoff = 2.0
-            await bot.run()
+def _callback_response(text: str, status: int = 200) -> web.Response:
+    return web.Response(
+        text=text,
+        status=status,
+        content_type="text/plain",
+        charset="utf-8",
+        headers={
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+class VKCallbackChannel:
+    """Authenticated VK Callback API receiver.
+
+    VK Callback API does not provide a browser Origin that can be trusted.
+    Authenticity therefore comes from a high-entropy shared secret, the exact
+    community ID, HTTPS at the public endpoint and replay protection.
+    """
+
+    def __init__(self, config: VKConfig):
+        if not config.callback_secret or not config.callback_confirmation_code:
+            raise RuntimeError("VK Callback API не настроен")
+        self.config = config
+        self.bot: VKBot | None = None
+        self._initializer: asyncio.Task | None = None
+        self._closing = False
+        self._verification_semaphore = asyncio.Semaphore(
+            VK_CALLBACK_VERIFY_CONCURRENCY
+        )
+        self._verification_rate_limiter = _SlidingRateLimiter(max_buckets=4)
+
+    def start(self) -> None:
+        if self._initializer is not None:
             return
+        self._initializer = asyncio.create_task(
+            self._initialize_bot(),
+            name="vk-callback-initializer",
+        )
+
+    async def _initialize_bot(self) -> None:
+        backoff = 2.0
+        while not self._closing:
+            bot = VKBot(self.config)
+            try:
+                await bot.start()
+                if self._closing:
+                    await bot.close()
+                    return
+                self.bot = bot
+                logger.info(
+                    "VK Callback API ready for group_id=%s",
+                    self.config.group_id,
+                )
+                return
+            except asyncio.CancelledError:
+                await bot.close()
+                raise
+            except Exception:
+                logger.exception(
+                    "VK Callback API пока не готов; Telegram продолжает "
+                    "работать, повторная инициализация VK"
+                )
+                await bot.close()
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)
+
+    async def close(self) -> None:
+        self._closing = True
+        if self._initializer is not None:
+            self._initializer.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._initializer
+            self._initializer = None
+        if self.bot is not None:
+            await self.bot.close()
+            self.bot = None
+
+    async def _read_payload(self, request: web.Request) -> dict:
+        if request.query_string:
+            raise web.HTTPBadRequest()
+        if request.headers.get("Content-Encoding", "").lower() not in {
+            "",
+            "identity",
+        }:
+            raise web.HTTPUnsupportedMediaType()
+        if request.content_type.lower() != "application/json":
+            raise web.HTTPUnsupportedMediaType()
+        if (
+            request.content_length is not None
+            and request.content_length > VK_CALLBACK_MAX_BODY_BYTES
+        ):
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=VK_CALLBACK_MAX_BODY_BYTES,
+                actual_size=request.content_length,
+            )
+        raw = bytearray()
+        async for chunk in request.content.iter_chunked(64 * 1024):
+            if len(raw) + len(chunk) > VK_CALLBACK_MAX_BODY_BYTES:
+                raise web.HTTPRequestEntityTooLarge(
+                    max_size=VK_CALLBACK_MAX_BODY_BYTES,
+                    actual_size=len(raw) + len(chunk),
+                )
+            raw.extend(chunk)
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise web.HTTPBadRequest() from exc
+        if not isinstance(payload, dict):
+            raise web.HTTPBadRequest()
+        return payload
+
+    def _authenticated_event_type(self, payload: dict) -> str:
+        supplied_secret = payload.get("secret")
+        checked_secret = supplied_secret if isinstance(supplied_secret, str) else ""
+        secret_ok = hmac.compare_digest(
+            checked_secret.encode("utf-8"),
+            self.config.callback_secret.encode("ascii"),
+        )
+        supplied_group_id = payload.get("group_id")
+        group_ok = (
+            isinstance(supplied_group_id, int)
+            and not isinstance(supplied_group_id, bool)
+            and supplied_group_id == self.config.group_id
+        )
+        if not secret_ok or not group_ok:
+            raise web.HTTPForbidden()
+        event_type = payload.get("type")
+        if (
+            not isinstance(event_type, str)
+            or not re.fullmatch(r"[a-z][a-z0-9_]{1,63}", event_type)
+        ):
+            raise web.HTTPBadRequest()
+        return event_type
+
+    def _validated_message_update(self, payload: dict) -> tuple[str, dict]:
+        if payload.get("v") != self.config.api_version:
+            raise web.HTTPBadRequest()
+        event_id = payload.get("event_id")
+        if (
+            not isinstance(event_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", event_id)
+        ):
+            raise web.HTTPBadRequest()
+        event_object = payload.get("object")
+        if not isinstance(event_object, dict):
+            raise web.HTTPBadRequest()
+        message = event_object.get("message")
+        if not isinstance(message, dict):
+            raise web.HTTPBadRequest()
+        numeric_fields = (
+            message.get("from_id"),
+            message.get("peer_id"),
+            message.get("date"),
+        )
+        if any(
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value <= 0
+            for value in numeric_fields
+        ):
+            raise web.HTTPBadRequest()
+        message_id = message.get("id")
+        conversation_message_id = message.get("conversation_message_id")
+        if (
+            not isinstance(conversation_message_id, int)
+            or isinstance(conversation_message_id, bool)
+            or conversation_message_id <= 0
+        ):
+            raise web.HTTPBadRequest()
+        if (
+            message_id is not None
+            and (
+                not isinstance(message_id, int)
+                or isinstance(message_id, bool)
+                or message_id < 0
+            )
+        ):
+            raise web.HTTPBadRequest()
+        sanitized = dict(payload)
+        sanitized.pop("secret", None)
+        return event_id, sanitized
+
+    async def handle(self, request: web.Request) -> web.Response:
+        try:
+            payload = await self._read_payload(request)
+            event_type = self._authenticated_event_type(payload)
+            if event_type == "confirmation":
+                return _callback_response(
+                    self.config.callback_confirmation_code
+                )
+            if payload.get("v") != self.config.api_version:
+                raise web.HTTPBadRequest()
+            if event_type != "message_new":
+                return _callback_response("ok")
+            event_object = payload.get("object")
+            message = (
+                event_object.get("message")
+                if isinstance(event_object, dict)
+                else None
+            )
+            if isinstance(message, dict) and bool(message.get("out")):
+                return _callback_response("ok")
+            event_id, update = self._validated_message_update(payload)
+            bot = self.bot
+            if bot is None or not bot.can_accept_update():
+                response = _callback_response("temporarily unavailable", 503)
+                response.headers["Retry-After"] = "5"
+                return response
+            if not self._verification_rate_limiter.allow(
+                "callback:verify",
+                VK_CALLBACK_VERIFY_RATE_PER_MINUTE,
+                60,
+            ):
+                response = _callback_response("temporarily unavailable", 503)
+                response.headers["Retry-After"] = "5"
+                return response
+            verification_acquired = False
+            try:
+                await asyncio.wait_for(
+                    self._verification_semaphore.acquire(),
+                    timeout=1,
+                )
+                verification_acquired = True
+                verified_update, identity = await asyncio.wait_for(
+                    bot.verify_callback_update(update),
+                    timeout=VK_CALLBACK_VERIFY_TIMEOUT_SECONDS,
+                )
+            except VKCallbackMessageMismatch:
+                logger.warning(
+                    "Отклонено Callback-событие, не совпавшее с "
+                    "официальным сообщением VK"
+                )
+                raise web.HTTPForbidden()
+            except (asyncio.TimeoutError, RuntimeError, VKAPIError):
+                logger.warning(
+                    "Официальное сообщение VK временно не подтверждено",
+                    exc_info=True,
+                )
+                response = _callback_response("temporarily unavailable", 503)
+                response.headers["Retry-After"] = "5"
+                return response
+            finally:
+                if verification_acquired:
+                    self._verification_semaphore.release()
+            group_id, peer_id, conversation_message_id, message_id = identity
+            try:
+                claimed_message = await db.claim_vk_callback_message(
+                    event_id=event_id,
+                    group_id=group_id,
+                    peer_id=peer_id,
+                    conversation_message_id=conversation_message_id,
+                    message_id=message_id,
+                    retention_seconds=VK_CALLBACK_REPLAY_RETENTION_SECONDS,
+                )
+            except Exception:
+                logger.exception(
+                    "Не удалось зафиксировать официальное сообщение VK"
+                )
+                response = _callback_response("temporarily unavailable", 503)
+                response.headers["Retry-After"] = "5"
+                return response
+            if not claimed_message:
+                return _callback_response("ok")
+            if not bot.submit_update(verified_update):
+                with contextlib.suppress(Exception):
+                    await db.release_vk_callback_event(event_id)
+                response = _callback_response("temporarily unavailable", 503)
+                response.headers["Retry-After"] = "5"
+                return response
+            return _callback_response("ok")
+        except web.HTTPRequestEntityTooLarge:
+            return _callback_response("request too large", 413)
+        except web.HTTPUnsupportedMediaType:
+            return _callback_response("unsupported media type", 415)
+        except web.HTTPForbidden:
+            return _callback_response("forbidden", 403)
+        except web.HTTPBadRequest:
+            return _callback_response("bad request", 400)
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception(
-                "VK-канал не запустился; Telegram продолжает работать, "
-                "повторное подключение VK"
-            )
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 60)
-        finally:
-            await bot.close()
+            logger.exception("Необработанная ошибка VK Callback API")
+            response = _callback_response("temporarily unavailable", 503)
+            response.headers["Retry-After"] = "5"
+            return response
+
+
+def setup_vk_callback_routes(app: web.Application) -> VKCallbackChannel | None:
+    """Registers Callback API without allowing VK failures to stop Telegram."""
+    try:
+        config = VKConfig.from_environment()
+    except Exception:
+        logger.exception(
+            "VK Callback API отключён из-за конфигурации; "
+            "Telegram продолжает работать"
+        )
+        return None
+    if config is None:
+        logger.info("VK channel is disabled")
+        return None
+    channel = VKCallbackChannel(config)
+    app.router.add_post(VK_CALLBACK_PATH, channel.handle)
+
+    async def _start_callback(_: web.Application) -> None:
+        channel.start()
+
+    async def _stop_callback(_: web.Application) -> None:
+        await channel.close()
+
+    app.on_startup.append(_start_callback)
+    app.on_cleanup.append(_stop_callback)
+    return channel
