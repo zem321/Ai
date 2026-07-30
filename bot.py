@@ -12,6 +12,7 @@ from aiogram.types import BotCommand
 from aiogram.fsm.storage.memory import MemoryStorage
 
 import database as db
+from build_info import BUILD_BRANCH, BUILD_SHA
 from handlers.start_handler import router as start_router
 from handlers.chat_handler import router as chat_router
 from handlers.image_handler import router as image_router
@@ -165,6 +166,7 @@ async def security_headers(request: web.Request, handler):
         or request.path == "/app"
         or request.path.startswith("/api/")
         or request.path == "/vk/callback"
+        or request.path in {"/health", "/ready"}
     ):
         response.headers.setdefault("Cache-Control", "no-store")
         response.headers.setdefault("Pragma", "no-cache")
@@ -173,7 +175,33 @@ async def security_headers(request: web.Request, handler):
 
 
 async def health(request: web.Request) -> web.Response:
-    return web.Response(text="OK")
+    return web.json_response(
+        {
+            "status": "ok",
+            "build_sha": BUILD_SHA,
+            "build_branch": BUILD_BRANCH,
+        }
+    )
+
+
+async def ready(request: web.Request) -> web.Response:
+    try:
+        database_ready = await asyncio.wait_for(
+            db.healthcheck(),
+            timeout=2,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        database_ready = False
+    return web.json_response(
+        {
+            "status": "ready" if database_ready else "not_ready",
+            "build_sha": BUILD_SHA,
+            "build_branch": BUILD_BRANCH,
+        },
+        status=200 if database_ready else 503,
+    )
 
 
 async def telegram_sdk(request: web.Request) -> web.Response:
@@ -210,6 +238,7 @@ async def start_web() -> web.AppRunner:
     app.router.add_get("/", miniapp)
     app.router.add_get("/app", miniapp)
     app.router.add_get("/health", health)
+    app.router.add_get("/ready", ready)
     app.router.add_get(
         "/static/telegram-web-app.3549138a7934039f.js",
         telegram_sdk,
@@ -233,7 +262,12 @@ async def start_web() -> web.AppRunner:
     site = web.TCPSite(runner, "0.0.0.0", port)  # nosec B104
     await site.start()
 
-    logger.info("Web server started on port %s", port)
+    logger.info(
+        "Web server started on port %s build_sha=%s branch=%s",
+        port,
+        BUILD_SHA,
+        BUILD_BRANCH,
+    )
     return runner
 
 

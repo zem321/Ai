@@ -135,6 +135,9 @@ WELCOME_TEXT = (
     "• анализировать фото;\n"
     "• генерировать изображения;\n"
     "• работать с разными моделями ИИ.\n\n"
+    f"Текстовая история хранится до {db.VK_CHAT_HISTORY_RETENTION_HOURS} "
+    "часов после последнего "
+    "сообщения. /clear удаляет её сразу.\n\n"
     "Выбери режим 👇"
 )
 
@@ -1304,7 +1307,7 @@ class VKBot:
             await self._save_state(vk_user_id, state, chat_history=[])
             await self.send_message(
                 peer_id,
-                "История очищена ✅",
+                "История диалога удалена сразу ✅",
                 keyboard=main_menu_keyboard(),
             )
             return True
@@ -1359,7 +1362,10 @@ class VKBot:
                 "❓ Помощь\n\n"
                 "💬 Чат — вопросы и анализ фото.\n"
                 "🎨 Генерация фото — изображение по описанию.\n"
-                "🤖 Модель — выбор ИИ.\n\n"
+                "🤖 Модель — выбор ИИ.\n"
+                "🕓 Текстовая история хранится до "
+                f"{db.VK_CHAT_HISTORY_RETENTION_HOURS} часов после "
+                "последнего сообщения; /clear удаляет её сразу.\n\n"
                 "Команды: /start, /menu, /chat, /image, /models, "
                 "/clear, /code."
             ),
