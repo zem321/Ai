@@ -494,7 +494,7 @@ class VKBot:
             },
         )
         try:
-            await self._verify_group_identity_and_settings()
+            await self._verify_group_identity_and_permissions()
             await self._refresh_long_poll_server()
         except BaseException:
             await self.close()
@@ -504,7 +504,7 @@ class VKBot:
             self.config.group_id,
         )
 
-    async def _verify_group_identity_and_settings(self) -> None:
+    async def _verify_group_identity_and_permissions(self) -> None:
         group_response = await self.api(
             "groups.getById",
             group_ids=str(self.config.group_id),
@@ -529,30 +529,30 @@ class VKBot:
                 "VK_GROUP_ID не относится к активному сообществу"
             )
 
-        settings = await self.api(
-            "groups.getLongPollSettings",
-            group_id=self.config.group_id,
-        )
-        if not isinstance(settings, dict):
-            raise RuntimeError("VK не вернул настройки Bot Long Poll")
-        events = settings.get("events")
-        if (
-            not bool(settings.get("is_enabled"))
-            or not isinstance(events, dict)
-            or not bool(events.get("message_new"))
-        ):
-            raise RuntimeError(
-                "В сообществе VK должны быть включены Bot Long Poll "
-                "и событие message_new"
+        token_info = await self.api("groups.getTokenPermissions")
+        if not isinstance(token_info, dict):
+            raise RuntimeError("VK не подтвердил права ключа сообщества")
+        permissions = token_info.get("permissions")
+        if not isinstance(permissions, list):
+            raise RuntimeError("VK вернул некорректные права ключа сообщества")
+        enabled_permissions = {
+            str(item.get("name") or "").strip().lower()
+            for item in permissions
+            if (
+                isinstance(item, dict)
+                and isinstance(item.get("setting"), int)
+                and not isinstance(item.get("setting"), bool)
+                and int(item["setting"]) > 0
             )
-        configured_version = str(settings.get("api_version") or "").strip()
-        if (
-            configured_version
-            and configured_version != self.config.api_version
-        ):
+        }
+        required_permissions = {"messages", "photos", "docs"}
+        missing_permissions = sorted(
+            required_permissions - enabled_permissions
+        )
+        if missing_permissions:
             raise RuntimeError(
-                "Версия Bot Long Poll в настройках сообщества не совпадает "
-                "с VK_API_VERSION"
+                "Ключу сообщества VK не хватает прав: "
+                + ", ".join(missing_permissions)
             )
         if not await self._verify_vk_user_id(self.config.admin_id):
             raise RuntimeError(
