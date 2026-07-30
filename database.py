@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import secrets
 import hashlib
@@ -61,6 +62,34 @@ USER_REQUEST_LEASE_SECONDS = _env_int(
     "USER_REQUEST_LEASE_SECONDS", 600, 60, 1800
 )
 LOGIN_CODE_PEPPER = os.getenv("LOGIN_CODE_PEPPER", "")
+
+# Telegram ID сохраняются в базе без изменений, чтобы обновление не требовало
+# миграции существующих пользователей. VK ID получают отдельное пространство
+# внутри BIGINT и поэтому никогда не пересекаются с Telegram ID.
+VK_USER_KEY_BASE = 4_000_000_000_000_000_000
+VK_MAX_EXTERNAL_USER_ID = 999_999_999_999
+
+
+def vk_user_key(vk_user_id: int) -> int:
+    if (
+        isinstance(vk_user_id, bool)
+        or not isinstance(vk_user_id, int)
+        or vk_user_id <= 0
+        or vk_user_id > VK_MAX_EXTERNAL_USER_ID
+    ):
+        raise ValueError("Некорректный VK user_id")
+    return VK_USER_KEY_BASE + vk_user_id
+
+
+def vk_external_user_id(user_id: int) -> int | None:
+    if (
+        isinstance(user_id, bool)
+        or not isinstance(user_id, int)
+        or user_id <= VK_USER_KEY_BASE
+        or user_id > VK_USER_KEY_BASE + VK_MAX_EXTERNAL_USER_ID
+    ):
+        return None
+    return user_id - VK_USER_KEY_BASE
 
 _ALLOWED_SSL_MODES = {"verify-full"}
 logger = logging.getLogger(__name__)
@@ -177,6 +206,19 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
                 status TEXT NOT NULL CHECK (status IN ('approved', 'pending', 'rejected'))
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS vk_user_state (
+                user_id BIGINT PRIMARY KEY,
+                mode TEXT NOT NULL DEFAULT 'main_menu'
+                    CHECK (mode IN ('main_menu', 'chat_mode', 'image_generate')),
+                selected_model TEXT NOT NULL,
+                chat_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
             )
             """
         )
@@ -400,20 +442,168 @@ async def revoke_user(user_id: int):
 
 async def get_all_approved() -> list[int]:
     async with _pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id FROM users WHERE status = 'approved'")
+        rows = await conn.fetch(
+            """
+            SELECT user_id FROM users
+            WHERE status = 'approved' AND user_id < $1
+            """,
+            VK_USER_KEY_BASE,
+        )
         return [r["user_id"] for r in rows]
 
 
 async def get_all_pending() -> list[int]:
     async with _pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id FROM users WHERE status = 'pending'")
+        rows = await conn.fetch(
+            """
+            SELECT user_id FROM users
+            WHERE status = 'pending' AND user_id < $1
+            """,
+            VK_USER_KEY_BASE,
+        )
         return [r["user_id"] for r in rows]
 
 
 async def get_all_rejected() -> list[int]:
     async with _pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id FROM users WHERE status = 'rejected'")
+        rows = await conn.fetch(
+            """
+            SELECT user_id FROM users
+            WHERE status = 'rejected' AND user_id < $1
+            """,
+            VK_USER_KEY_BASE,
+        )
         return [r["user_id"] for r in rows]
+
+
+async def get_vk_user_status(vk_user_id: int) -> str | None:
+    return await get_user_status(vk_user_key(vk_user_id))
+
+
+async def add_vk_pending(vk_user_id: int) -> bool:
+    return await add_pending(vk_user_key(vk_user_id))
+
+
+async def approve_vk_user(vk_user_id: int) -> None:
+    await approve_user(vk_user_key(vk_user_id))
+
+
+async def reject_vk_user(vk_user_id: int) -> None:
+    await reject_user(vk_user_key(vk_user_id))
+
+
+async def get_all_vk_users(status: str) -> list[int]:
+    if status not in {"approved", "pending", "rejected"}:
+        raise ValueError("Некорректный статус пользователя")
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT user_id
+            FROM users
+            WHERE status = $1
+              AND user_id > $2
+              AND user_id <= $3
+            ORDER BY user_id
+            """,
+            status,
+            VK_USER_KEY_BASE,
+            VK_USER_KEY_BASE + VK_MAX_EXTERNAL_USER_ID,
+        )
+    return [int(row["user_id"]) - VK_USER_KEY_BASE for row in rows]
+
+
+def _validated_vk_history(history: object) -> list[dict[str, str]]:
+    if not isinstance(history, list):
+        return []
+    result: list[dict[str, str]] = []
+    total_chars = 0
+    for item in history[-20:]:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role not in {"user", "assistant"} or not isinstance(content, str):
+            continue
+        remaining = 10_000 - total_chars
+        if remaining <= 0:
+            break
+        clipped = content[: min(10_000, remaining)]
+        result.append({"role": role, "content": clipped})
+        total_chars += len(clipped)
+    return result
+
+
+async def get_vk_state(vk_user_id: int, default_model: str) -> dict:
+    user_id = vk_user_key(vk_user_id)
+    checked_default_model = str(default_model or "")[:128]
+    if not checked_default_model:
+        raise ValueError("Модель по умолчанию не задана")
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT mode, selected_model, chat_history
+            FROM vk_user_state
+            WHERE user_id = $1
+            """,
+            user_id,
+        )
+    if row is None:
+        return {
+            "mode": "main_menu",
+            "selected_model": checked_default_model,
+            "chat_history": [],
+        }
+    raw_history = row["chat_history"]
+    if isinstance(raw_history, str):
+        try:
+            raw_history = json.loads(raw_history)
+        except json.JSONDecodeError:
+            raw_history = []
+    return {
+        "mode": str(row["mode"]),
+        "selected_model": str(row["selected_model"]),
+        "chat_history": _validated_vk_history(raw_history),
+    }
+
+
+async def save_vk_state(
+    vk_user_id: int,
+    *,
+    mode: str,
+    selected_model: str,
+    chat_history: object,
+) -> None:
+    user_id = vk_user_key(vk_user_id)
+    if mode not in {"main_menu", "chat_mode", "image_generate"}:
+        raise ValueError("Некорректный режим VK")
+    checked_model = str(selected_model or "")[:128]
+    if not checked_model:
+        raise ValueError("Модель не задана")
+    checked_history = _validated_vk_history(chat_history)
+    serialized_history = json.dumps(
+        checked_history,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO vk_user_state (
+                user_id, mode, selected_model, chat_history, updated_at
+            )
+            VALUES ($1, $2, $3, $4::jsonb, NOW())
+            ON CONFLICT (user_id)
+            DO UPDATE SET
+                mode = EXCLUDED.mode,
+                selected_model = EXCLUDED.selected_model,
+                chat_history = EXCLUDED.chat_history,
+                updated_at = NOW()
+            """,
+            user_id,
+            mode,
+            checked_model,
+            serialized_history,
+        )
 
 
 # ─── Статистика запросов ───────────────────────────────────────────────────────
