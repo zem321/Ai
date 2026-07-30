@@ -44,6 +44,9 @@ DATABASE_POOL_MAX_SIZE = max(
 REQUEST_STATS_RETENTION_DAYS = _env_int(
     "REQUEST_STATS_RETENTION_DAYS", 90, 7, 365
 )
+VK_CHAT_HISTORY_RETENTION_HOURS = _env_int(
+    "VK_CHAT_HISTORY_RETENTION_HOURS", 24, 1, 168
+)
 GLOBAL_DAILY_AI_LIMIT = _env_int(
     "GLOBAL_DAILY_AI_LIMIT", 5000, 1, 1_000_000
 )
@@ -218,9 +221,31 @@ async def init_db():
                     CHECK (mode IN ('main_menu', 'chat_mode', 'image_generate')),
                 selected_model TEXT NOT NULL,
                 chat_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+                history_updated_at TIMESTAMPTZ,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
             )
+            """
+        )
+        await conn.execute(
+            """
+            ALTER TABLE vk_user_state
+                ADD COLUMN IF NOT EXISTS history_updated_at TIMESTAMPTZ
+            """
+        )
+        await conn.execute(
+            """
+            UPDATE vk_user_state
+            SET history_updated_at = updated_at
+            WHERE history_updated_at IS NULL
+              AND chat_history <> '[]'::jsonb
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_vk_user_state_history_updated
+            ON vk_user_state(history_updated_at)
+            WHERE history_updated_at IS NOT NULL
             """
         )
         await conn.execute(
@@ -590,11 +615,21 @@ async def get_vk_state(vk_user_id: int, default_model: str) -> dict:
     async with _pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT mode, selected_model, chat_history
+            SELECT
+                mode,
+                selected_model,
+                CASE
+                    WHEN history_updated_at IS NOT NULL
+                     AND history_updated_at >
+                         NOW() - ($2::integer * INTERVAL '1 hour')
+                    THEN chat_history
+                    ELSE '[]'::jsonb
+                END AS chat_history
             FROM vk_user_state
             WHERE user_id = $1
             """,
             user_id,
+            VK_CHAT_HISTORY_RETENTION_HOURS,
         )
     if row is None:
         return {
@@ -638,14 +673,36 @@ async def save_vk_state(
         await conn.execute(
             """
             INSERT INTO vk_user_state (
-                user_id, mode, selected_model, chat_history, updated_at
+                user_id,
+                mode,
+                selected_model,
+                chat_history,
+                history_updated_at,
+                updated_at
             )
-            VALUES ($1, $2, $3, $4::jsonb, NOW())
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4::jsonb,
+                CASE
+                    WHEN $4::jsonb = '[]'::jsonb THEN NULL
+                    ELSE NOW()
+                END,
+                NOW()
+            )
             ON CONFLICT (user_id)
             DO UPDATE SET
                 mode = EXCLUDED.mode,
                 selected_model = EXCLUDED.selected_model,
                 chat_history = EXCLUDED.chat_history,
+                history_updated_at = CASE
+                    WHEN EXCLUDED.chat_history = '[]'::jsonb THEN NULL
+                    WHEN vk_user_state.chat_history
+                         IS DISTINCT FROM EXCLUDED.chat_history
+                    THEN NOW()
+                    ELSE vk_user_state.history_updated_at
+                END,
                 updated_at = NOW()
             """,
             user_id,
@@ -1451,7 +1508,7 @@ async def delete_all_web_sessions(user_id: int) -> None:
 
 
 async def cleanup_expired_auth(conn=None) -> None:
-    """Удаляет истёкшие данные аутентификации и старую статистику."""
+    """Удаляет истёкшие данные аутентификации, историю и статистику."""
     if conn is not None:
         await conn.execute("DELETE FROM login_codes WHERE expires_at < NOW()")
         await conn.execute("DELETE FROM web_sessions WHERE expires_at < NOW()")
@@ -1460,6 +1517,17 @@ async def cleanup_expired_auth(conn=None) -> None:
         )
         await conn.execute(
             "DELETE FROM vk_callback_events WHERE expires_at <= NOW()"
+        )
+        await conn.execute(
+            """
+            UPDATE vk_user_state
+            SET chat_history = '[]'::jsonb,
+                history_updated_at = NULL
+            WHERE history_updated_at <=
+                NOW() - ($1::integer * INTERVAL '1 hour')
+              AND chat_history <> '[]'::jsonb
+            """,
+            VK_CHAT_HISTORY_RETENTION_HOURS,
         )
         await conn.execute(
             """
@@ -1485,6 +1553,18 @@ async def cleanup_expired_auth(conn=None) -> None:
         return
     async with _pool.acquire() as acquired:
         await cleanup_expired_auth(conn=acquired)
+
+
+async def healthcheck() -> bool:
+    """Проверяет готовность пула и PostgreSQL без раскрытия деталей ошибки."""
+    if _pool is None:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            return await conn.fetchval("SELECT 1") == 1
+    except (asyncpg.PostgresError, OSError, RuntimeError):
+        logger.warning("Проверка готовности PostgreSQL завершилась ошибкой")
+        return False
 
 
 async def close_db() -> None:
