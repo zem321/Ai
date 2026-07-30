@@ -5,6 +5,7 @@ import secrets
 import hashlib
 import hmac
 import logging
+import re
 import ssl
 from contextlib import asynccontextmanager, suppress
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -220,6 +221,54 @@ async def init_db():
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
             )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS vk_callback_events (
+                event_id TEXT PRIMARY KEY
+                    CHECK (
+                        LENGTH(event_id) BETWEEN 1 AND 128
+                        AND event_id ~ '^[A-Za-z0-9_-]+$'
+                    ),
+                group_id BIGINT NOT NULL CHECK (group_id > 0),
+                peer_id BIGINT NOT NULL CHECK (peer_id > 0),
+                conversation_message_id BIGINT NOT NULL
+                    CHECK (conversation_message_id > 0),
+                message_id BIGINT NOT NULL DEFAULT 0 CHECK (message_id >= 0),
+                received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        await conn.execute(
+            """
+            ALTER TABLE vk_callback_events
+                ADD COLUMN IF NOT EXISTS group_id BIGINT,
+                ADD COLUMN IF NOT EXISTS peer_id BIGINT,
+                ADD COLUMN IF NOT EXISTS conversation_message_id BIGINT,
+                ADD COLUMN IF NOT EXISTS message_id BIGINT
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_vk_callback_events_expires
+            ON vk_callback_events(expires_at)
+            """
+        )
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS
+                uq_vk_callback_events_official_message
+            ON vk_callback_events(
+                group_id,
+                peer_id,
+                conversation_message_id
+            )
+            WHERE
+                group_id IS NOT NULL
+                AND peer_id IS NOT NULL
+                AND conversation_message_id IS NOT NULL
             """
         )
         await conn.execute(
@@ -603,6 +652,89 @@ async def save_vk_state(
             mode,
             checked_model,
             serialized_history,
+        )
+
+
+async def claim_vk_callback_message(
+    *,
+    event_id: str,
+    group_id: int,
+    peer_id: int,
+    conversation_message_id: int,
+    message_id: int,
+    retention_seconds: int = 24 * 60 * 60,
+) -> bool:
+    """Claims both VK event_id and the immutable official message identity."""
+    if (
+        not isinstance(event_id, str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", event_id)
+    ):
+        raise ValueError("Некорректный VK event_id")
+    identifiers = (
+        group_id,
+        peer_id,
+        conversation_message_id,
+    )
+    if any(
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or value <= 0
+        for value in identifiers
+    ):
+        raise ValueError("Некорректный идентификатор сообщения VK")
+    if (
+        not isinstance(message_id, int)
+        or isinstance(message_id, bool)
+        or message_id < 0
+    ):
+        raise ValueError("Некорректный message_id VK")
+    checked_retention = max(
+        60 * 60,
+        min(int(retention_seconds), 7 * 24 * 60 * 60),
+    )
+    async with _pool.acquire() as conn:
+        inserted = await conn.fetchval(
+            """
+            INSERT INTO vk_callback_events(
+                event_id,
+                group_id,
+                peer_id,
+                conversation_message_id,
+                message_id,
+                expires_at
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                NOW() + ($6::integer * INTERVAL '1 second')
+            )
+            ON CONFLICT DO NOTHING
+            RETURNING event_id
+            """,
+            event_id,
+            group_id,
+            peer_id,
+            conversation_message_id,
+            message_id,
+            checked_retention,
+        )
+    return inserted is not None
+
+
+async def release_vk_callback_event(event_id: str) -> None:
+    """Releases an event only when it could not be queued for processing."""
+    if (
+        not isinstance(event_id, str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", event_id)
+    ):
+        return
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM vk_callback_events WHERE event_id = $1",
+            event_id,
         )
 
 
@@ -1325,6 +1457,9 @@ async def cleanup_expired_auth(conn=None) -> None:
         await conn.execute("DELETE FROM web_sessions WHERE expires_at < NOW()")
         await conn.execute(
             "DELETE FROM active_user_requests WHERE expires_at <= NOW()"
+        )
+        await conn.execute(
+            "DELETE FROM vk_callback_events WHERE expires_at <= NOW()"
         )
         await conn.execute(
             """
