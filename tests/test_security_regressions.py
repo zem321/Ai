@@ -1,8 +1,12 @@
 import importlib
 import os
+import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
+import database as db
 from safety import (
     prohibited_image_reason,
     prohibited_output_reason,
@@ -359,6 +363,205 @@ class LogoutCsrfRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200)
 
 
+class VKChannelRegressionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.vk_handler = importlib.import_module("handlers.vk_handler")
+
+    def test_vk_user_key_is_separate_and_reversible(self):
+        vk_id = 123456789
+        internal_id = db.vk_user_key(vk_id)
+        self.assertGreater(internal_id, db.VK_USER_KEY_BASE)
+        self.assertEqual(db.vk_external_user_id(internal_id), vk_id)
+        self.assertIsNone(db.vk_external_user_id(vk_id))
+
+    def test_vk_user_key_rejects_invalid_values(self):
+        for value in (True, 0, -1, db.VK_MAX_EXTERNAL_USER_ID + 1):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    db.vk_user_key(value)
+
+    def test_vk_disabled_does_not_require_secrets(self):
+        with patch.dict(os.environ, {"VK_ENABLED": "0"}, clear=False):
+            self.assertIsNone(
+                self.vk_handler.VKConfig.from_environment()
+            )
+
+    def test_vk_media_url_does_not_accept_suffix_confusion(self):
+        allowed = self.vk_handler._VK_MEDIA_HOSTS
+        valid = self.vk_handler._validated_https_url(
+            "https://sun9-1.userapi.com/image.jpg?x=1",
+            allowed,
+        )
+        self.assertTrue(valid.startswith("https://"))
+        invalid_urls = (
+            "https://userapi.com.attacker.example/image.jpg",
+            "https://attacker.example/userapi.com/image.jpg",
+            "https://userapi.com./image.jpg",
+            "https://userapi.com@attacker.example/image.jpg",
+            "https://attacker.example@userapi.com/image.jpg",
+            "https://userapi.com:444/image.jpg",
+            "http://userapi.com/image.jpg",
+            "https://userapi.c\u043em/image.jpg",
+            "https://userapi.com\\@attacker.example/image.jpg",
+            "https://userapi.com/%0d%0aHost:attacker.example",
+            " https://userapi.com/image.jpg",
+            "https://userapi.com",
+        )
+        for url in invalid_urls:
+            with self.subTest(url=url):
+                with self.assertRaises(RuntimeError):
+                    self.vk_handler._validated_https_url(url, allowed)
+
+    def test_vk_long_poll_url_rejects_embedded_query(self):
+        self.assertEqual(
+            self.vk_handler._validated_https_url(
+                "https://lp.vk.com/wh123",
+                self.vk_handler._VK_LONG_POLL_HOSTS,
+                allow_query=False,
+            ),
+            "https://lp.vk.com/wh123",
+        )
+        with self.assertRaises(RuntimeError):
+            self.vk_handler._validated_https_url(
+                "https://lp.vk.com/wh123?key=attacker",
+                self.vk_handler._VK_LONG_POLL_HOSTS,
+                allow_query=False,
+            )
+
+    def test_vk_long_poll_key_and_ts_are_strict(self):
+        self.assertEqual(
+            self.vk_handler._validated_long_poll_key("a" * 32),
+            "a" * 32,
+        )
+        self.assertEqual(
+            self.vk_handler._validated_long_poll_ts("123456789"),
+            "123456789",
+        )
+        for value in ("short", "a" * 15 + "&", "a" * 15 + "\n"):
+            with self.subTest(key=value):
+                with self.assertRaises(RuntimeError):
+                    self.vk_handler._validated_long_poll_key(value)
+        for value in ("", "-1", "1&key=bad", True, object()):
+            with self.subTest(ts=value):
+                with self.assertRaises(RuntimeError):
+                    self.vk_handler._validated_long_poll_ts(value)
+
+    def test_vk_rejects_replayed_and_stale_events(self):
+        config = self.vk_handler.VKConfig(
+            token="x" * 64,
+            group_id=123,
+            admin_id=456,
+            api_version="5.199",
+        )
+        bot = self.vk_handler.VKBot(config)
+        current_message = {
+            "date": int(time.time()),
+            "id": 1001,
+            "conversation_message_id": 7,
+            "from_id": 456,
+            "peer_id": 456,
+        }
+        update = {"event_id": "event-1001"}
+        self.assertTrue(
+            bot._accept_fresh_event_once(update, current_message)
+        )
+        self.assertFalse(
+            bot._accept_fresh_event_once(update, current_message)
+        )
+
+        stale_message = {
+            **current_message,
+            "date": int(time.time()) - bot._event_max_age_seconds - 1,
+            "id": 1002,
+            "conversation_message_id": 8,
+        }
+        self.assertFalse(
+            bot._accept_fresh_event_once(
+                {"event_id": "event-1002"},
+                stale_message,
+            )
+        )
+
+    def test_invalid_event_id_cannot_override_message_replay_key(self):
+        config = self.vk_handler.VKConfig(
+            token="x" * 64,
+            group_id=123,
+            admin_id=456,
+            api_version="5.199",
+        )
+        bot = self.vk_handler.VKBot(config)
+        message = {
+            "date": int(time.time()),
+            "id": 2001,
+            "conversation_message_id": 11,
+            "from_id": 456,
+            "peer_id": 456,
+        }
+        self.assertTrue(
+            bot._accept_fresh_event_once(
+                {"event_id": "../spoofed-event"},
+                message,
+            )
+        )
+        self.assertFalse(
+            bot._accept_fresh_event_once(
+                {"event_id": "../other-spoof"},
+                message,
+            )
+        )
+
+    def test_telegram_startup_is_not_blocked_by_vk_initialization(self):
+        bot_path = Path(__file__).with_name("bot.py")
+        if not bot_path.exists():
+            bot_path = Path(__file__).with_name("bot 8.py")
+        source = bot_path.read_text(encoding="utf-8")
+        self.assertIn(
+            "asyncio.create_task(\n"
+            "            run_vk_channel_from_environment()",
+            source,
+        )
+        self.assertNotIn(
+            "await create_vk_bot_from_environment()",
+            source,
+        )
+
+
+class VKChannelAsyncRegressionTests(unittest.IsolatedAsyncioTestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.vk_handler = importlib.import_module("handlers.vk_handler")
+
+    def _bot(self):
+        return self.vk_handler.VKBot(
+            self.vk_handler.VKConfig(
+                token="x" * 64,
+                group_id=123,
+                admin_id=456,
+                api_version="5.199",
+            )
+        )
+
+    async def test_vk_user_id_must_match_official_api_response(self):
+        bot = self._bot()
+        bot.api = AsyncMock(return_value=[{"id": 999}])
+        self.assertFalse(await bot._verify_vk_user_id(456))
+        bot.api.assert_awaited_once_with("users.get", user_ids="456")
+
+    async def test_verified_vk_user_id_is_cached_briefly(self):
+        bot = self._bot()
+        bot.api = AsyncMock(return_value=[{"id": 456}])
+        self.assertTrue(await bot._verify_vk_user_id(456))
+        self.assertTrue(await bot._verify_vk_user_id(456))
+        bot.api.assert_awaited_once_with("users.get", user_ids="456")
+
+    async def test_vk_send_rejects_non_private_peer_before_api_call(self):
+        bot = self._bot()
+        bot.api = AsyncMock()
+        with self.assertRaises(ValueError):
+            await bot.send_message(db.VK_MAX_EXTERNAL_USER_ID + 1, "test")
+        bot.api.assert_not_awaited()
+
+
 if __name__ == "__main__":
     unittest.main()
-
