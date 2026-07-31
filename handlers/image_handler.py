@@ -13,7 +13,7 @@ import aiohttp
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
-from keyboards import GEMINI_MODELS, cancel_keyboard
+from keyboards import GEMINI_MODELS, menu_keyboard
 from states import BotStates
 import database as db
 from request_guard import single_user_ai_request
@@ -413,7 +413,7 @@ async def enter_generation(callback: CallbackQuery, state: FSMContext):
         await callback.answer(AI_DISABLED_MESSAGE, show_alert=True)
         return
     await state.set_state(BotStates.image_generate)
-    await callback.message.edit_text("<b>Генерация фото</b>\n\nОтправь текстовый запрос.", parse_mode="HTML", reply_markup=cancel_keyboard())
+    await callback.message.edit_text("<b>Генерация фото</b>\n\nОтправь текстовый запрос.", parse_mode="HTML", reply_markup=menu_keyboard())
     await callback.answer()
 
 
@@ -470,16 +470,16 @@ async def do_generate(message: Message, state: FSMContext):
             photo=BufferedInputFile(image_bytes, filename="generated.png"),
             caption=f"<b>Готово</b>\n\n{escape(caption_prompt)}",
             parse_mode="HTML",
-            reply_markup=cancel_keyboard(),
+            reply_markup=menu_keyboard(),
         )
     except asyncio.TimeoutError:
         await status_msg.edit_text(
             "❌ Генерация заняла слишком много времени.",
-            reply_markup=cancel_keyboard(),
+            reply_markup=menu_keyboard(),
         )
     except Exception:
         logger.exception("Ошибка генерации изображения")
         await status_msg.edit_text(
             "❌ Не удалось создать изображение. Попробуй позже.",
-            reply_markup=cancel_keyboard(),
+            reply_markup=menu_keyboard(),
         )
