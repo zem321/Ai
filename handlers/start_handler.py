@@ -7,7 +7,12 @@ from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 
 import database as db
-from keyboards import main_menu_keyboard, admin_notify_keyboard, admin_panel_keyboard
+from keyboards import (
+    main_menu_keyboard,
+    menu_keyboard,
+    admin_notify_keyboard,
+    admin_panel_keyboard,
+)
 from states import BotStates
 
 logger = logging.getLogger(__name__)
@@ -121,7 +126,7 @@ async def cb_help(callback: CallbackQuery):
         "/start — главное меню\n"
         "/admin — панель администратора"
     )
-    await callback.message.edit_text(text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+    await callback.message.edit_text(text, reply_markup=menu_keyboard(), parse_mode="HTML")
     await callback.answer()
 
 
