@@ -110,7 +110,18 @@ async def cmd_start(message: Message, state: FSMContext):
 @router.callback_query(F.data == "main_menu")
 async def cb_main_menu(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BotStates.main_menu)
-    await callback.message.edit_text(WELCOME_TEXT, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+    if callback.message.text is not None:
+        await callback.message.edit_text(
+            WELCOME_TEXT,
+            reply_markup=main_menu_keyboard(),
+            parse_mode="HTML",
+        )
+    else:
+        await callback.message.answer(
+            WELCOME_TEXT,
+            reply_markup=main_menu_keyboard(),
+            parse_mode="HTML",
+        )
     await callback.answer()
 
 
