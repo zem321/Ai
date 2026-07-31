@@ -5,14 +5,17 @@ import base64
 import binascii
 import json
 import logging
+import re
 import time
 from collections import OrderedDict, deque
 from html import escape
+from io import BytesIO
 from urllib.parse import urlsplit
 import aiohttp
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
+from PIL import Image, ImageOps
 from keyboards import GEMINI_MODELS, menu_keyboard
 from states import BotStates
 import database as db
@@ -20,6 +23,7 @@ from request_guard import single_user_ai_request
 from safety import (
     AI_DISABLED_MESSAGE,
     AI_REQUESTS_ENABLED,
+    ALLOW_USER_IMAGE_UPLOADS,
     contains_probable_secret,
     prohibited_image_reason,
     sanitize_safe_image_payload,
@@ -31,13 +35,16 @@ router = Router()
 logger = logging.getLogger(__name__)
 logger.info("image_handler module loaded: build=stream-read-v3")
 
-__all__ = ("router", "generate_image")
+__all__ = ("router", "generate_image", "edit_image")
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
+CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://ai.api.nvidia.com/v1/genai")
 NVIDIA_OPENAI_BASE = os.getenv("NVIDIA_OPENAI_BASE", "https://integrate.api.nvidia.com/v1")
 _ALLOWED_NVIDIA_HOSTS = {"ai.api.nvidia.com", "integrate.api.nvidia.com"}
+CLOUDFLARE_IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
 GEMINI_OPENAI_CHAT_URL = (
     "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 )
@@ -50,6 +57,9 @@ if IMAGE_MODERATION_MODEL not in GEMINI_MODELS:
         "IMAGE_MODERATION_MODEL должен быть разрешённой Gemini-моделью"
     )
 MAX_GENERATED_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_EDIT_INPUT_BYTES = 15 * 1024 * 1024
+MAX_EDIT_SOURCE_PIXELS = 25_000_000
+CLOUDFLARE_EDIT_MAX_SIDE = 511
 PROVIDER_RESPONSE_LIMIT = 15 * 1024 * 1024
 MODERATION_RESPONSE_LIMIT = 64 * 1024
 MAX_IMAGE_PROMPT_CHARS = 4_000
@@ -81,6 +91,12 @@ def _validated_nvidia_url(base_url: str, suffix: str) -> str:
 class ProviderHTTPError(Exception):
     def __init__(self, status: int):
         super().__init__(f"NVIDIA API вернул HTTP {status}")
+        self.status = status
+
+
+class CloudflareHTTPError(Exception):
+    def __init__(self, status: int):
+        super().__init__(f"Cloudflare API вернул HTTP {status}")
         self.status = status
 
 
@@ -322,6 +338,193 @@ def _decode_image_base64(value: object) -> bytes:
     return sanitized[0]
 
 
+class _LimitedBytesIO(BytesIO):
+    """Прерывает загрузку Telegram-файла при превышении лимита."""
+
+    def __init__(self, max_bytes: int):
+        super().__init__()
+        self.max_bytes = max_bytes
+
+    def write(self, data) -> int:
+        if self.tell() + len(data) > self.max_bytes:
+            raise ValueError("Изображение слишком большое.")
+        return super().write(data)
+
+
+async def _telegram_photo_to_bytes(message: Message, file_id: str) -> bytes:
+    tg_file = await message.bot.get_file(file_id)
+    if not tg_file.file_path:
+        raise ValueError("Telegram не вернул изображение.")
+    if tg_file.file_size and tg_file.file_size > MAX_EDIT_INPUT_BYTES:
+        raise ValueError("Изображение слишком большое.")
+    buffer = _LimitedBytesIO(MAX_EDIT_INPUT_BYTES)
+    await message.bot.download_file(tg_file.file_path, destination=buffer)
+    raw = buffer.getvalue()
+    if not raw:
+        raise ValueError("Не удалось скачать изображение.")
+    return raw
+
+
+def _edit_output_dimensions(width: int, height: int) -> tuple[int, int]:
+    """Сохраняет пропорции исходника при выходе примерно до 1024 px."""
+    if width <= 0 or height <= 0:
+        raise ValueError("Изображение имеет некорректный размер.")
+    if width >= height:
+        output_width = 1024
+        output_height = round((1024 * height / width) / 32) * 32
+    else:
+        output_height = 1024
+        output_width = round((1024 * width / height) / 32) * 32
+    return (
+        max(256, min(output_width, 1024)),
+        max(256, min(output_height, 1024)),
+    )
+
+
+def _prepare_cloudflare_edit_input(
+    raw: bytes,
+) -> tuple[bytes, str, int, int]:
+    if not ALLOW_USER_IMAGE_UPLOADS:
+        raise ValueError("Загрузка пользовательских изображений отключена.")
+    if not raw or len(raw) > MAX_EDIT_INPUT_BYTES:
+        raise ValueError("Изображение пустое или слишком большое.")
+    try:
+        sanitized = sanitize_safe_image_payload(
+            raw,
+            max_output_bytes=MAX_EDIT_INPUT_BYTES,
+        )
+    except ValueError as exc:
+        raise ValueError("Изображение не прошло проверку формата.") from exc
+    if sanitized is None:
+        raise ValueError("Поддерживаются только безопасные изображения JPEG и PNG.")
+
+    safe_bytes, _ = sanitized
+    try:
+        with Image.open(BytesIO(safe_bytes)) as source:
+            source.load()
+            source_width, source_height = source.size
+            if (
+                source_width <= 0
+                or source_height <= 0
+                or source_width * source_height > MAX_EDIT_SOURCE_PIXELS
+            ):
+                raise ValueError("Изображение имеет недопустимое разрешение.")
+            prepared = ImageOps.exif_transpose(source).convert("RGB")
+            prepared.thumbnail(
+                (CLOUDFLARE_EDIT_MAX_SIDE, CLOUDFLARE_EDIT_MAX_SIDE),
+                Image.Resampling.LANCZOS,
+            )
+            output_width, output_height = _edit_output_dimensions(
+                source_width,
+                source_height,
+            )
+            output = BytesIO()
+            prepared.save(output, format="JPEG", quality=95, optimize=True)
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise ValueError("Изображение повреждено или имеет опасный размер.") from exc
+
+    prepared_bytes = output.getvalue()
+    if not prepared_bytes or len(prepared_bytes) > MAX_EDIT_INPUT_BYTES:
+        raise ValueError("Не удалось безопасно подготовить изображение.")
+    return prepared_bytes, "image/jpeg", output_width, output_height
+
+
+def _cloudflare_image_url() -> str:
+    if not re.fullmatch(r"[0-9a-fA-F]{32}", CLOUDFLARE_ACCOUNT_ID):
+        raise RuntimeError("CLOUDFLARE_ACCOUNT_ID имеет некорректный формат")
+    return (
+        "https://api.cloudflare.com/client/v4/accounts/"
+        f"{CLOUDFLARE_ACCOUNT_ID}/ai/run/{CLOUDFLARE_IMAGE_MODEL}"
+    )
+
+
+async def _cloudflare_edit_image(
+    prompt: str,
+    image_bytes: bytes,
+    mime_type: str,
+    width: int,
+    height: int,
+) -> bytes:
+    if not CLOUDFLARE_API_TOKEN:
+        raise RuntimeError("CLOUDFLARE_API_TOKEN не задан")
+    form = aiohttp.FormData()
+    form.add_field("prompt", prompt)
+    form.add_field(
+        "input_image_0",
+        image_bytes,
+        filename="input.jpg",
+        content_type=mime_type,
+    )
+    form.add_field("width", str(width))
+    form.add_field("height", str(height))
+    headers = {
+        "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
+        "Accept": "application/json",
+    }
+    timeout = aiohttp.ClientTimeout(
+        total=IMAGE_TIMEOUT_SECONDS,
+        connect=10,
+        sock_read=max(30, IMAGE_TIMEOUT_SECONDS - 20),
+    )
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(
+            _cloudflare_image_url(),
+            data=form,
+            headers=headers,
+            allow_redirects=False,
+        ) as resp:
+            raw = await _read_limited_response(
+                resp,
+                PROVIDER_RESPONSE_LIMIT,
+            )
+            if resp.status < 200 or resp.status >= 300:
+                logger.warning(
+                    "Cloudflare image edit API error status=%s",
+                    resp.status,
+                )
+                raise CloudflareHTTPError(resp.status)
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Cloudflare API вернул некорректный JSON") from exc
+    if not isinstance(data, dict) or data.get("success") is not True:
+        raise RuntimeError("Cloudflare API вернул некорректный ответ")
+    result = data.get("result")
+    if not isinstance(result, dict):
+        raise RuntimeError("Cloudflare API не вернул результат")
+    image = _decode_image_base64(result.get("image"))
+    await _moderate_generated_image(image)
+    return image
+
+
+async def edit_image(prompt: str, source_image: bytes) -> bytes:
+    if not AI_REQUESTS_ENABLED:
+        raise RuntimeError(AI_DISABLED_MESSAGE)
+    if not isinstance(prompt, str):
+        raise ValueError("Промпт должен быть строкой")
+    prompt = prompt.strip()
+    if not prompt:
+        raise ValueError("Промпт не задан")
+    if len(prompt) > MAX_IMAGE_PROMPT_CHARS:
+        raise ValueError("Промпт слишком длинный")
+    if contains_probable_secret(prompt):
+        raise ValueError("Промпт содержит данные, похожие на секрет")
+    prohibited_reason = prohibited_image_reason(prompt)
+    if prohibited_reason:
+        raise ValueError(safety_response_for_reason(prohibited_reason))
+
+    prepared, mime_type, width, height = _prepare_cloudflare_edit_input(
+        source_image
+    )
+    return await _cloudflare_edit_image(
+        prompt,
+        prepared,
+        mime_type,
+        width,
+        height,
+    )
+
+
 async def generate_image(prompt: str):
     if not AI_REQUESTS_ENABLED:
         raise RuntimeError(AI_DISABLED_MESSAGE)
@@ -413,7 +616,30 @@ async def enter_generation(callback: CallbackQuery, state: FSMContext):
         await callback.answer(AI_DISABLED_MESSAGE, show_alert=True)
         return
     await state.set_state(BotStates.image_generate)
+    await state.update_data(image_mode="generate")
     await callback.message.edit_text("<b>Генерация фото</b>\n\nОтправь текстовый запрос.", parse_mode="HTML", reply_markup=menu_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "mode_image_edit")
+async def enter_editing(callback: CallbackQuery, state: FSMContext):
+    if not AI_REQUESTS_ENABLED:
+        await callback.answer(AI_DISABLED_MESSAGE, show_alert=True)
+        return
+    if not ALLOW_USER_IMAGE_UPLOADS:
+        await callback.answer(
+            "Загрузка пользовательских изображений отключена.",
+            show_alert=True,
+        )
+        return
+    await state.set_state(BotStates.image_generate)
+    await state.update_data(image_mode="edit")
+    await callback.message.edit_text(
+        "<b>Редактирование фото</b>\n\n"
+        "Отправь фотографию с подписью, что нужно изменить.",
+        parse_mode="HTML",
+        reply_markup=menu_keyboard(),
+    )
     await callback.answer()
 
 
@@ -422,6 +648,13 @@ async def enter_generation(callback: CallbackQuery, state: FSMContext):
 async def do_generate(message: Message, state: FSMContext):
     if not AI_REQUESTS_ENABLED:
         await message.answer(AI_DISABLED_MESSAGE)
+        return
+    data = await state.get_data()
+    if data.get("image_mode") == "edit":
+        await message.answer(
+            "Отправь фотографию и укажи задание в подписи к ней.",
+            reply_markup=menu_keyboard(),
+        )
         return
     prompt = message.text.strip()
     if not prompt:
@@ -481,5 +714,97 @@ async def do_generate(message: Message, state: FSMContext):
         logger.exception("Ошибка генерации изображения")
         await status_msg.edit_text(
             "❌ Не удалось создать изображение. Попробуй позже.",
+            reply_markup=menu_keyboard(),
+        )
+
+
+@router.message(BotStates.image_generate, F.photo)
+@single_user_ai_request
+async def do_edit(message: Message, state: FSMContext):
+    if not AI_REQUESTS_ENABLED:
+        await message.answer(AI_DISABLED_MESSAGE)
+        return
+    data = await state.get_data()
+    if data.get("image_mode") != "edit":
+        await message.answer(
+            "Для редактирования выбери в меню «Редактировать фото».",
+            reply_markup=menu_keyboard(),
+        )
+        return
+    if not ALLOW_USER_IMAGE_UPLOADS:
+        await message.answer("Загрузка пользовательских изображений отключена.")
+        return
+    prompt = (message.caption or "").strip()
+    if not prompt:
+        await message.answer(
+            "Добавь к фотографии подпись с описанием нужных изменений.",
+            reply_markup=menu_keyboard(),
+        )
+        return
+    if len(prompt) > MAX_IMAGE_PROMPT_CHARS:
+        await message.answer(
+            f"Запрос слишком длинный. Максимум {MAX_IMAGE_PROMPT_CHARS} символов."
+        )
+        return
+    if contains_probable_secret(prompt):
+        await message.answer("Запрос похож на секрет и не был отправлен.")
+        return
+    prohibited_reason = prohibited_image_reason(prompt)
+    if prohibited_reason:
+        await message.answer(safety_response_for_reason(prohibited_reason))
+        return
+    user_id = message.from_user.id
+    if not _image_rate_limiter.allow(user_id):
+        await message.answer("Лимит обработки изображений исчерпан. Попробуй позже.")
+        return
+    try:
+        reserved = await db.reserve_request(
+            user_id,
+            "image-generation",
+            source="bot",
+            default_daily_limit=DEFAULT_DAILY_IMAGE_LIMIT,
+        )
+    except Exception:
+        logger.exception("Не удалось проверить лимит редактирования изображений")
+        await message.answer("Проверка лимита временно недоступна. Попробуй позже.")
+        return
+    if not reserved:
+        await message.answer("Дневной лимит обработки изображений исчерпан.")
+        return
+
+    status_msg = await message.answer("⏳ Редактирую фото...", parse_mode="HTML")
+    try:
+        source_image = await _telegram_photo_to_bytes(
+            message,
+            message.photo[-1].file_id,
+        )
+        async with _image_semaphore:
+            image_bytes = await asyncio.wait_for(
+                edit_image(prompt, source_image),
+                timeout=IMAGE_TIMEOUT_SECONDS,
+            )
+        await status_msg.delete()
+        caption_prompt = prompt[:900] + ("…" if len(prompt) > 900 else "")
+        await message.answer_photo(
+            photo=BufferedInputFile(image_bytes, filename="edited.png"),
+            caption=f"<b>Готово</b>\n\n{escape(caption_prompt)}",
+            parse_mode="HTML",
+            reply_markup=menu_keyboard(),
+        )
+    except asyncio.TimeoutError:
+        await status_msg.edit_text(
+            "❌ Редактирование заняло слишком много времени.",
+            reply_markup=menu_keyboard(),
+        )
+    except ValueError as exc:
+        await status_msg.edit_text(
+            f"❌ {escape(str(exc))}",
+            parse_mode="HTML",
+            reply_markup=menu_keyboard(),
+        )
+    except Exception:
+        logger.exception("Ошибка редактирования изображения")
+        await status_msg.edit_text(
+            "❌ Не удалось отредактировать изображение. Попробуй позже.",
             reply_markup=menu_keyboard(),
         )
