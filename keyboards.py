@@ -35,6 +35,9 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Генерация фото", callback_data="mode_image_gen"),
         ],
         [
+            InlineKeyboardButton(text="Редактировать фото", callback_data="mode_image_edit"),
+        ],
+        [
             InlineKeyboardButton(text="Очистить историю", callback_data="clear_history"),
         ],
         [
