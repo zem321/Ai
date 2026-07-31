@@ -35,7 +35,6 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Генерация фото", callback_data="mode_image_gen"),
         ],
         [
-            InlineKeyboardButton(text="Выбрать модель", callback_data="select_model"),
             InlineKeyboardButton(text="Очистить историю", callback_data="clear_history"),
         ],
         [
@@ -75,6 +74,11 @@ def cancel_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Сменить модель", callback_data="select_model"),
             InlineKeyboardButton(text="Меню", callback_data="main_menu"),
         ]
+    ])
+
+def menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Меню", callback_data="main_menu")]
     ])
 
 def edit_model_keyboard() -> InlineKeyboardMarkup:
