@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
+CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
 LOGIN_CODE_PEPPER = os.getenv("LOGIN_CODE_PEPPER", "")
 try:
     ADMIN_ID = int(os.environ["ADMIN_ID"])
@@ -97,15 +99,20 @@ def _validate_required_provider_secret(name: str, value: str) -> None:
 
 _validate_required_provider_secret("GEMINI_API_KEY", GEMINI_API_KEY)
 _validate_required_provider_secret("NVIDIA_API_KEY", NVIDIA_API_KEY)
+_validate_required_provider_secret("CLOUDFLARE_API_TOKEN", CLOUDFLARE_API_TOKEN)
+if not re.fullmatch(r"[0-9a-fA-F]{32}", CLOUDFLARE_ACCOUNT_ID):
+    raise RuntimeError("CLOUDFLARE_ACCOUNT_ID имеет некорректный формат")
 configured_secrets = {
     BOT_TOKEN,
     GEMINI_API_KEY.strip(),
     NVIDIA_API_KEY.strip(),
+    CLOUDFLARE_API_TOKEN.strip(),
     LOGIN_CODE_PEPPER,
 }
-if len(configured_secrets) != 4:
+if len(configured_secrets) != 5:
     raise RuntimeError(
-        "BOT_TOKEN, GEMINI_API_KEY, NVIDIA_API_KEY и LOGIN_CODE_PEPPER "
+        "BOT_TOKEN, GEMINI_API_KEY, NVIDIA_API_KEY, CLOUDFLARE_API_TOKEN "
+        "и LOGIN_CODE_PEPPER "
         "должны быть разными секретами"
     )
 
