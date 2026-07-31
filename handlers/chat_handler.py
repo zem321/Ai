@@ -188,6 +188,17 @@ FILE_RESEND_COMMANDS = [
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NVIDIA_MODELS_URL = "https://integrate.api.nvidia.com/v1/models"
+NVIDIA_IMAGE_MODELS = (
+    "stabilityai/stable-diffusion-3.5-large",
+    "black-forest-labs/flux.1-dev",
+    "black-forest-labs/flux.1-schnell",
+    "qwen/qwen-image",
+    "qwen/qwen-image-2512",
+    "black-forest-labs/flux.2-klein-4b",
+)
+NVIDIA_VIDEO_MODELS = (
+    "wan-ai/wan2.2",
+)
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -1117,6 +1128,37 @@ async def show_nvidia_models(message: Message):
             parse_mode="HTML",
         )
 
+async def _show_nvidia_media_models(
+    message: Message,
+    title: str,
+    model_ids: tuple[str, ...],
+) -> None:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
+        return
+    await message.answer(
+        f"<b>{escape(title)}: {len(model_ids)}</b>\n\n"
+        + "\n".join(f"<code>{escape(model_id)}</code>" for model_id in model_ids),
+        parse_mode="HTML",
+    )
+
+
+@router.message(F.text == "/nvidia_image_models")
+async def show_nvidia_image_models(message: Message):
+    await _show_nvidia_media_models(
+        message,
+        "Фото-модели NVIDIA",
+        NVIDIA_IMAGE_MODELS,
+    )
+
+
+@router.message(F.text == "/nvidia_video_models")
+async def show_nvidia_video_models(message: Message):
+    await _show_nvidia_media_models(
+        message,
+        "Видео-модели NVIDIA",
+        NVIDIA_VIDEO_MODELS,
+    )
+
 
 @router.callback_query(F.data == "select_model")
 async def select_model_group(callback: CallbackQuery):
@@ -1153,7 +1195,15 @@ async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
     model_id = data.get("selected_model") or list(GEMINI_MODELS.keys())[0]
     await state.update_data(selected_model=model_id)
     await state.set_state(BotStates.chat_mode)
-    await callback.message.edit_text("<b>Режим чата активирован</b>\n\nПиши свои сообщения.\n/clear — очистить историю", reply_markup=cancel_keyboard(), parse_mode="HTML")
+    model_name = MODELS.get(model_id, model_id)
+    await callback.message.edit_text(
+        "<b>Режим чата активирован</b>\n\n"
+        f"<b>Выбрана модель:</b> {escape(model_name)}\n\n"
+        "Пиши свои сообщения.\n"
+        "/clear — очистить историю",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML",
+    )
     await callback.answer()
 
 @router.callback_query(F.data == "clear_history")
