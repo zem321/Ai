@@ -1,9 +1,3 @@
-"""VK Callback API channel for the shared AI assistant.
-
-The module intentionally uses aiohttp that is already present in the locked
-requirements. AI providers, content safety, quotas and request leases are
-reused from the Telegram/web application.
-"""
 
 from __future__ import annotations
 
@@ -68,7 +62,9 @@ try:
     from handlers.image_handler import (
         DEFAULT_DAILY_IMAGE_LIMIT,
         IMAGE_TIMEOUT_SECONDS,
+        MAX_EDIT_INPUT_BYTES,
         MAX_IMAGE_PROMPT_CHARS,
+        edit_image,
         generate_image,
     )
 except ImportError:
@@ -92,7 +88,9 @@ except ImportError:
     from image_handler import (  # type: ignore[no-redef]
         DEFAULT_DAILY_IMAGE_LIMIT,
         IMAGE_TIMEOUT_SECONDS,
+        MAX_EDIT_INPUT_BYTES,
         MAX_IMAGE_PROMPT_CHARS,
+        edit_image,
         generate_image,
     )
 
@@ -434,6 +432,9 @@ def main_menu_keyboard() -> str:
             [
                 _button("Чат с ИИ", "chat", color="primary"),
                 _button("Генерация фото", "image", color="primary"),
+            ],
+            [
+                _button("Редактировать фото", "image_edit"),
             ],
             [
                 _button("Выбрать модель", "models"),
@@ -1088,10 +1089,10 @@ class VKBot:
 
         attachments = message.get("attachments")
         if isinstance(attachments, list) and attachments:
-            if state["mode"] != "chat_mode":
+            if state["mode"] not in {"chat_mode", "image_edit"}:
                 await self.send_message(
                     peer_id,
-                    "Сначала включи режим «Чат с ИИ».",
+                    "Сначала включи режим «Чат с ИИ» или «Редактировать фото».",
                     keyboard=main_menu_keyboard(),
                 )
                 return
@@ -1106,12 +1107,29 @@ class VKBot:
                 None,
             )
             if photo is not None:
-                await self._handle_photo(
-                    vk_user_id,
+                if state["mode"] == "image_edit":
+                    await self._handle_photo_edit(
+                        vk_user_id,
+                        peer_id,
+                        photo,
+                        text,
+                        state,
+                    )
+                else:
+                    await self._handle_photo(
+                        vk_user_id,
+                        peer_id,
+                        photo,
+                        text,
+                        state,
+                    )
+                return
+            if state["mode"] == "image_edit":
+                await self.send_message(
                     peer_id,
-                    photo,
-                    text,
-                    state,
+                    "Для редактирования отправь фотографию с подписью, "
+                    "что изменить.",
+                    keyboard=mode_keyboard(),
                 )
                 return
             document = next(
@@ -1155,6 +1173,12 @@ class VKBot:
                 peer_id,
                 text,
                 state,
+            )
+        elif state["mode"] == "image_edit":
+            await self.send_message(
+                peer_id,
+                "Отправь фотографию и укажи задание в подписи к ней.",
+                keyboard=mode_keyboard(),
             )
         else:
             await self.send_message(
@@ -1268,6 +1292,24 @@ class VKBot:
                 keyboard=mode_keyboard(),
             )
             return True
+        if command == "image_edit":
+            if not AI_REQUESTS_ENABLED:
+                await self.send_message(peer_id, AI_DISABLED_MESSAGE)
+                return True
+            if not ALLOW_USER_IMAGE_UPLOADS:
+                await self.send_message(
+                    peer_id,
+                    "Загрузка пользовательских изображений отключена.",
+                )
+                return True
+            await self._save_state(vk_user_id, state, mode="image_edit")
+            await self.send_message(
+                peer_id,
+                "✏️ Редактирование фото. Отправь фотографию с подписью, "
+                "что нужно изменить.",
+                keyboard=mode_keyboard(),
+            )
+            return True
         if command == "models":
             await self.send_message(
                 peer_id,
@@ -1336,6 +1378,7 @@ class VKBot:
             "/help": {"cmd": "help"},
             "/chat": {"cmd": "chat"},
             "/image": {"cmd": "image"},
+            "/edit": {"cmd": "image_edit"},
             "/models": {"cmd": "models"},
             "/clear": {"cmd": "clear"},
             "/code": {"cmd": "site_code"},
@@ -1362,11 +1405,12 @@ class VKBot:
                 "❓ Помощь\n\n"
                 "💬 Чат — вопросы и анализ фото.\n"
                 "🎨 Генерация фото — изображение по описанию.\n"
+                "✏️ Редактирование фото — отправь фото с подписью-заданием.\n"
                 "🤖 Модель — выбор ИИ.\n"
                 "🕓 Текстовая история хранится до "
                 f"{db.VK_CHAT_HISTORY_RETENTION_HOURS} часов после "
                 "последнего сообщения; /clear удаляет её сразу.\n\n"
-                "Команды: /start, /menu, /chat, /image, /models, "
+                "Команды: /start, /menu, /chat, /image, /edit, /models, "
                 "/clear, /code."
             ),
             keyboard=main_menu_keyboard(),
@@ -1915,6 +1959,152 @@ class VKBot:
             chat_history=trim_history(history),
         )
         await self.send_message(peer_id, reply, keyboard=mode_keyboard())
+
+    async def _handle_photo_edit(
+        self,
+        vk_user_id: int,
+        peer_id: int,
+        photo: dict,
+        caption: str,
+        state: dict,
+    ) -> None:
+        if not ALLOW_USER_IMAGE_UPLOADS:
+            await self.send_message(
+                peer_id,
+                "Загрузка пользовательских изображений отключена до "
+                "подключения доверенной локальной OCR/CV-проверки.",
+            )
+            return
+        await self._run_with_request_lease(
+            vk_user_id,
+            peer_id,
+            lambda: self._process_photo_edit(
+                vk_user_id,
+                peer_id,
+                photo,
+                caption,
+                state,
+            ),
+        )
+
+    async def _process_photo_edit(
+        self,
+        vk_user_id: int,
+        peer_id: int,
+        photo: dict,
+        caption: str,
+        state: dict,
+    ) -> None:
+        if not AI_REQUESTS_ENABLED:
+            await self.send_message(peer_id, AI_DISABLED_MESSAGE)
+            return
+        prompt = (caption or "").strip()
+        if not prompt:
+            await self.send_message(
+                peer_id,
+                "Добавь к фотографии подпись с описанием нужных изменений.",
+                keyboard=mode_keyboard(),
+            )
+            return
+        if len(prompt) > MAX_IMAGE_PROMPT_CHARS:
+            await self.send_message(
+                peer_id,
+                f"Запрос слишком длинный. Максимум {MAX_IMAGE_PROMPT_CHARS} символов.",
+            )
+            return
+        if contains_probable_secret(prompt):
+            await self.send_message(
+                peer_id,
+                "Запрос похож на секрет и не был отправлен.",
+            )
+            return
+        prohibited_reason = prohibited_image_reason(prompt)
+        if prohibited_reason:
+            await self.send_message(
+                peer_id,
+                safety_response_for_reason(prohibited_reason),
+            )
+            return
+        if not self._rate_limiter.allow(
+            f"edit:{vk_user_id}",
+            5,
+            10 * 60,
+        ):
+            await self.send_message(
+                peer_id,
+                "Лимит обработки изображений исчерпан. Попробуй позже.",
+            )
+            return
+        if not await self._reserve_ai(
+            vk_user_id,
+            peer_id,
+            "image-generation",
+            DEFAULT_DAILY_IMAGE_LIMIT,
+        ):
+            return
+        sizes = photo.get("sizes")
+        if not isinstance(sizes, list):
+            await self.send_message(peer_id, "VK не передал адрес фотографии.")
+            return
+        candidates = [
+            item
+            for item in sizes
+            if isinstance(item, dict) and item.get("url")
+        ]
+        if not candidates:
+            await self.send_message(peer_id, "VK не передал адрес фотографии.")
+            return
+        selected = max(
+            candidates,
+            key=lambda item: int(item.get("width") or 0)
+            * int(item.get("height") or 0),
+        )
+        await self.send_message(peer_id, "⏳ Редактирую фото...")
+        try:
+            source_image, _mime_type = await self._download_limited(
+                selected["url"],
+                MAX_EDIT_INPUT_BYTES,
+                _VK_MEDIA_HOSTS,
+            )
+            image_bytes = await asyncio.wait_for(
+                edit_image(prompt, source_image),
+                timeout=IMAGE_TIMEOUT_SECONDS,
+            )
+            attachment = await self._upload_message_photo(
+                peer_id,
+                image_bytes,
+            )
+        except asyncio.TimeoutError:
+            await self.send_message(
+                peer_id,
+                "❌ Редактирование заняло слишком много времени.",
+                keyboard=mode_keyboard(),
+            )
+            return
+        except ValueError as exc:
+            await self.send_message(
+                peer_id,
+                f"❌ {exc}",
+                keyboard=mode_keyboard(),
+            )
+            return
+        except Exception:
+            logger.exception(
+                "Ошибка редактирования VK-фото user_id=%s",
+                vk_user_id,
+            )
+            await self.send_message(
+                peer_id,
+                "Не удалось отредактировать фото. Попробуй позже.",
+                keyboard=mode_keyboard(),
+            )
+            return
+        await self.send_message(
+            peer_id,
+            f"Готово ✅\n\n{prompt[:900]}",
+            attachment=attachment,
+            keyboard=mode_keyboard(),
+        )
 
     async def _handle_document(
         self,
