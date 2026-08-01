@@ -218,13 +218,25 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS vk_user_state (
                 user_id BIGINT PRIMARY KEY,
                 mode TEXT NOT NULL DEFAULT 'main_menu'
-                    CHECK (mode IN ('main_menu', 'chat_mode', 'image_generate')),
+                    CHECK (mode IN ('main_menu', 'chat_mode', 'image_generate', 'image_edit')),
                 selected_model TEXT NOT NULL,
                 chat_history JSONB NOT NULL DEFAULT '[]'::jsonb,
                 history_updated_at TIMESTAMPTZ,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
             )
+            """
+        )
+        await conn.execute(
+            """
+            ALTER TABLE vk_user_state DROP CONSTRAINT IF EXISTS vk_user_state_mode_check
+            """
+        )
+        await conn.execute(
+            """
+            ALTER TABLE vk_user_state
+                ADD CONSTRAINT vk_user_state_mode_check
+                CHECK (mode IN ('main_menu', 'chat_mode', 'image_generate', 'image_edit'))
             """
         )
         await conn.execute(
