@@ -658,7 +658,7 @@ async def save_vk_state(
     chat_history: object,
 ) -> None:
     user_id = vk_user_key(vk_user_id)
-    if mode not in {"main_menu", "chat_mode", "image_generate"}:
+    if mode not in {"main_menu", "chat_mode", "image_generate", "image_edit"}:
         raise ValueError("Некорректный режим VK")
     checked_model = str(selected_model or "")[:128]
     if not checked_model:
