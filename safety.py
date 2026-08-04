@@ -929,11 +929,23 @@ def sanitize_safe_image_payload(
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data)) as image:
-                if (image.format or "").upper() != expected_format:
+                detected_format = (image.format or "").upper()
+                # MPF/Multi-Picture Object — формат, в котором iPhone
+                # склеивает основной кадр с portrait/depth-снимком после
+                # EOI. Pillow распознаёт такой JPEG как отдельный формат
+                # "MPO", хотя первый кадр — обычный JPEG. Разрешаем его как
+                # совместимый вариант контейнера и используем только первый
+                # (основной) кадр, второй отбрасываем при переупаковке.
+                is_compatible_mpo = (
+                    expected_format == "JPEG" and detected_format == "MPO"
+                )
+                if detected_format != expected_format and not is_compatible_mpo:
                     raise ValueError(
                         "Фактический формат изображения не совпадает с контейнером."
                     )
-                if getattr(image, "n_frames", 1) != 1:
+                if is_compatible_mpo:
+                    image.seek(0)
+                elif getattr(image, "n_frames", 1) != 1:
                     raise ValueError("Анимированные изображения не принимаются.")
                 image.load()
                 width, height = image.size
