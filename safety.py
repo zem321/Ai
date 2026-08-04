@@ -748,6 +748,8 @@ def validate_safe_image_payload(
             0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
             0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
         }
+        embedded_image_count = 1
+        max_embedded_images = 4
         while position < len(data):
             if data[position] != 0xFF:
                 raise ValueError("Данные JPEG вне сегмента или scan-потока.")
@@ -758,10 +760,22 @@ def validate_safe_image_payload(
             marker = data[position]
             position += 1
             if marker == 0xD9:
-                if position != len(data):
-                    raise ValueError("Данные после первого EOI JPEG запрещены.")
                 seen_eoi = True
-                break
+                if position == len(data):
+                    break
+                # Некоторые камеры (Apple MPF/Multi-Picture Object для
+                # portrait- и depth-снимков) дописывают после EOI ещё одно
+                # самостоятельное JPEG-изображение. Разрешаем хвост, только
+                # если он сам начинается с валидного SOI следующего JPEG —
+                # произвольные данные (ZIP/HTML/PHP/exe-сигнатуры и т.п.)
+                # по-прежнему безусловно запрещены.
+                if not data[position:].startswith(b"\xff\xd8"):
+                    raise ValueError("Данные после первого EOI JPEG запрещены.")
+                embedded_image_count += 1
+                if embedded_image_count > max_embedded_images:
+                    raise ValueError("Слишком много вложенных JPEG-изображений.")
+                position += 2
+                continue
             if marker in {0x01, 0xD8, *range(0xD0, 0xD8)}:
                 continue
             if marker == 0x00 or position + 2 > len(data):
@@ -775,8 +789,9 @@ def validate_safe_image_payload(
             if marker in sof_markers:
                 if segment_length < 7:
                     raise ValueError("Некорректный SOF-сегмент JPEG.")
-                height = int.from_bytes(data[position + 3:position + 5], "big")
-                width = int.from_bytes(data[position + 5:position + 7], "big")
+                if embedded_image_count == 1:
+                    height = int.from_bytes(data[position + 3:position + 5], "big")
+                    width = int.from_bytes(data[position + 5:position + 7], "big")
             position = segment_end
             if marker == 0xDA:
                 seen_sos = True
