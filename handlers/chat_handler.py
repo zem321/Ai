@@ -24,6 +24,7 @@ from keyboards import (
     reasoning_level_keyboard,
     REASONING_LEVELS,
     DEFAULT_MODEL,
+    FALLBACK_MODELS,
     LEVEL_MODELS,
     MODELS,
     VISION_BRIDGE_MODEL,
@@ -1073,10 +1074,35 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
             "safety_filtered": True,
             "blocked_before_provider": True,
         }
-    if model_id.startswith("gemini/"):
-        content, debug = await call_gemini(model_id, messages)
-    else:
-        content, debug = await call_nvidia(model_id, messages)
+    async def call_provider(provider_model_id: str) -> tuple[str, dict]:
+        if provider_model_id.startswith("gemini/"):
+            return await call_gemini(provider_model_id, messages)
+        return await call_nvidia(provider_model_id, messages)
+
+    fallback_model_id = FALLBACK_MODELS.get(model_id)
+    try:
+        content, debug = await call_provider(model_id)
+    except Exception as primary_error:
+        if not fallback_model_id:
+            raise
+        logger.warning(
+            "Основная модель недоступна, пробуем резервную: primary=%s "
+            "fallback=%s error=%s",
+            model_id,
+            fallback_model_id,
+            type(primary_error).__name__,
+        )
+        try:
+            content, debug = await call_provider(fallback_model_id)
+        except Exception:
+            logger.exception(
+                "Резервная модель также недоступна: primary=%s fallback=%s",
+                model_id,
+                fallback_model_id,
+            )
+            raise
+        debug["fallback_used"] = True
+        debug["fallback_model"] = fallback_model_id
 
     content = str(content or "")
     if len(content) > MAX_AI_REPLY_CHARS:
