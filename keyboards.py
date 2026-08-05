@@ -1,32 +1,62 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Gemini модели
-GEMINI_MODELS = {
-    "gemini/gemini-3.1-flash-lite": "Gemini 3.1 Flash Lite",
-    "gemini/gemini-3.5-flash-lite": "Gemini 3.5 Flash Lite",
+# Пользователь выбирает понятный уровень работы, а не техническое имя модели.
+REASONING_LEVELS = {
+    "fast": {
+        "title": "⚡ Быстро",
+        "model_id": "deepseek-ai/deepseek-v4-flash",
+    },
+    "balanced": {
+        "title": "⚖️ Обычно",
+        "model_id": "gemini/gemini-3.6-flash",
+    },
+    "deep": {
+        "title": "🧠 Глубоко",
+        "model_id": "deepseek-ai/deepseek-v4-pro",
+    },
+    "expert": {
+        "title": "🛠 Эксперт",
+        "model_id": "z-ai/glm-5.2",
+    },
+}
+
+DEFAULT_REASONING_LEVEL = "balanced"
+DEFAULT_MODEL = REASONING_LEVELS[DEFAULT_REASONING_LEVEL]["model_id"]
+LEVEL_MODELS = frozenset(
+    level["model_id"] for level in REASONING_LEVELS.values()
+)
+MODEL_TO_LEVEL = {
+    level["model_id"]: level_id
+    for level_id, level in REASONING_LEVELS.items()
+}
+
+# Лёгкая vision-модель описывает фото перед передачей текстовым моделям.
+VISION_BRIDGE_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
+DIRECT_VISION_MODELS = frozenset({
+    REASONING_LEVELS["balanced"]["model_id"],
+    VISION_BRIDGE_MODEL,
+})
+
+# Полный внутренний список нужен для проверки исходящих API-запросов.
+MODELS = {
+    "deepseek-ai/deepseek-v4-flash": "DeepSeek V4 Flash",
     "gemini/gemini-3.6-flash": "Gemini 3.6 Flash",
-}
-
-# Остальные модели (Other)
-OTHER_MODELS = {
-    "z-ai/glm-5.2": "GLM-5.2",
     "deepseek-ai/deepseek-v4-pro": "DeepSeek V4 Pro",
-    "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
-    "meta/llama-3.2-11b-vision-instruct": "Llama 3.2 Vision 11B",
+    "z-ai/glm-5.2": "GLM-5.2",
+    VISION_BRIDGE_MODEL: "Nemotron Nano 12B VL",
 }
 
-MODELS = {**GEMINI_MODELS, **OTHER_MODELS}
 
-# Llama Vision используется как визуальный адаптер для текстовых Other-моделей.
-# Модели из этого набора получают изображение напрямую.
-VISION_BRIDGE_MODEL = "meta/llama-3.2-11b-vision-instruct"
-DIRECT_VISION_MODELS = frozenset((*GEMINI_MODELS, VISION_BRIDGE_MODEL))
+def reasoning_level_for_model(model_id: str) -> str:
+    return MODEL_TO_LEVEL.get(model_id, DEFAULT_REASONING_LEVEL)
 
-# Человекочитаемые названия групп моделей
-GROUP_TITLES = {
-    "gemini": "Gemini",
-    "other": "Other",
-}
+
+def reasoning_level_title(level_id: str) -> str:
+    level = REASONING_LEVELS.get(
+        level_id,
+        REASONING_LEVELS[DEFAULT_REASONING_LEVEL],
+    )
+    return str(level["title"])
 
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -48,33 +78,27 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
         ]
     ])
 
-def model_group_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Gemini", callback_data="model_group_gemini")],
-        [InlineKeyboardButton(text="Other", callback_data="model_group_other")],
-        [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
-    ])
-
-def models_keyboard(group: str, current: str = "") -> InlineKeyboardMarkup:
+def reasoning_level_keyboard(current_model: str = "") -> InlineKeyboardMarkup:
     buttons = []
-
-    if group == "gemini":
-        for model_id, model_name in GEMINI_MODELS.items():
-            label = f"[x] {model_name}" if model_id == current else model_name
-            buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
-    elif group == "other":
-        for model_id, model_name in OTHER_MODELS.items():
-            label = f"[x] {model_name}" if model_id == current else model_name
-            buttons.append([InlineKeyboardButton(text=label, callback_data=f"model_{model_id}")])
-
-    buttons.append([InlineKeyboardButton(text="Назад", callback_data="select_model")])
-
+    current_level = reasoning_level_for_model(current_model)
+    for level_id, level in REASONING_LEVELS.items():
+        title = str(level["title"])
+        label = f"✓ {title}" if level_id == current_level else title
+        buttons.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"reasoning_{level_id}",
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="Назад", callback_data="main_menu")
+    ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Сменить модель", callback_data="select_model"),
+            InlineKeyboardButton(text="Сменить уровень", callback_data="select_model"),
             InlineKeyboardButton(text="Меню", callback_data="main_menu"),
         ]
     ])
