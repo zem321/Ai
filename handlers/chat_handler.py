@@ -21,14 +21,15 @@ from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from keyboards import (
     cancel_keyboard,
-    model_group_keyboard,
-    models_keyboard,
-    GEMINI_MODELS,
-    OTHER_MODELS,
-    GROUP_TITLES,
+    reasoning_level_keyboard,
+    REASONING_LEVELS,
+    DEFAULT_MODEL,
+    LEVEL_MODELS,
     MODELS,
     VISION_BRIDGE_MODEL,
     DIRECT_VISION_MODELS,
+    reasoning_level_for_model,
+    reasoning_level_title,
 )
 
 from states import BotStates
@@ -231,7 +232,7 @@ def get_history(data):
 
 def get_model(data):
     selected = data.get("selected_model")
-    return selected if selected in MODELS else list(GEMINI_MODELS.keys())[0]
+    return selected if selected in LEVEL_MODELS else DEFAULT_MODEL
 
 def trim_history(history: list) -> list:
     result = []
@@ -662,7 +663,7 @@ async def call_ai_with_image_bytes(
             timeout=BOT_AI_TIMEOUT_SECONDS,
         )
         if not description.strip():
-            raise Exception("Llama Vision не смогла описать изображение.")
+            raise Exception("Модель анализа фото не смогла описать изображение.")
 
         text_model_prompt = make_text_model_image_prompt(
             caption=caption,
@@ -1161,44 +1162,82 @@ async def show_nvidia_video_models(message: Message):
 
 
 @router.callback_query(F.data == "select_model")
-async def select_model_group(callback: CallbackQuery):
-    await callback.message.edit_text("<b>Выберите группу моделей</b>", reply_markup=model_group_keyboard(), parse_mode="HTML")
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("model_group_"))
-async def show_models_group(callback: CallbackQuery, state: FSMContext):
-    group = callback.data.replace("model_group_", "")
+async def select_reasoning_level(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    current = data.get("selected_model", "")
-    title = GROUP_TITLES.get(group, group.capitalize())
-    await callback.message.edit_text(f"<b>Модели группы {escape(title)}</b>", reply_markup=models_keyboard(group, current), parse_mode="HTML")
+    current_model = get_model(data)
+    await callback.message.edit_text(
+        "<b>Выберите глубину рассуждения</b>",
+        reply_markup=reasoning_level_keyboard(current_model),
+        parse_mode="HTML",
+    )
     await callback.answer()
 
-async def activate_model(callback: CallbackQuery, state: FSMContext, model_id: str):
+# Старые кнопки выбора групп перенаправляются на новый экран уровней.
+@router.callback_query(F.data.startswith("model_group_"))
+async def show_reasoning_levels_from_legacy_button(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    data = await state.get_data()
+    await callback.message.edit_text(
+        "<b>Выберите глубину рассуждения</b>",
+        reply_markup=reasoning_level_keyboard(get_model(data)),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+async def activate_reasoning_level(
+    callback: CallbackQuery,
+    state: FSMContext,
+    level_id: str,
+):
+    level = REASONING_LEVELS[level_id]
+    model_id = str(level["model_id"])
     await state.update_data(selected_model=model_id)
     await state.set_state(BotStates.chat_mode)
-    model_name = MODELS.get(model_id, model_id)
-    await callback.message.edit_text(f"<b>Модель выбрана:</b> {escape(model_name)}\n\nПиши сообщения.", reply_markup=cancel_keyboard(), parse_mode="HTML")
+    level_title = reasoning_level_title(level_id)
+    await callback.message.edit_text(
+        f"<b>Уровень выбран:</b> {escape(level_title)}\n\nПиши сообщения.",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML",
+    )
     await callback.answer()
 
-@router.callback_query(F.data.startswith("model_"))
-async def set_model(callback: CallbackQuery, state: FSMContext):
-    model_id = callback.data.replace("model_", "")
-    if model_id not in MODELS:
-        await callback.answer("Недоступная модель", show_alert=True)
+@router.callback_query(F.data.startswith("reasoning_"))
+async def set_reasoning_level(callback: CallbackQuery, state: FSMContext):
+    level_id = callback.data.replace("reasoning_", "", 1)
+    if level_id not in REASONING_LEVELS:
+        await callback.answer("Недоступный уровень", show_alert=True)
         return
-    await activate_model(callback, state, model_id)
+    await activate_reasoning_level(callback, state, level_id)
+
+
+# Сохранена совместимость со старыми сообщениями, где были кнопки моделей.
+@router.callback_query(F.data.startswith("model_"))
+async def set_model_from_legacy_button(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    model_id = callback.data.replace("model_", "")
+    if model_id not in LEVEL_MODELS:
+        await callback.answer("Выберите новый уровень", show_alert=True)
+        return
+    await activate_reasoning_level(
+        callback,
+        state,
+        reasoning_level_for_model(model_id),
+    )
 
 @router.callback_query(F.data == "mode_chat")
 async def enter_chat_mode_cb(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    model_id = data.get("selected_model") or list(GEMINI_MODELS.keys())[0]
+    model_id = get_model(data)
     await state.update_data(selected_model=model_id)
     await state.set_state(BotStates.chat_mode)
-    model_name = MODELS.get(model_id, model_id)
+    level_title = reasoning_level_title(reasoning_level_for_model(model_id))
     await callback.message.edit_text(
         "<b>Режим чата активирован</b>\n\n"
-        f"<b>Выбрана модель:</b> {escape(model_name)}\n\n"
+        f"<b>Уровень:</b> {escape(level_title)}\n\n"
         "Пиши свои сообщения.\n"
         "/clear — очистить историю",
         reply_markup=cancel_keyboard(),
