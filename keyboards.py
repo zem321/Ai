@@ -13,7 +13,6 @@ OTHER_MODELS = {
     "deepseek-ai/deepseek-v4-pro": "DeepSeek V4 Pro",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
     "meta/llama-3.2-11b-vision-instruct": "Llama 3.2 Vision 11B",
-    "moonshotai/kimi-k2.6",
 }
 
 MODELS = {**GEMINI_MODELS, **OTHER_MODELS}
