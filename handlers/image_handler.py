@@ -16,7 +16,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image, ImageOps
-from keyboards import GEMINI_MODELS, menu_keyboard
+from keyboards import menu_keyboard
 from states import BotStates
 import database as db
 from request_guard import single_user_ai_request
@@ -48,11 +48,18 @@ CLOUDFLARE_IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
 GEMINI_OPENAI_CHAT_URL = (
     "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 )
+ALLOWED_IMAGE_MODERATION_MODELS = frozenset(
+    {
+        "gemini/gemini-3.1-flash-lite",
+        "gemini/gemini-3.5-flash-lite",
+        "gemini/gemini-3.6-flash",
+    }
+)
 IMAGE_MODERATION_MODEL = os.getenv(
     "IMAGE_MODERATION_MODEL",
     "gemini/gemini-3.1-flash-lite",
 ).strip()
-if IMAGE_MODERATION_MODEL not in GEMINI_MODELS:
+if IMAGE_MODERATION_MODEL not in ALLOWED_IMAGE_MODERATION_MODELS:
     raise RuntimeError(
         "IMAGE_MODERATION_MODEL должен быть разрешённой Gemini-моделью"
     )
