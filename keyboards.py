@@ -4,15 +4,11 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 REASONING_LEVELS = {
     "fast": {
         "title": "⚡ Быстро",
-        "model_id": "deepseek-ai/deepseek-v4-flash",
+        "model_id": "nvidia/nemotron-3-nano-30b-a3b",
     },
     "balanced": {
         "title": "⚖️ Обычно",
-        "model_id": "gemini/gemini-3.6-flash",
-    },
-    "deep": {
-        "title": "🧠 Глубоко",
-        "model_id": "deepseek-ai/deepseek-v4-pro",
+        "model_id": "gemini/gemini-3.5-flash-lite",
     },
     "expert": {
         "title": "🛠 Эксперт",
@@ -30,6 +26,14 @@ MODEL_TO_LEVEL = {
     for level_id, level in REASONING_LEVELS.items()
 }
 
+# Резервная модель используется только при ошибке основного провайдера.
+FALLBACK_MODELS = {
+    REASONING_LEVELS["fast"]["model_id"]: "gemini/gemini-3.1-flash-lite",
+    REASONING_LEVELS["balanced"]["model_id"]: (
+        "nvidia/nemotron-3-super-120b-a12b"
+    ),
+}
+
 # Лёгкая vision-модель описывает фото перед передачей текстовым моделям.
 VISION_BRIDGE_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
 DIRECT_VISION_MODELS = frozenset({
@@ -39,9 +43,10 @@ DIRECT_VISION_MODELS = frozenset({
 
 # Полный внутренний список нужен для проверки исходящих API-запросов.
 MODELS = {
-    "deepseek-ai/deepseek-v4-flash": "DeepSeek V4 Flash",
-    "gemini/gemini-3.6-flash": "Gemini 3.6 Flash",
-    "deepseek-ai/deepseek-v4-pro": "DeepSeek V4 Pro",
+    "nvidia/nemotron-3-nano-30b-a3b": "Nemotron 3 Nano 30B A3B",
+    "gemini/gemini-3.1-flash-lite": "Gemini 3.1 Flash-Lite",
+    "gemini/gemini-3.5-flash-lite": "Gemini 3.5 Flash-Lite",
+    "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B A12B",
     "z-ai/glm-5.2": "GLM-5.2",
     VISION_BRIDGE_MODEL: "Nemotron Nano 12B VL",
 }
