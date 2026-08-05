@@ -23,7 +23,13 @@ import aiohttp
 from aiohttp import web
 
 import database as db
-from keyboards import GEMINI_MODELS, GROUP_TITLES, MODELS, OTHER_MODELS
+from keyboards import (
+    DEFAULT_MODEL,
+    LEVEL_MODELS,
+    REASONING_LEVELS,
+    reasoning_level_for_model,
+    reasoning_level_title,
+)
 from safety import (
     AI_DISABLED_MESSAGE,
     AI_REQUESTS_ENABLED,
@@ -132,7 +138,7 @@ WELCOME_TEXT = (
     "• отвечать на вопросы с памятью диалога;\n"
     "• анализировать фото;\n"
     "• генерировать изображения;\n"
-    "• работать с разными моделями ИИ.\n\n"
+    "• выбирать скорость и глубину рассуждения.\n\n"
     f"Текстовая история хранится до {db.VK_CHAT_HISTORY_RETENTION_HOURS} "
     "часов после последнего "
     "сообщения. /clear удаляет её сразу.\n\n"
@@ -437,7 +443,7 @@ def main_menu_keyboard() -> str:
                 _button("Редактировать фото", "image_edit"),
             ],
             [
-                _button("Выбрать модель", "models"),
+                _button("Выбрать уровень", "models"),
                 _button("Очистить историю", "clear"),
             ],
             [_button("Код для сайта", "site_code")],
@@ -450,30 +456,21 @@ def mode_keyboard() -> str:
     return _keyboard(
         [
             [
-                _button("Сменить модель", "models"),
+                _button("Сменить уровень", "models"),
                 _button("Меню", "menu"),
             ]
         ]
     )
 
 
-def model_group_keyboard() -> str:
-    return _keyboard(
-        [
-            [_button("Gemini", "model_group", group="gemini")],
-            [_button("Other", "model_group", group="other")],
-            [_button("Назад", "menu")],
-        ]
-    )
-
-
-def models_keyboard(group: str, current: str) -> str:
-    models = GEMINI_MODELS if group == "gemini" else OTHER_MODELS
+def reasoning_level_keyboard(current_model: str) -> str:
+    current_level = reasoning_level_for_model(current_model)
     rows = []
-    for model_id, title in models.items():
-        label = f"✓ {title}" if model_id == current else title
-        rows.append([_button(label, "model", model=model_id)])
-    rows.append([_button("Назад", "models")])
+    for level_id, level in REASONING_LEVELS.items():
+        title = str(level["title"])
+        label = f"✓ {title}" if level_id == current_level else title
+        rows.append([_button(label, "reasoning", level=level_id)])
+    rows.append([_button("Назад", "menu")])
     return _keyboard(rows)
 
 
@@ -1189,7 +1186,7 @@ class VKBot:
 
     @property
     def default_model(self) -> str:
-        return next(iter(GEMINI_MODELS))
+        return DEFAULT_MODEL
 
     def _parse_payload(self, raw_payload: object) -> dict:
         if isinstance(raw_payload, dict):
@@ -1274,10 +1271,24 @@ class VKBot:
             await self._send_help(peer_id)
             return True
         if command == "chat":
-            await self._save_state(vk_user_id, state, mode="chat_mode")
+            model_id = (
+                state["selected_model"]
+                if state["selected_model"] in LEVEL_MODELS
+                else self.default_model
+            )
+            await self._save_state(
+                vk_user_id,
+                state,
+                mode="chat_mode",
+                selected_model=model_id,
+            )
+            level_title = reasoning_level_title(
+                reasoning_level_for_model(model_id)
+            )
             await self.send_message(
                 peer_id,
-                "💬 Режим чата активирован. Пиши сообщения.",
+                f"💬 Режим чата активирован.\nУровень: {level_title}\n\n"
+                "Пиши сообщения.",
                 keyboard=mode_keyboard(),
             )
             return True
@@ -1311,27 +1322,59 @@ class VKBot:
             )
             return True
         if command == "models":
+            current_model = (
+                state["selected_model"]
+                if state["selected_model"] in LEVEL_MODELS
+                else self.default_model
+            )
             await self.send_message(
                 peer_id,
-                "Выбери группу моделей.",
-                keyboard=model_group_keyboard(),
+                "Выбери скорость и глубину рассуждения.",
+                keyboard=reasoning_level_keyboard(current_model),
             )
             return True
-        if command == "model_group":
-            group = str(payload.get("group") or "")
-            if group not in {"gemini", "other"}:
+        if command == "reasoning":
+            level_id = str(payload.get("level") or "")
+            if level_id not in REASONING_LEVELS:
+                await self.send_message(peer_id, "Недоступный уровень.")
                 return True
-            title = GROUP_TITLES.get(group, group)
+            model_id = str(REASONING_LEVELS[level_id]["model_id"])
+            await self._save_state(
+                vk_user_id,
+                state,
+                mode="chat_mode",
+                selected_model=model_id,
+            )
             await self.send_message(
                 peer_id,
-                f"Модели группы {title}:",
-                keyboard=models_keyboard(group, state["selected_model"]),
+                f"Уровень выбран: {reasoning_level_title(level_id)}\n\n"
+                "Пиши сообщения.",
+                keyboard=mode_keyboard(),
             )
             return True
+        # Старые кнопки групп ведут на новый экран уровней.
+        if command == "model_group":
+            current_model = (
+                state["selected_model"]
+                if state["selected_model"] in LEVEL_MODELS
+                else self.default_model
+            )
+            await self.send_message(
+                peer_id,
+                "Выбери скорость и глубину рассуждения.",
+                keyboard=reasoning_level_keyboard(current_model),
+            )
+            return True
+        # Старые кнопки отдельных моделей остаются рабочими, если модель
+        # соответствует одному из новых уровней.
         if command == "model":
             model_id = str(payload.get("model") or "")
-            if model_id not in MODELS:
-                await self.send_message(peer_id, "Недоступная модель.")
+            if model_id not in LEVEL_MODELS:
+                await self.send_message(
+                    peer_id,
+                    "Список обновлён. Выбери уровень рассуждения.",
+                    keyboard=reasoning_level_keyboard(self.default_model),
+                )
                 return True
             await self._save_state(
                 vk_user_id,
@@ -1341,7 +1384,9 @@ class VKBot:
             )
             await self.send_message(
                 peer_id,
-                f"Модель выбрана: {MODELS[model_id]}\n\nПиши сообщения.",
+                "Уровень выбран: "
+                f"{reasoning_level_title(reasoning_level_for_model(model_id))}"
+                "\n\nПиши сообщения.",
                 keyboard=mode_keyboard(),
             )
             return True
@@ -1380,6 +1425,7 @@ class VKBot:
             "/image": {"cmd": "image"},
             "/edit": {"cmd": "image_edit"},
             "/models": {"cmd": "models"},
+            "/levels": {"cmd": "models"},
             "/clear": {"cmd": "clear"},
             "/code": {"cmd": "site_code"},
         }
@@ -1406,11 +1452,11 @@ class VKBot:
                 "💬 Чат — вопросы и анализ фото.\n"
                 "🎨 Генерация фото — изображение по описанию.\n"
                 "✏️ Редактирование фото — отправь фото с подписью-заданием.\n"
-                "🤖 Модель — выбор ИИ.\n"
+                "🧠 Уровень — выбор скорости и глубины рассуждения.\n"
                 "🕓 Текстовая история хранится до "
                 f"{db.VK_CHAT_HISTORY_RETENTION_HOURS} часов после "
                 "последнего сообщения; /clear удаляет её сразу.\n\n"
-                "Команды: /start, /menu, /chat, /image, /edit, /models, "
+                "Команды: /start, /menu, /chat, /image, /edit, /levels, "
                 "/clear, /code."
             ),
             keyboard=main_menu_keyboard(),
@@ -1693,7 +1739,7 @@ class VKBot:
 
         model_id = (
             state["selected_model"]
-            if state["selected_model"] in MODELS
+            if state["selected_model"] in LEVEL_MODELS
             else self.default_model
         )
         if not await self._reserve_ai(
@@ -1889,7 +1935,7 @@ class VKBot:
             return
         model_id = (
             state["selected_model"]
-            if state["selected_model"] in MODELS
+            if state["selected_model"] in LEVEL_MODELS
             else self.default_model
         )
         if not await self._reserve_ai(
@@ -2183,7 +2229,7 @@ class VKBot:
             return
         model_id = (
             state["selected_model"]
-            if state["selected_model"] in MODELS
+            if state["selected_model"] in LEVEL_MODELS
             else self.default_model
         )
         if not await self._reserve_ai(
