@@ -1097,7 +1097,7 @@ async def call_groq(model_id: str, messages: list) -> tuple[str, dict]:
         "model": raw_model,
         "messages": messages,
         "temperature": 0.7,
-        "max_completion_tokens": 8192,
+        "max_completion_tokens": 4096,
     }
     logger.info("call_groq -> url=%s model=%s", GROQ_CHAT_URL, raw_model)
     return await _call_openai_compatible_chat(
