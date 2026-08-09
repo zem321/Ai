@@ -1099,6 +1099,12 @@ async def call_groq(model_id: str, messages: list) -> tuple[str, dict]:
         "temperature": 0.7,
         "max_completion_tokens": 4096,
     }
+    if raw_model == "qwen/qwen3.6-27b":
+    payload["reasoning_effort"] = "none"
+
+elif raw_model == "openai/gpt-oss-120b":
+    payload["reasoning_effort"] = "medium"
+    payload["reasoning_format"] = "hidden"
     logger.info("call_groq -> url=%s model=%s", GROQ_CHAT_URL, raw_model)
     return await _call_openai_compatible_chat(
         provider="groq",
