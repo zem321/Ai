@@ -23,6 +23,7 @@ import aiohttp
 from aiohttp import web
 
 import database as db
+from provider_keys import configured_provider_secrets
 from keyboards import (
     DEFAULT_MODEL,
     LEVEL_MODELS,
@@ -235,8 +236,7 @@ class VKConfig:
             raise RuntimeError("VK_GROUP_TOKEN не задан или имеет некорректный формат")
         other_secrets = {
             os.getenv("BOT_TOKEN", ""),
-            os.getenv("GEMINI_API_KEY", ""),
-            os.getenv("NVIDIA_API_KEY", ""),
+            *configured_provider_secrets(),
             os.getenv("LOGIN_CODE_PEPPER", ""),
             os.getenv("DATABASE_URL", ""),
         }
