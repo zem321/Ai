@@ -24,13 +24,21 @@ from keyboards import (
     reasoning_level_keyboard,
     REASONING_LEVELS,
     DEFAULT_MODEL,
-    FALLBACK_MODELS,
+    MODEL_FALLBACK_CHAINS,
     LEVEL_MODELS,
     MODELS,
     VISION_BRIDGE_MODEL,
     DIRECT_VISION_MODELS,
     reasoning_level_for_model,
     reasoning_level_title,
+)
+from provider_keys import (
+    MAX_KEY_ATTEMPTS_PER_MODEL,
+    ProviderKeysUnavailable,
+    acquire_provider_key,
+    configured_provider_keys,
+    mark_provider_key_failure,
+    mark_provider_key_success,
 )
 
 from states import BotStates
@@ -187,9 +195,9 @@ FILE_RESEND_COMMANDS = [
     "отправь файлом", "пришли файлом", "дай файл", "скачать", "сохрани"
 ]
 
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_CHAT_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NVIDIA_MODELS_URL = "https://integrate.api.nvidia.com/v1/models"
+GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 NVIDIA_IMAGE_MODELS = (
     "stabilityai/stable-diffusion-3.5-large",
     "black-forest-labs/flux.1-dev",
@@ -202,8 +210,6 @@ NVIDIA_VIDEO_MODELS = (
     "wan-ai/wan2.2",
 )
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 _DEBUG_MODE_RAW = os.getenv("DEBUG_MODE", "0").strip().lower()
 if _DEBUG_MODE_RAW not in {
@@ -222,10 +228,12 @@ DEBUG_MODE = _DEBUG_MODE_RAW in {
 logger.info("NVIDIA_CHAT_URL = %s", NVIDIA_CHAT_URL)
 logger.info("DEBUG_MODE = %s", DEBUG_MODE)
 
-if not GEMINI_API_KEY:
-    logger.warning("GEMINI_API_KEY не задан. Запросы к Gemini будут падать с ошибкой.")
-if not NVIDIA_API_KEY:
-    logger.warning("NVIDIA_API_KEY не задан. Запросы к Nvidia будут падать с ошибкой.")
+for _provider_name in ("gemini", "nvidia", "groq"):
+    if not configured_provider_keys(_provider_name):
+        logger.warning(
+            "API-ключи провайдера %s не заданы. Запросы будут пропущены.",
+            _provider_name,
+        )
 
 
 def get_history(data):
@@ -864,66 +872,190 @@ async def _read_provider_json(resp: aiohttp.ClientResponse, provider: str) -> di
     return data
 
 
+_KEY_FAILURE_HTTP_STATUSES = frozenset({401, 403, 408, 425, 429})
+
+
+def _http_status_disables_key(status: int) -> bool:
+    return status in _KEY_FAILURE_HTTP_STATUSES or status >= 500
+
+
+async def _call_openai_compatible_chat(
+    *,
+    provider: str,
+    provider_label: str,
+    url: str,
+    payload: dict,
+    timeout_seconds: int,
+) -> tuple[str, dict]:
+    attempted_fingerprints: set[str] = set()
+    last_error: BaseException | None = None
+
+    for _ in range(MAX_KEY_ATTEMPTS_PER_MODEL):
+        try:
+            lease = await acquire_provider_key(
+                provider,
+                excluded_fingerprints=frozenset(attempted_fingerprints),
+            )
+        except ProviderKeysUnavailable as exc:
+            last_error = exc
+            break
+        attempted_fingerprints.add(lease.fingerprint)
+        headers = {
+            "Authorization": f"Bearer {lease.secret}",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+                    allow_redirects=False,
+                ) as resp:
+                    status = resp.status
+                    try:
+                        data = await _read_provider_json(resp, provider_label)
+                    except Exception as exc:
+                        if _http_status_disables_key(status):
+                            cooldown = await mark_provider_key_failure(lease)
+                            logger.warning(
+                                "%s API вернул повреждённый ответ status=%s; "
+                                "ключ исключён на %s сек.",
+                                provider_label,
+                                status,
+                                cooldown,
+                            )
+                            last_error = exc
+                            continue
+                        await mark_provider_key_success(lease)
+                        raise
+        except asyncio.CancelledError:
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            cooldown = await mark_provider_key_failure(lease)
+            logger.warning(
+                "%s API network error; ключ исключён на %s сек.",
+                provider_label,
+                cooldown,
+            )
+            last_error = exc
+            continue
+
+        if status != 200:
+            logger.warning("%s API error status=%s", provider_label, status)
+            if _http_status_disables_key(status):
+                cooldown = await mark_provider_key_failure(lease)
+                logger.warning(
+                    "%s API-ключ исключён на %s сек.",
+                    provider_label,
+                    cooldown,
+                )
+                last_error = RuntimeError(
+                    f"{provider_label} API вернул HTTP {status}"
+                )
+                continue
+            await mark_provider_key_success(lease)
+            raise RuntimeError(f"{provider_label} API вернул HTTP {status}")
+
+        await mark_provider_key_success(lease)
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError(
+                f"{provider_label} вернул некорректный формат ответа."
+            ) from exc
+        return str(content), {
+            "url": url,
+            "provider": provider,
+            "sent_model": payload["model"],
+            "provider_model": data.get("model", payload["model"]),
+            "provider_key_attempts": len(attempted_fingerprints),
+        }
+
+    raise RuntimeError(
+        f"Все доступные API-ключи провайдера {provider_label} исчерпаны"
+    ) from last_error
+
+
 async def call_nvidia(model_id: str, messages: list) -> tuple[str, dict]:
-    if not NVIDIA_API_KEY:
-        raise Exception("NVIDIA_API_KEY не задан.")
-    headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
-        "Content-Type": "application/json",
-    }
     payload = {
         "model": model_id,
         "messages": messages,
         "max_tokens": 8192,
         "temperature": 0.7,
     }
-    logger.info("call_nvidia -> url=%s model=%s", NVIDIA_CHAT_URL, payload["model"])
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
-            NVIDIA_CHAT_URL,
-            json=payload,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=BOT_AI_TIMEOUT_SECONDS),
-            allow_redirects=False,
-        ) as resp:
-            data = await _read_provider_json(resp, "NVIDIA")
-            if resp.status != 200:
-                logger.warning(
-                    "NVIDIA API error status=%s",
-                    resp.status,
-                )
-                raise Exception("NVIDIA API временно недоступен.")
-            
-            debug = {"url": NVIDIA_CHAT_URL, "sent_model": payload["model"], "provider_model": data.get("model")}
-            try:
-                content = data["choices"][0]["message"]["content"]
-            except (KeyError, IndexError, TypeError) as exc:
-                raise Exception("NVIDIA вернул некорректный формат ответа.") from exc
-            return str(content), debug
+    logger.info("call_nvidia -> url=%s model=%s", NVIDIA_CHAT_URL, model_id)
+    return await _call_openai_compatible_chat(
+        provider="nvidia",
+        provider_label="NVIDIA",
+        url=NVIDIA_CHAT_URL,
+        payload=payload,
+        timeout_seconds=BOT_AI_TIMEOUT_SECONDS,
+    )
 
 
 async def get_nvidia_models() -> list[str]:
-    """Возвращает модели, реально доступные текущему NVIDIA_API_KEY."""
-    if not NVIDIA_API_KEY:
-        raise Exception("NVIDIA_API_KEY не задан.")
-    headers = {
-        "Authorization": f"Bearer {NVIDIA_API_KEY}",
-        "Accept": "application/json",
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            NVIDIA_MODELS_URL,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=30),
-            allow_redirects=False,
-        ) as resp:
-            data = await _read_provider_json(resp, "NVIDIA")
-            if resp.status != 200:
-                logger.warning(
-                    "NVIDIA models API error status=%s",
-                    resp.status,
+    """Возвращает модели, доступные одному из активных NVIDIA API-ключей."""
+    attempted_fingerprints: set[str] = set()
+    last_error: BaseException | None = None
+    data: dict | None = None
+    for _ in range(MAX_KEY_ATTEMPTS_PER_MODEL):
+        try:
+            lease = await acquire_provider_key(
+                "nvidia",
+                excluded_fingerprints=frozenset(attempted_fingerprints),
+            )
+        except ProviderKeysUnavailable as exc:
+            last_error = exc
+            break
+        attempted_fingerprints.add(lease.fingerprint)
+        headers = {
+            "Authorization": f"Bearer {lease.secret}",
+            "Accept": "application/json",
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    NVIDIA_MODELS_URL,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                    allow_redirects=False,
+                ) as resp:
+                    status = resp.status
+                    try:
+                        data = await _read_provider_json(resp, "NVIDIA")
+                    except Exception as exc:
+                        if _http_status_disables_key(status):
+                            await mark_provider_key_failure(lease)
+                            last_error = exc
+                            data = None
+                            continue
+                        await mark_provider_key_success(lease)
+                        raise
+        except asyncio.CancelledError:
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            await mark_provider_key_failure(lease)
+            last_error = exc
+            continue
+        if status != 200:
+            if _http_status_disables_key(status):
+                await mark_provider_key_failure(lease)
+                last_error = RuntimeError(
+                    f"NVIDIA models API вернул HTTP {status}"
                 )
-                raise Exception("Не удалось получить список моделей NVIDIA.")
+                continue
+            await mark_provider_key_success(lease)
+            raise RuntimeError("Не удалось получить список моделей NVIDIA.")
+        await mark_provider_key_success(lease)
+        break
+    else:
+        data = None
+    if data is None:
+        raise RuntimeError(
+            "Все доступные API-ключи NVIDIA исчерпаны"
+        ) from last_error
 
     models = data.get("data")
     if not isinstance(models, list):
@@ -937,55 +1069,40 @@ async def get_nvidia_models() -> list[str]:
 
 
 async def call_gemini(model_id: str, messages: list) -> tuple[str, dict]:
-    if not GEMINI_API_KEY:
-        raise Exception("GEMINI_API_KEY не задан.")
-    
     raw_model = model_id.replace("gemini/", "", 1)
-    
-    # Официальный OpenAI-совместимый эндпоинт от Google
     url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {GEMINI_API_KEY}"
-    }
-
     payload = {
         "model": raw_model,
         "messages": messages,
         "temperature": 0.7,
         "max_tokens": 2048,
     }
-
     logger.info("call_gemini -> url=%s model=%s", url, raw_model)
+    return await _call_openai_compatible_chat(
+        provider="gemini",
+        provider_label="Google",
+        url=url,
+        payload=payload,
+        timeout_seconds=60,
+    )
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
-            url,
-            json=payload,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=60),
-            allow_redirects=False,
-        ) as resp:
-            data = await _read_provider_json(resp, "Google")
-            
-            if resp.status != 200:
-                logger.warning(
-                    "Google API error status=%s",
-                    resp.status,
-                )
-                raise Exception("Google API временно недоступен.")
-            
-            debug = {
-                "url": url,
-                "sent_model": raw_model,
-                "provider_model": data.get("model", raw_model),
-            }
-            
-            try:
-                reply = data["choices"][0]["message"]["content"]
-                return str(reply), debug
-            except (KeyError, IndexError, TypeError) as exc:
-                raise Exception("Google API вернул некорректный формат ответа.") from exc
+
+async def call_groq(model_id: str, messages: list) -> tuple[str, dict]:
+    raw_model = model_id.removeprefix("groq/")
+    payload = {
+        "model": raw_model,
+        "messages": messages,
+        "temperature": 0.7,
+        "max_completion_tokens": 8192,
+    }
+    logger.info("call_groq -> url=%s model=%s", GROQ_CHAT_URL, raw_model)
+    return await _call_openai_compatible_chat(
+        provider="groq",
+        provider_label="Groq",
+        url=GROQ_CHAT_URL,
+        payload=payload,
+        timeout_seconds=60,
+    )
 
 
 async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
@@ -1077,32 +1194,44 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
     async def call_provider(provider_model_id: str) -> tuple[str, dict]:
         if provider_model_id.startswith("gemini/"):
             return await call_gemini(provider_model_id, messages)
+        if provider_model_id.startswith("groq/"):
+            return await call_groq(provider_model_id, messages)
         return await call_nvidia(provider_model_id, messages)
 
-    fallback_model_id = FALLBACK_MODELS.get(model_id)
-    try:
-        content, debug = await call_provider(model_id)
-    except Exception as primary_error:
-        if not fallback_model_id:
-            raise
-        logger.warning(
-            "Основная модель недоступна, пробуем резервную: primary=%s "
-            "fallback=%s error=%s",
-            model_id,
-            fallback_model_id,
-            type(primary_error).__name__,
-        )
+    model_chain = MODEL_FALLBACK_CHAINS.get(model_id, (model_id,))
+    attempted_models: list[str] = []
+    last_error: BaseException | None = None
+    for chain_index, provider_model_id in enumerate(model_chain):
+        attempted_models.append(provider_model_id)
         try:
-            content, debug = await call_provider(fallback_model_id)
-        except Exception:
-            logger.exception(
-                "Резервная модель также недоступна: primary=%s fallback=%s",
-                model_id,
-                fallback_model_id,
-            )
+            content, debug = await call_provider(provider_model_id)
+            break
+        except asyncio.CancelledError:
             raise
-        debug["fallback_used"] = True
-        debug["fallback_model"] = fallback_model_id
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "Модель недоступна, переходим по цепочке: requested=%s "
+                "failed=%s position=%s/%s error=%s",
+                model_id,
+                provider_model_id,
+                chain_index + 1,
+                len(model_chain),
+                type(exc).__name__,
+            )
+    else:
+        logger.error(
+            "Все модели цепочки недоступны: requested=%s attempted=%s",
+            model_id,
+            attempted_models,
+        )
+        raise RuntimeError("Все модели выбранного уровня временно недоступны") from last_error
+
+    debug["fallback_used"] = provider_model_id != model_id
+    debug["fallback_model"] = (
+        provider_model_id if provider_model_id != model_id else None
+    )
+    debug["attempted_models"] = attempted_models
 
     content = str(content or "")
     if len(content) > MAX_AI_REPLY_CHARS:
