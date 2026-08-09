@@ -166,7 +166,14 @@ async def init_db():
         for value in (
             os.getenv("BOT_TOKEN"),
             os.getenv("GEMINI_API_KEY"),
+            os.getenv("GEMINI_API_KEY_2"),
+            os.getenv("GEMINI_API_KEY_3"),
             os.getenv("NVIDIA_API_KEY"),
+            os.getenv("NVIDIA_API_KEY_2"),
+            os.getenv("NVIDIA_API_KEY_3"),
+            os.getenv("GROQ_API_KEY"),
+            os.getenv("GROQ_API_KEY_2"),
+            os.getenv("GROQ_API_KEY_3"),
             DATABASE_URL,
         )
         if value
@@ -384,6 +391,33 @@ async def init_db():
             ON global_request_usage_daily(usage_date)
             """
         )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS provider_api_key_state (
+                provider TEXT NOT NULL
+                    CHECK (provider IN ('nvidia', 'gemini', 'groq')),
+                key_fingerprint TEXT NOT NULL
+                    CHECK (key_fingerprint ~ '^[0-9a-f]{64}$'),
+                failure_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (failure_count >= 0),
+                unavailable_until TIMESTAMPTZ NOT NULL
+                    DEFAULT '-infinity'::timestamptz,
+                rate_window_started_at TIMESTAMPTZ,
+                rate_request_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (rate_request_count >= 0),
+                last_reserved_at TIMESTAMPTZ,
+                last_failure_at TIMESTAMPTZ,
+                last_success_at TIMESTAMPTZ,
+                PRIMARY KEY (provider, key_fingerprint)
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_provider_key_available
+            ON provider_api_key_state(provider, unavailable_until)
+            """
+        )
 
         # ─── Вход на сайт по коду (вне Telegram Mini App) ──────────────────
         await conn.execute(
@@ -457,6 +491,165 @@ async def init_db():
             """
         )
         await cleanup_expired_auth(conn=conn)
+
+
+_PROVIDER_NAMES = frozenset({"nvidia", "gemini", "groq"})
+_KEY_FINGERPRINT_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def _validate_provider_key_identity(
+    provider: str,
+    key_fingerprint: str,
+) -> None:
+    if provider not in _PROVIDER_NAMES:
+        raise ValueError("Некорректный провайдер API-ключа")
+    if not _KEY_FINGERPRINT_RE.fullmatch(key_fingerprint):
+        raise ValueError("Некорректный отпечаток API-ключа")
+
+
+async def reserve_provider_api_key(
+    provider: str,
+    key_fingerprints: tuple[str, ...],
+    *,
+    per_minute_limit: int | None,
+) -> str | None:
+    """Атомарно выбирает случайный доступный ключ и резервирует RPM-слот."""
+    if provider not in _PROVIDER_NAMES:
+        raise ValueError("Некорректный провайдер API-ключа")
+    checked_fingerprints = tuple(dict.fromkeys(key_fingerprints))
+    if not checked_fingerprints or any(
+        not _KEY_FINGERPRINT_RE.fullmatch(value)
+        for value in checked_fingerprints
+    ):
+        raise ValueError("Некорректный список отпечатков API-ключей")
+    if per_minute_limit is not None and not 1 <= per_minute_limit <= 10_000:
+        raise ValueError("Некорректный минутный лимит API-ключа")
+
+    async with _pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO provider_api_key_state (
+                    provider,
+                    key_fingerprint
+                )
+                SELECT $1, fingerprint
+                FROM UNNEST($2::text[]) AS configured(fingerprint)
+                ON CONFLICT (provider, key_fingerprint) DO NOTHING
+                """,
+                provider,
+                list(checked_fingerprints),
+            )
+            row = await conn.fetchrow(
+                """
+                WITH candidate AS (
+                    SELECT provider, key_fingerprint
+                    FROM provider_api_key_state
+                    WHERE provider = $1
+                      AND key_fingerprint = ANY($2::text[])
+                      AND unavailable_until <= NOW()
+                      AND (
+                            $3::integer IS NULL
+                            OR rate_window_started_at IS NULL
+                            OR rate_window_started_at <=
+                                NOW() - INTERVAL '1 minute'
+                            OR rate_request_count < $3
+                          )
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                    FOR UPDATE
+                )
+                UPDATE provider_api_key_state AS state
+                SET
+                    rate_window_started_at = CASE
+                        WHEN $3::integer IS NULL
+                            THEN state.rate_window_started_at
+                        WHEN state.rate_window_started_at IS NULL
+                          OR state.rate_window_started_at <=
+                                NOW() - INTERVAL '1 minute'
+                            THEN NOW()
+                        ELSE state.rate_window_started_at
+                    END,
+                    rate_request_count = CASE
+                        WHEN $3::integer IS NULL
+                            THEN state.rate_request_count
+                        WHEN state.rate_window_started_at IS NULL
+                          OR state.rate_window_started_at <=
+                                NOW() - INTERVAL '1 minute'
+                            THEN 1
+                        ELSE state.rate_request_count + 1
+                    END,
+                    last_reserved_at = NOW()
+                FROM candidate
+                WHERE state.provider = candidate.provider
+                  AND state.key_fingerprint = candidate.key_fingerprint
+                RETURNING state.key_fingerprint
+                """,
+                provider,
+                list(checked_fingerprints),
+                per_minute_limit,
+            )
+    return str(row["key_fingerprint"]) if row else None
+
+
+async def mark_provider_api_key_failure(
+    provider: str,
+    key_fingerprint: str,
+) -> int:
+    """Ставит ключ в карантин и возвращает длительность карантина в секундах."""
+    _validate_provider_key_identity(provider, key_fingerprint)
+    async with _pool.acquire() as conn:
+        cooldown_seconds = await conn.fetchval(
+            """
+            UPDATE provider_api_key_state
+            SET
+                failure_count = failure_count + 1,
+                unavailable_until = NOW() + MAKE_INTERVAL(
+                    secs => CASE
+                        WHEN provider = 'groq' THEN 86400
+                        WHEN provider = 'gemini' AND failure_count >= 1
+                            THEN 86400
+                        ELSE 60
+                    END
+                ),
+                last_failure_at = NOW()
+            WHERE provider = $1
+              AND key_fingerprint = $2
+            RETURNING CASE
+                WHEN provider = 'groq' THEN 86400
+                WHEN provider = 'gemini' AND failure_count >= 2 THEN 86400
+                ELSE 60
+            END
+            """,
+            provider,
+            key_fingerprint,
+        )
+    if cooldown_seconds is None:
+        raise RuntimeError("Состояние API-ключа не найдено")
+    return int(cooldown_seconds)
+
+
+async def mark_provider_api_key_success(
+    provider: str,
+    key_fingerprint: str,
+) -> None:
+    _validate_provider_key_identity(provider, key_fingerprint)
+    async with _pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE provider_api_key_state
+            SET
+                failure_count = 0,
+                unavailable_until = '-infinity'::timestamptz,
+                last_success_at = NOW()
+            WHERE provider = $1
+              AND key_fingerprint = $2
+            """,
+            provider,
+            key_fingerprint,
+        )
+    if result == "UPDATE 0":
+        raise RuntimeError("Состояние API-ключа не найдено")
 
 
 async def get_user_status(user_id: int) -> str | None:
