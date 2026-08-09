@@ -8,7 +8,7 @@ REASONING_LEVELS = {
     },
     "balanced": {
         "title": "⚖️ Обычно",
-        "model_id": "qwen/qwen3.6-27b",
+        "model_id": "groq/qwen/qwen3.6-27b",
     },
     "expert": {
         "title": "🛠 Эксперт",
@@ -18,6 +18,19 @@ REASONING_LEVELS = {
 
 DEFAULT_REASONING_LEVEL = "balanced"
 DEFAULT_MODEL = REASONING_LEVELS[DEFAULT_REASONING_LEVEL]["model_id"]
+
+# Старые клиенты и сохранённые пользовательские настройки могли присылать
+# Qwen без внутреннего префикса провайдера. Канонизируем такой ID, чтобы он
+# всегда отправлялся в Groq, а не попадал в NVIDIA по умолчанию.
+LEGACY_MODEL_ALIASES = {
+    "qwen/qwen3.6-27b": REASONING_LEVELS["balanced"]["model_id"],
+}
+
+
+def canonical_model_id(model_id: str) -> str:
+    return LEGACY_MODEL_ALIASES.get(model_id, model_id)
+
+
 LEVEL_MODELS = frozenset(
     level["model_id"] for level in REASONING_LEVELS.values()
 )
@@ -57,7 +70,7 @@ MODELS = {
     "nvidia/nemotron-3-nano-30b-a3b": "Nemotron 3 Nano 30B A3B",
     "gemini/gemini-3.1-flash-lite": "Gemini 3.1 Flash-Lite",
     "gemini/gemini-3.5-flash-lite": "Gemini 3.5 Flash-Lite",
-    "qwen/qwen3.6-27b": "Qwen 3.6 27B",
+    "groq/qwen/qwen3.6-27b": "Qwen 3.6 27B",
     "gemini/gemini-3.6-flash": "Gemini 3.6 Flash",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B A12B",
     "z-ai/glm-5.2": "GLM-5.2",
@@ -68,7 +81,10 @@ MODELS = {
 
 
 def reasoning_level_for_model(model_id: str) -> str:
-    return MODEL_TO_LEVEL.get(model_id, DEFAULT_REASONING_LEVEL)
+    return MODEL_TO_LEVEL.get(
+        canonical_model_id(model_id),
+        DEFAULT_REASONING_LEVEL,
+    )
 
 
 def reasoning_level_title(level_id: str) -> str:
