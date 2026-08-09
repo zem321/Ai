@@ -29,6 +29,7 @@ from keyboards import (
     MODELS,
     VISION_BRIDGE_MODEL,
     DIRECT_VISION_MODELS,
+    canonical_model_id,
     reasoning_level_for_model,
     reasoning_level_title,
 )
@@ -241,6 +242,9 @@ def get_history(data):
 
 def get_model(data):
     selected = data.get("selected_model")
+    if not isinstance(selected, str):
+        return DEFAULT_MODEL
+    selected = canonical_model_id(selected)
     return selected if selected in LEVEL_MODELS else DEFAULT_MODEL
 
 def trim_history(history: list) -> list:
@@ -562,7 +566,7 @@ def make_vision_content(prompt: str, image_data_url: str) -> list:
 
 
 def model_accepts_images(model_id: str) -> bool:
-    return model_id in DIRECT_VISION_MODELS
+    return canonical_model_id(model_id) in DIRECT_VISION_MODELS
 
 
 def make_vision_bridge_prompt(caption: str) -> str:
@@ -1106,7 +1110,13 @@ async def call_groq(model_id: str, messages: list) -> tuple[str, dict]:
 
 
 async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
-    logger.info("call_ai: selected_model=%s", model_id)
+    requested_model_id = model_id
+    model_id = canonical_model_id(model_id)
+    logger.info(
+        "call_ai: selected_model=%s canonical_model=%s",
+        requested_model_id,
+        model_id,
+    )
 
     if not AI_REQUESTS_ENABLED:
         raise RuntimeError(AI_DISABLED_MESSAGE)
