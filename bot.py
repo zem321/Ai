@@ -19,6 +19,7 @@ from handlers.image_handler import router as image_router
 from handlers.webapp_login_handler import router as webapp_login_router
 from handlers.vk_handler import setup_vk_callback_routes
 from middleware import AccessMiddleware
+from provider_keys import PROVIDER_KEY_ENV_NAMES
 from webapp_api import api_rate_limit_middleware, setup_webapp_routes
 
 logging.basicConfig(
@@ -28,8 +29,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
 LOGIN_CODE_PEPPER = os.getenv("LOGIN_CODE_PEPPER", "")
@@ -97,23 +96,25 @@ def _validate_required_provider_secret(name: str, value: str) -> None:
         raise RuntimeError(f"{name} не должен содержать пробелы")
 
 
-_validate_required_provider_secret("GEMINI_API_KEY", GEMINI_API_KEY)
-_validate_required_provider_secret("NVIDIA_API_KEY", NVIDIA_API_KEY)
+provider_secrets: list[str] = []
+for provider, env_names in PROVIDER_KEY_ENV_NAMES.items():
+    for env_name in env_names:
+        provider_secret = os.getenv(env_name, "")
+        _validate_required_provider_secret(env_name, provider_secret)
+        provider_secrets.append(provider_secret.strip())
 _validate_required_provider_secret("CLOUDFLARE_API_TOKEN", CLOUDFLARE_API_TOKEN)
 if not re.fullmatch(r"[0-9a-fA-F]{32}", CLOUDFLARE_ACCOUNT_ID):
     raise RuntimeError("CLOUDFLARE_ACCOUNT_ID имеет некорректный формат")
 configured_secrets = {
     BOT_TOKEN,
-    GEMINI_API_KEY.strip(),
-    NVIDIA_API_KEY.strip(),
+    *provider_secrets,
     CLOUDFLARE_API_TOKEN.strip(),
     LOGIN_CODE_PEPPER,
 }
-if len(configured_secrets) != 5:
+if len(configured_secrets) != 12:
     raise RuntimeError(
-        "BOT_TOKEN, GEMINI_API_KEY, NVIDIA_API_KEY, CLOUDFLARE_API_TOKEN "
-        "и LOGIN_CODE_PEPPER "
-        "должны быть разными секретами"
+        "BOT_TOKEN, три ключа NVIDIA, три ключа Gemini, три ключа Groq, "
+        "CLOUDFLARE_API_TOKEN и LOGIN_CODE_PEPPER должны быть разными секретами"
     )
 
 
