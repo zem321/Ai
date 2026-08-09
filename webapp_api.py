@@ -16,6 +16,7 @@ from urllib.parse import parse_qsl, urlsplit
 from aiohttp import web
 
 import database as db
+from keyboards import DEFAULT_MODEL as BOT_DEFAULT_MODEL
 from keyboards import MODELS as BOT_MODELS
 
 logger = logging.getLogger(__name__)
@@ -158,7 +159,7 @@ if any(
 _RENDER_PROXY_HEADERS = os.getenv("RENDER", "").strip().lower() == "true"
 
 ALLOWED_MODELS = frozenset(BOT_MODELS)
-DEFAULT_MODEL = "gemini/gemini-3.1-flash-lite"
+DEFAULT_MODEL = BOT_DEFAULT_MODEL
 
 AUTH_BODY_LIMIT = 1024
 ADMIN_BODY_LIMIT = 16 * 1024
@@ -2036,4 +2037,3 @@ def setup_webapp_routes(app: web.Application) -> None:
     app.router.add_get("/api/admin/users/{user_id}/stats", api_admin_user_stats)
     app.router.add_post("/api/admin/action", api_admin_action)
     app.router.add_post("/api/admin/limit", api_admin_limit)
-
