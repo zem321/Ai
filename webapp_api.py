@@ -18,6 +18,7 @@ from aiohttp import web
 import database as db
 from keyboards import DEFAULT_MODEL as BOT_DEFAULT_MODEL
 from keyboards import MODELS as BOT_MODELS
+from keyboards import canonical_model_id
 
 logger = logging.getLogger(__name__)
 logger.info("webapp_api module loaded: build=security-hardened-v8")
@@ -1252,7 +1253,13 @@ async def _api_chat_for_user(
         if len(user_text) > MAX_MESSAGE_CHARS:
             raise ValueError("Сообщение слишком длинное")
         model_id = payload.get("model") or DEFAULT_MODEL
-        if not isinstance(model_id, str) or model_id not in ALLOWED_MODELS:
+        if not isinstance(model_id, str):
+            return web.json_response(
+                {"error": "invalid_model", "message": "Недоступная модель."},
+                status=400,
+            )
+        model_id = canonical_model_id(model_id)
+        if model_id not in ALLOWED_MODELS:
             return web.json_response(
                 {"error": "invalid_model", "message": "Недоступная модель."},
                 status=400,
