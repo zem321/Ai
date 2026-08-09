@@ -686,7 +686,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
           </button>
           <button class="pill-model glass-pill" id="model-btn">
-            <span id="model-label">Gemini 3.1 Flash Lite</span>
+            <span id="model-label">⚖️ Обычно · Qwen 3.6 27B</span>
             <span class="chev"></span>
           </button>
           <div class="tool-spacer"></div>
@@ -2594,25 +2594,19 @@
 
   /* ================= Model picker (Synced with Backend IDs) ================= */
   const GROUP_MODELS = {
-    gemini:  [
-      ['gemini/gemini-3.1-flash-lite', 'Gemini 3.1 Flash Lite'],
-      ['gemini/gemini-3.5-flash-lite', 'Gemini 3.5 Flash Lite'],
-      ['gemini/gemini-3.6-flash', 'Gemini 3.6 Flash']
-    ],
-    other:   [
-      ['z-ai/glm-5.2', 'GLM-5.2'],
-      ['deepseek-ai/deepseek-v4-pro', 'DeepSeek V4 Pro'],
-      ['nvidia/nemotron-3-super-120b-a12b', 'Nemotron 3 Super 120B'],
-      ['meta/llama-3.2-11b-vision-instruct', 'Llama 3.2 Vision 11B']
+    levels: [
+      ['nvidia/nemotron-3-nano-30b-a3b', '⚡ Быстро · Nemotron 3 Nano'],
+      ['groq/qwen/qwen3.6-27b', '⚖️ Обычно · Qwen 3.6 27B'],
+      ['z-ai/glm-5.2', '🛠 Эксперт · GLM-5.2']
     ]
   };
-  const GROUP_LABELS = { gemini:'Gemini', other:'Other Models' };
+  const GROUP_LABELS = { levels:'Уровень ответа' };
   const ALL_LIMIT_MODELS = [
     ...Object.values(GROUP_MODELS).flat(),
     ['image-generation', 'Генерация изображений']
   ];
 
-  let model = 'gemini/gemini-3.1-flash-lite';
+  let model = 'groq/qwen/qwen3.6-27b';
   const modelLabel = document.getElementById('model-label');
 
   function openGroupPicker() {
