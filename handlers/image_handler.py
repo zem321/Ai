@@ -17,6 +17,14 @@ from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from PIL import Image, ImageOps
 from keyboards import menu_keyboard
+from provider_keys import (
+    MAX_KEY_ATTEMPTS_PER_MODEL,
+    ProviderKeysUnavailable,
+    acquire_provider_key,
+    configured_provider_keys,
+    mark_provider_key_failure,
+    mark_provider_key_success,
+)
 from states import BotStates
 import database as db
 from request_guard import single_user_ai_request
@@ -37,8 +45,6 @@ logger.info("image_handler module loaded: build=stream-read-v3")
 
 __all__ = ("router", "generate_image", "edit_image")
 
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://ai.api.nvidia.com/v1/genai")
@@ -78,6 +84,12 @@ DEFAULT_DAILY_IMAGE_LIMIT = max(
 _image_semaphore = asyncio.Semaphore(BOT_IMAGE_CONCURRENCY)
 
 IMAGE_MODELS = {"img_flux2": {"title": "Flux 2 Klein", "path": "black-forest-labs/flux.2-klein-4b"}}
+
+_KEY_FAILURE_HTTP_STATUSES = frozenset({401, 403, 408, 425, 429})
+
+
+def _http_status_disables_key(status: int) -> bool:
+    return status in _KEY_FAILURE_HTTP_STATUSES or status >= 500
 
 
 def _validated_nvidia_url(base_url: str, suffix: str) -> str:
@@ -141,30 +153,74 @@ async def _read_limited_response(
 
 
 async def _nvidia_post_full_url(url, payload):
-    if not NVIDIA_API_KEY:
-        raise RuntimeError("NVIDIA_API_KEY не задан")
-    headers = {"Authorization": f"Bearer {NVIDIA_API_KEY}", "Accept": "application/json", "Content-Type": "application/json"}
+    if not configured_provider_keys("nvidia"):
+        raise RuntimeError("API-ключи NVIDIA не заданы")
     timeout = aiohttp.ClientTimeout(total=90, connect=10, sock_read=60)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        # Не следуем редиректам: исходный URL прошёл allowlist, а адрес из
-        # Location уже может указывать на другой узел.
-        async with session.post(
-            url,
-            json=payload,
-            headers=headers,
-            allow_redirects=False,
-        ) as resp:
-            raw = await _read_limited_response(resp, PROVIDER_RESPONSE_LIMIT)
-            try:
-                data = json.loads(raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise RuntimeError("NVIDIA API вернул некорректный JSON") from exc
-            if resp.status < 200 or resp.status >= 300:
-                logger.warning("NVIDIA image API error status=%s", resp.status)
-                raise ProviderHTTPError(resp.status)
-            if not isinstance(data, dict):
-                raise RuntimeError("NVIDIA API вернул некорректный ответ")
-            return data
+    attempted_fingerprints: set[str] = set()
+    last_error: BaseException | None = None
+    for _ in range(MAX_KEY_ATTEMPTS_PER_MODEL):
+        try:
+            lease = await acquire_provider_key(
+                "nvidia",
+                excluded_fingerprints=frozenset(attempted_fingerprints),
+            )
+        except ProviderKeysUnavailable as exc:
+            last_error = exc
+            break
+        attempted_fingerprints.add(lease.fingerprint)
+        headers = {
+            "Authorization": f"Bearer {lease.secret}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                # Не следуем редиректам: исходный URL прошёл allowlist, а
+                # адрес из Location уже может указывать на другой узел.
+                async with session.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    allow_redirects=False,
+                ) as resp:
+                    status = resp.status
+                    try:
+                        raw = await _read_limited_response(
+                            resp,
+                            PROVIDER_RESPONSE_LIMIT,
+                        )
+                    except RuntimeError as exc:
+                        if _http_status_disables_key(status):
+                            await mark_provider_key_failure(lease)
+                            last_error = exc
+                            continue
+                        await mark_provider_key_success(lease)
+                        raise
+        except asyncio.CancelledError:
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            await mark_provider_key_failure(lease)
+            last_error = exc
+            continue
+        if status < 200 or status >= 300:
+            logger.warning("NVIDIA image API error status=%s", status)
+            if _http_status_disables_key(status):
+                await mark_provider_key_failure(lease)
+                last_error = ProviderHTTPError(status)
+                continue
+            await mark_provider_key_success(lease)
+            raise ProviderHTTPError(status)
+        await mark_provider_key_success(lease)
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("NVIDIA API вернул некорректный JSON") from exc
+        if not isinstance(data, dict):
+            raise RuntimeError("NVIDIA API вернул некорректный ответ")
+        return data
+    if isinstance(last_error, ProviderHTTPError):
+        raise last_error
+    raise RuntimeError("Все API-ключи NVIDIA временно недоступны") from last_error
 
 
 def _parse_image_moderation_result(data: object) -> tuple[bool, str]:
@@ -204,8 +260,8 @@ def _parse_image_moderation_result(data: object) -> tuple[bool, str]:
 
 async def _moderate_generated_image(image_bytes: bytes) -> None:
     """Проверяет пиксели вторым провайдером и при любой неопределённости закрывает выдачу."""
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY не задан для модерации изображения")
+    if not configured_provider_keys("gemini"):
+        raise RuntimeError("API-ключи Gemini не заданы для модерации изображения")
     mime_type = validate_safe_image_payload(image_bytes)
     if mime_type is None:
         raise RuntimeError("Невозможно проверить формат изображения")
@@ -257,29 +313,72 @@ async def _moderate_generated_image(image_bytes: bytes) -> None:
         "max_tokens": 128,
         "response_format": {"type": "json_object"},
     }
-    headers = {
-        "Authorization": f"Bearer {GEMINI_API_KEY}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
     timeout = aiohttp.ClientTimeout(total=45, connect=10, sock_read=30)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(
-            GEMINI_OPENAI_CHAT_URL,
-            json=payload,
-            headers=headers,
-            allow_redirects=False,
-        ) as resp:
-            raw = await _read_limited_response(
-                resp,
-                MODERATION_RESPONSE_LIMIT,
+    attempted_fingerprints: set[str] = set()
+    last_error: BaseException | None = None
+    raw: bytes | None = None
+    succeeded = False
+    for _ in range(MAX_KEY_ATTEMPTS_PER_MODEL):
+        try:
+            lease = await acquire_provider_key(
+                "gemini",
+                excluded_fingerprints=frozenset(attempted_fingerprints),
             )
-            if resp.status < 200 or resp.status >= 300:
-                logger.warning(
-                    "Gemini image moderation error status=%s",
-                    resp.status,
+        except ProviderKeysUnavailable as exc:
+            last_error = exc
+            break
+        attempted_fingerprints.add(lease.fingerprint)
+        headers = {
+            "Authorization": f"Bearer {lease.secret}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    GEMINI_OPENAI_CHAT_URL,
+                    json=payload,
+                    headers=headers,
+                    allow_redirects=False,
+                ) as resp:
+                    status = resp.status
+                    try:
+                        raw = await _read_limited_response(
+                            resp,
+                            MODERATION_RESPONSE_LIMIT,
+                        )
+                    except RuntimeError as exc:
+                        if _http_status_disables_key(status):
+                            await mark_provider_key_failure(lease)
+                            last_error = exc
+                            raw = None
+                            continue
+                        await mark_provider_key_success(lease)
+                        raise
+        except asyncio.CancelledError:
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            await mark_provider_key_failure(lease)
+            last_error = exc
+            continue
+        if status < 200 or status >= 300:
+            logger.warning(
+                "Gemini image moderation error status=%s",
+                status,
+            )
+            if _http_status_disables_key(status):
+                await mark_provider_key_failure(lease)
+                last_error = RuntimeError(
+                    f"Gemini moderation API вернул HTTP {status}"
                 )
-                raise RuntimeError("Сервис модерации временно недоступен")
+                continue
+            await mark_provider_key_success(lease)
+            raise RuntimeError("Сервис модерации временно недоступен")
+        await mark_provider_key_success(lease)
+        succeeded = True
+        break
+    if not succeeded or raw is None:
+        raise RuntimeError("Сервис модерации временно недоступен") from last_error
     try:
         data = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
