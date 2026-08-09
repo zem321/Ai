@@ -8,7 +8,7 @@ REASONING_LEVELS = {
     },
     "balanced": {
         "title": "⚖️ Обычно",
-        "model_id": "gemini/gemini-3.5-flash-lite",
+        "model_id": "qwen/qwen3.6-27b",
     },
     "expert": {
         "title": "🛠 Эксперт",
@@ -26,11 +26,22 @@ MODEL_TO_LEVEL = {
     for level_id, level in REASONING_LEVELS.items()
 }
 
-# Резервная модель используется только при ошибке основного провайдера.
-FALLBACK_MODELS = {
-    REASONING_LEVELS["fast"]["model_id"]: "gemini/gemini-3.1-flash-lite",
+# Для каждого пользовательского уровня задан строгий порядок провайдеров.
+MODEL_FALLBACK_CHAINS = {
+    REASONING_LEVELS["fast"]["model_id"]: (
+        REASONING_LEVELS["fast"]["model_id"],
+        "gemini/gemini-3.5-flash-lite",
+        "groq/llama-3.1-8b-instant",
+    ),
     REASONING_LEVELS["balanced"]["model_id"]: (
-        "nvidia/nemotron-3-super-120b-a12b"
+        REASONING_LEVELS["balanced"]["model_id"],
+        "gemini/gemini-3.6-flash",
+        "nvidia/nemotron-3-super-120b-a12b",
+    ),
+    REASONING_LEVELS["expert"]["model_id"]: (
+        REASONING_LEVELS["expert"]["model_id"],
+        "gemini/gemini-3.6-flash",
+        "groq/openai/gpt-oss-120b",
     ),
 }
 
@@ -46,8 +57,12 @@ MODELS = {
     "nvidia/nemotron-3-nano-30b-a3b": "Nemotron 3 Nano 30B A3B",
     "gemini/gemini-3.1-flash-lite": "Gemini 3.1 Flash-Lite",
     "gemini/gemini-3.5-flash-lite": "Gemini 3.5 Flash-Lite",
+    "qwen/qwen3.6-27b": "Qwen 3.6 27B",
+    "gemini/gemini-3.6-flash": "Gemini 3.6 Flash",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B A12B",
     "z-ai/glm-5.2": "GLM-5.2",
+    "groq/llama-3.1-8b-instant": "Llama 3.1 8B Instant",
+    "groq/openai/gpt-oss-120b": "GPT-OSS 120B",
     VISION_BRIDGE_MODEL: "Nemotron Nano 12B VL",
 }
 
