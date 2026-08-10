@@ -33,6 +33,42 @@ class ProviderKeysUnavailable(RuntimeError):
     """У провайдера нет настроенного или доступного ключа."""
 
 
+class AllProviderKeysExhausted(RuntimeError):
+    """В рамках одного запроса подряд не ответили несколько разных ключей
+    одного провайдера (см. MAX_KEY_ATTEMPTS_PER_MODEL). Пользователь уже
+    увидел ошибку — это повод уведомить администратора."""
+
+    def __init__(self, provider: str, provider_label: str, attempts: int):
+        super().__init__(
+            f"Все доступные API-ключи провайдера {provider_label} исчерпаны "
+            f"(попыток: {attempts})"
+        )
+        self.provider = provider
+        self.provider_label = provider_label
+        self.attempts = attempts
+
+
+class AIChainExhausted(RuntimeError):
+    """Все модели цепочки fallback для выбранного уровня недоступны —
+    то есть отвалилось несколько провайдеров подряд в рамках одного запроса."""
+
+    def __init__(
+        self,
+        requested_model: str,
+        attempted_models: list[str],
+        errors: list[BaseException],
+    ):
+        summary = "; ".join(
+            f"{m}: {type(e).__name__}" for m, e in zip(attempted_models, errors)
+        )
+        super().__init__(
+            f"Все модели выбранного уровня временно недоступны ({summary})"
+        )
+        self.requested_model = requested_model
+        self.attempted_models = list(attempted_models)
+        self.errors = list(errors)
+
+
 @dataclass(frozen=True)
 class ProviderKeyLease:
     provider: str
