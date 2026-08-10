@@ -290,6 +290,40 @@ async def cleanup_auth_loop():
         await asyncio.sleep(60 * 60)
 
 
+def _seconds_until_next_daily_run(hour_utc: int, minute_utc: int = 0) -> float:
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=hour_utc, minute=minute_utc, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+async def daily_healthcheck_loop(bot: Bot):
+    """Полный health-check всех ключей всех провайдеров + UptimeRobot,
+    раз в сутки в 07:00 UTC (10:00 МСК). Отчёт уходит админу в Telegram."""
+    from healthcheck import run_full_healthcheck, format_report
+
+    while True:
+        try:
+            await asyncio.sleep(_seconds_until_next_daily_run(hour_utc=7))
+            report = await run_full_healthcheck()
+            text = format_report(report)
+            chunk = ""
+            for line in text.split("\n"):
+                if len(chunk) + len(line) + 1 > 3800:
+                    await bot.send_message(ADMIN_ID, chunk, parse_mode="HTML")
+                    chunk = ""
+                chunk += line + "\n"
+            if chunk.strip():
+                await bot.send_message(ADMIN_ID, chunk, parse_mode="HTML")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Ошибка планового healthcheck")
+
+
 async def set_commands(bot: Bot):
     await bot.set_my_commands([
         BotCommand(command="start", description="Главное меню"),
@@ -297,6 +331,7 @@ async def set_commands(bot: Bot):
         BotCommand(command="clear", description="Очистить историю"),
         BotCommand(command="code", description="Код для входа на сайт"),
         BotCommand(command="admin", description="Админ панель"),
+        BotCommand(command="healthcheck", description="Проверка всех AI-ключей"),
     ])
 
 
@@ -310,6 +345,7 @@ async def main():
     cleanup_task = asyncio.create_task(cleanup_auth_loop())
 
     bot = Bot(token=BOT_TOKEN)
+    healthcheck_task = asyncio.create_task(daily_healthcheck_loop(bot))
     dp = Dispatcher(storage=MemoryStorage())
 
     dp.message.middleware(AccessMiddleware())
@@ -330,8 +366,11 @@ async def main():
         await dp.start_polling(bot, skip_updates=True)
     finally:
         cleanup_task.cancel()
+        healthcheck_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cleanup_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await healthcheck_task
         await bot.session.close()
         await web_runner.cleanup()
         await db.close_db()
