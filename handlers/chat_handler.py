@@ -35,12 +35,15 @@ from keyboards import (
 )
 from provider_keys import (
     MAX_KEY_ATTEMPTS_PER_MODEL,
+    AIChainExhausted,
+    AllProviderKeysExhausted,
     ProviderKeysUnavailable,
     acquire_provider_key,
     configured_provider_keys,
     mark_provider_key_failure,
     mark_provider_key_success,
 )
+from admin_alerts import notify_admin_provider_failure
 
 from states import BotStates
 import database as db
@@ -324,6 +327,11 @@ async def reserve_bot_ai_request(message: Message, model_id: str) -> bool:
 
 async def edit_error(status_msg: Message, title: str, error: Exception):
     logger.exception(title)
+    if isinstance(error, (AllProviderKeysExhausted, AIChainExhausted)):
+        chat_id = status_msg.chat.id if status_msg.chat else None
+        asyncio.create_task(
+            notify_admin_provider_failure(status_msg.bot, chat_id, error)
+        )
     await status_msg.edit_text(
         f"<b>{escape(title)}</b>\n\nПопробуй ещё раз или отправь другой файл.",
         parse_mode="HTML",
@@ -977,8 +985,8 @@ async def _call_openai_compatible_chat(
             "provider_key_attempts": len(attempted_fingerprints),
         }
 
-    raise RuntimeError(
-        f"Все доступные API-ключи провайдера {provider_label} исчерпаны"
+    raise AllProviderKeysExhausted(
+        provider, provider_label, len(attempted_fingerprints)
     ) from last_error
 
 
@@ -1217,6 +1225,7 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
 
     model_chain = MODEL_FALLBACK_CHAINS.get(model_id, (model_id,))
     attempted_models: list[str] = []
+    attempted_errors: list[BaseException] = []
     last_error: BaseException | None = None
     for chain_index, provider_model_id in enumerate(model_chain):
         attempted_models.append(provider_model_id)
@@ -1227,6 +1236,7 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
             raise
         except Exception as exc:
             last_error = exc
+            attempted_errors.append(exc)
             logger.warning(
                 "Модель недоступна, переходим по цепочке: requested=%s "
                 "failed=%s position=%s/%s error=%s",
@@ -1242,7 +1252,9 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
             model_id,
             attempted_models,
         )
-        raise RuntimeError("Все модели выбранного уровня временно недоступны") from last_error
+        raise AIChainExhausted(
+            model_id, attempted_models, attempted_errors
+        ) from last_error
 
     debug["fallback_used"] = provider_model_id != model_id
     debug["fallback_model"] = (
@@ -1331,6 +1343,36 @@ async def show_nvidia_video_models(message: Message):
         "Видео-модели NVIDIA",
         NVIDIA_VIDEO_MODELS,
     )
+
+
+@router.message(F.text == "/healthcheck")
+async def run_healthcheck_command(message: Message):
+    if not message.from_user or message.from_user.id != ADMIN_ID:
+        return
+    status_msg = await message.answer(
+        "<i>Проверяю все ключи всех провайдеров по всем моделям, "
+        "плюс UptimeRobot...</i>",
+        parse_mode="HTML",
+    )
+    try:
+        from healthcheck import run_full_healthcheck, format_report
+
+        report = await run_full_healthcheck()
+        text = format_report(report)
+    except Exception:
+        logger.exception("Ошибка при healthcheck")
+        await status_msg.edit_text("❌ Не удалось выполнить healthcheck.")
+        return
+
+    await status_msg.delete()
+    chunk = ""
+    for line in text.split("\n"):
+        if len(chunk) + len(line) + 1 > 3800:
+            await message.answer(chunk, parse_mode="HTML")
+            chunk = ""
+        chunk += line + "\n"
+    if chunk.strip():
+        await message.answer(chunk, parse_mode="HTML")
 
 
 @router.callback_query(F.data == "select_model")
