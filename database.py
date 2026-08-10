@@ -419,6 +419,25 @@ async def init_db():
             """
         )
 
+        # ─── Инциденты: несколько ключей/провайдеров подряд не ответили ────
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS provider_incidents (
+                id BIGSERIAL PRIMARY KEY,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                requested TEXT NOT NULL,
+                attempted TEXT[] NOT NULL DEFAULT '{}',
+                details TEXT NOT NULL DEFAULT '',
+                user_id BIGINT,
+                admin_notified BOOLEAN NOT NULL DEFAULT FALSE
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_provider_incidents_created "
+            "ON provider_incidents(created_at)"
+        )
+
         # ─── Вход на сайт по коду (вне Telegram Mini App) ──────────────────
         await conn.execute(
             """
@@ -650,6 +669,46 @@ async def mark_provider_api_key_success(
         )
     if result == "UPDATE 0":
         raise RuntimeError("Состояние API-ключа не найдено")
+
+
+async def log_provider_incident(
+    *,
+    requested: str,
+    attempted: list[str],
+    details: str,
+    user_id: int | None,
+    admin_notified: bool,
+) -> int:
+    """Записывает инцидент сбоя провайдера/цепочки моделей и возвращает id."""
+    async with _pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO provider_incidents
+                (requested, attempted, details, user_id, admin_notified)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            """,
+            requested[:200],
+            [str(item)[:200] for item in attempted][:20],
+            details[:2000],
+            user_id,
+            admin_notified,
+        )
+    return int(row["id"])
+
+
+async def recent_provider_incidents(limit: int = 20) -> list[dict]:
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, created_at, requested, attempted, details, user_id
+            FROM provider_incidents
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            max(1, min(limit, 200)),
+        )
+    return [dict(row) for row in rows]
 
 
 async def get_user_status(user_id: int) -> str | None:
