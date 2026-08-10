@@ -19,6 +19,7 @@ from PIL import Image, ImageOps
 from keyboards import menu_keyboard
 from provider_keys import (
     MAX_KEY_ATTEMPTS_PER_MODEL,
+    AllProviderKeysExhausted,
     ProviderKeysUnavailable,
     acquire_provider_key,
     configured_provider_keys,
@@ -28,6 +29,7 @@ from provider_keys import (
 from states import BotStates
 import database as db
 from request_guard import single_user_ai_request
+from admin_alerts import notify_admin_provider_failure
 from safety import (
     AI_DISABLED_MESSAGE,
     AI_REQUESTS_ENABLED,
@@ -220,7 +222,9 @@ async def _nvidia_post_full_url(url, payload):
         return data
     if isinstance(last_error, ProviderHTTPError):
         raise last_error
-    raise RuntimeError("Все API-ключи NVIDIA временно недоступны") from last_error
+    raise AllProviderKeysExhausted(
+        "nvidia", "NVIDIA", len(attempted_fingerprints)
+    ) from last_error
 
 
 def _parse_image_moderation_result(data: object) -> tuple[bool, str]:
@@ -816,8 +820,12 @@ async def do_generate(message: Message, state: FSMContext):
             "❌ Генерация заняла слишком много времени.",
             reply_markup=menu_keyboard(),
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Ошибка генерации изображения")
+        if isinstance(exc, AllProviderKeysExhausted):
+            asyncio.create_task(
+                notify_admin_provider_failure(message.bot, message.chat.id, exc)
+            )
         await status_msg.edit_text(
             "❌ Не удалось создать изображение. Попробуй позже.",
             reply_markup=menu_keyboard(),
@@ -908,8 +916,12 @@ async def do_edit(message: Message, state: FSMContext):
             parse_mode="HTML",
             reply_markup=menu_keyboard(),
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Ошибка редактирования изображения")
+        if isinstance(exc, AllProviderKeysExhausted):
+            asyncio.create_task(
+                notify_admin_provider_failure(message.bot, message.chat.id, exc)
+            )
         await status_msg.edit_text(
             "❌ Не удалось отредактировать изображение. Попробуй позже.",
             reply_markup=menu_keyboard(),
