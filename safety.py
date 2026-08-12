@@ -240,6 +240,10 @@ ALLOW_USER_IMAGE_UPLOADS = _boolean_environment(
     "ALLOW_USER_IMAGE_UPLOADS",
     "0",
 )
+ALLOW_USER_VIDEO_UPLOADS = _boolean_environment(
+    "ALLOW_USER_VIDEO_UPLOADS",
+    "0",
+)
 ALLOW_USER_FILE_UPLOADS = _boolean_environment(
     "ALLOW_USER_FILE_UPLOADS",
     "0",
@@ -510,19 +514,122 @@ def _decoded_security_sources(source: str) -> tuple[tuple[str, ...], bool]:
     return tuple(dict.fromkeys(cleaned)), exhausted
 
 
+_ANY_SIGNAL_RE_CACHE: re.Pattern[str] | None = None
+
+
+def _iter_patterns(value: object):
+    if isinstance(value, re.Pattern):
+        yield value
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _iter_patterns(item)
+
+
+def _any_signal_regex() -> re.Pattern[str]:
+    """Один общий regex-предфильтр из всех "листовых" сигнальных паттернов.
+
+    Композитные правила ниже требуют совпадения НЕСКОЛЬКИХ таких паттернов
+    сразу (и то — в пределах одного окна из соседних предложений). Значит
+    если этот объединённый regex вообще ни разу не совпал во всём
+    сообщении, ни одно составное правило заведомо не может сработать —
+    дорогой разбор по окнам можно безопасно пропустить. Кэшируется один раз
+    при первом вызове (после того как модуль полностью загрузился и все
+    паттерны объявлены), поэтому короткие обычные сообщения без единого
+    "подозрительного" слова обрабатываются практически бесплатно.
+    """
+    global _ANY_SIGNAL_RE_CACHE
+    if _ANY_SIGNAL_RE_CACHE is None:
+        seen: set[str] = set()
+        parts: list[str] = []
+        for value in list(globals().values()):
+            for pattern in _iter_patterns(value):
+                # Инлайн-флаги вида (?i) валидны только в начале ОБЩЕГО
+                # выражения — при объединении многих паттернов в один они
+                # мешают компиляции. Снаружи и так задан re.IGNORECASE.
+                text = re.sub(r"^\(\?[aiLmsux]+\)", "", pattern.pattern)
+                if text not in seen:
+                    seen.add(text)
+                    parts.append(f"(?:{text})")
+        combined = "|".join(parts)
+        _ANY_SIGNAL_RE_CACHE = re.compile(combined, re.IGNORECASE | re.DOTALL)
+    return _ANY_SIGNAL_RE_CACHE
+
+
+def _segment_sentences(text: str) -> list[str]:
+    """Режет текст на предложения/пункты списка по терминаторам и переносам."""
+    raw_parts = re.split(r"[\r\n]+|(?<=[.!?…])\s+", text)
+    parts = [p.strip(" \t*-•\u2022\u2023\u25e6") for p in raw_parts]
+    return [p for p in parts if p]
+
+
+def _windowed_segments(
+    text: str,
+    *,
+    window_sentences: int = 3,
+    stride: int = 2,
+    max_chars: int = 600,
+    max_windows: int | None = None,
+) -> list[str]:
+    """Скользящие окна из нескольких соседних предложений.
+
+    Композитные правила ("действие" + "цель" + "скрытность" и т.п.) должны
+    сработать, только если сигналы стоят РЯДОМ по смыслу — иначе два
+    случайных невинных слова из разных, никак не связанных предложений
+    длинного сообщения складываются в ложное срабатывание. Окно даёт
+    достаточный запас (по умолчанию до 3 предложений подряд), чтобы ловить
+    формулировки, растянутые на пару фраз, но не смешивать весь документ
+    в одну кучу.
+
+    ``max_windows`` не задан по умолчанию намеренно: жёсткий потолок молча
+    обрезал бы анализ хвоста длинных сообщений (см. регресс-тест). Общая
+    стоимость и так ограничена ``MAX_SECURITY_TEXT_CHARS`` на входе.
+    """
+    sentences = _segment_sentences(text)
+    if len(sentences) <= 1:
+        return [text] if text else []
+
+    windows: list[str] = []
+    i = 0
+    while i < len(sentences) and (max_windows is None or len(windows) < max_windows):
+        chunk: list[str] = []
+        length = 0
+        for j in range(i, min(i + window_sentences, len(sentences))):
+            length += len(sentences[j]) + 1
+            if length > max_chars and chunk:
+                break
+            chunk.append(sentences[j])
+        windows.append(" ".join(chunk))
+        i += stride
+    return windows
+
+
 def _security_text_analysis(
     value: object,
-) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
-    """Возвращает исходники, варианты и fail-closed причину отказа."""
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], str | None]:
+    """Возвращает исходники, варианты и fail-closed причину отказа.
+
+    Даёт два набора вариантов:
+    * ``whole_variants`` — весь (декодированный) текст целиком, как раньше.
+      Подходит для самодостаточных паттернов с встроенным ограниченным
+      разрывом (``.{0,100}`` и т.п. внутри одной регулярки) — они не могут
+      случайно "склеить" два далёких друг от друга слова, так что весь текст
+      проверять дёшево и безопасно.
+    * ``windowed_variants`` — тот же текст, разбитый на скользящие окна по
+      несколько соседних предложений. Нужен для композитных правил, которые
+      делают ``pattern_a.search(text) and pattern_b.search(text)`` двумя
+      отдельными проверками без ограничения на расстояние между ними —
+      без окна такие правила случайно совмещают невinные слова из разных,
+      никак не связанных предложений длинного сообщения.
+    """
     if not isinstance(value, str):
-        return (), (), None
+        return (), (), (), None
     complexity_reason = _security_complexity_rejection_reason(value)
     if complexity_reason:
-        return (), (), complexity_reason
+        return (), (), (), complexity_reason
     sources, decode_exhausted = _decoded_security_sources(value)
-    variants: list[str] = []
-    for source in sources:
-        normalized = source.casefold()
+
+    def _variants_for(text: str) -> tuple[str, ...]:
+        normalized = text.casefold()
         latin_skeleton = normalized.translate(_LATIN_CONFUSABLES)
         accentless = "".join(
             char
@@ -537,30 +644,42 @@ def _security_text_analysis(
             lambda match: re.sub(r"\s+", "", match.group(0)),
             tokenized,
         )
-        variants.extend(
-            (
-                normalized,
-                latin_skeleton,
-                accentless,
-                tokenized,
-                compact,
-                tokenized.translate(_LEET_CONFUSABLES),
-                compact.translate(_LEET_CONFUSABLES),
-                de_spaced.translate(_LEET_CONFUSABLES),
-            )
+        return (
+            normalized,
+            latin_skeleton,
+            accentless,
+            tokenized,
+            compact,
+            tokenized.translate(_LEET_CONFUSABLES),
+            compact.translate(_LEET_CONFUSABLES),
+            de_spaced.translate(_LEET_CONFUSABLES),
         )
+
+    whole_variants: list[str] = []
+    windowed_variants: list[str] = []
+    signal_re = _any_signal_regex()
+    for source in sources:
+        whole_variants.extend(_variants_for(source))
+        # Дорогой разбор по окнам запускаем, только если в источнике вообще
+        # есть хоть один сигнальный паттерн — иначе составные правила и так
+        # гарантированно не сработают (см. docstring _any_signal_regex).
+        if signal_re.search(source):
+            for window in _windowed_segments(source):
+                windowed_variants.extend(_variants_for(window))
+
     rejection_reason = (
         "encoded_content_unverifiable" if decode_exhausted else None
     )
     return (
         sources,
-        tuple(dict.fromkeys(item for item in variants if item)),
+        tuple(dict.fromkeys(item for item in whole_variants if item)),
+        tuple(dict.fromkeys(item for item in windowed_variants if item)),
         rejection_reason,
     )
 
 
 def _security_text_variants(value: object) -> tuple[str, ...]:
-    """Совместимый внутренний помощник для готовых правил."""
+    """Совместимый внутренний помощник для готовых правил (весь текст)."""
     return _security_text_analysis(value)[1]
 
 
@@ -1021,7 +1140,7 @@ def contains_probable_secret(value: object) -> bool:
     """
     if not isinstance(value, str) or not value:
         return False
-    sources, _variants, rejection_reason = _security_text_analysis(value)
+    sources, _whole, _windowed, rejection_reason = _security_text_analysis(value)
     if rejection_reason == "encoded_content_unverifiable":
         # Нельзя доказать отсутствие секрета внутри непроверенного слоя.
         return True
@@ -3709,12 +3828,19 @@ def _is_clearly_defensive_malware_context(text: str) -> bool:
 
 
 def _prohibited_request_reason_from_variants(
-    variants: tuple[str, ...],
+    whole_variants: tuple[str, ...],
+    windowed_variants: tuple[str, ...],
 ) -> str | None:
-    for text in variants:
+    # Композитные правила ("действие" + "цель" в разных .search()) — только
+    # в пределах окна из соседних предложений, иначе далёкие невинные слова
+    # ложно складываются в срабатывание на длинном сообщении.
+    for text in windowed_variants:
         keyword_reason = _keyword_rule_reason(text)
         if keyword_reason:
             return keyword_reason
+    # Самодостаточные паттерны с ограниченным разрывом внутри одной
+    # регулярки безопасно проверять по всему тексту целиком.
+    for text in whole_variants:
         for category, patterns in _PROHIBITED_REQUEST_PATTERNS:
             if any(pattern.search(text) for pattern in patterns):
                 if _is_clearly_safe_context(category, text):
@@ -3733,10 +3859,12 @@ def prohibited_request_reason(value: object) -> str | None:
     расследовании и защите не блокируются только из-за упоминания malware.
     Непроверяемая кодировка и чрезмерная сложность отклоняются fail-closed.
     """
-    _sources, variants, rejection_reason = _security_text_analysis(value)
+    _sources, whole_variants, windowed_variants, rejection_reason = (
+        _security_text_analysis(value)
+    )
     if rejection_reason:
         return rejection_reason
-    return _prohibited_request_reason_from_variants(variants)
+    return _prohibited_request_reason_from_variants(whole_variants, windowed_variants)
 
 
 def prohibited_image_reason(value: object) -> str | None:
@@ -3761,12 +3889,14 @@ def prohibited_image_reason(value: object) -> str | None:
 
 def contains_high_risk_payload(value: object) -> bool:
     """Ищет готовые опасные команды/полезные нагрузки во вложении или ответе."""
-    _sources, variants, rejection_reason = _security_text_analysis(value)
+    _sources, whole_variants, _windowed, rejection_reason = (
+        _security_text_analysis(value)
+    )
     if rejection_reason:
         return True
     return any(
         pattern.search(text)
-        for text in variants
+        for text in whole_variants
         for pattern in _HIGH_RISK_PAYLOAD_PATTERNS
     )
 
@@ -3776,17 +3906,21 @@ def prohibited_output_reason(value: object) -> str | None:
     if isinstance(value, str):
         if is_canonical_safety_response(value):
             return None
-        _sources, variants, rejection_reason = _security_text_analysis(value)
+        _sources, whole_variants, windowed_variants, rejection_reason = (
+            _security_text_analysis(value)
+        )
         if rejection_reason:
             return rejection_reason
         if any(
             pattern.search(text)
-            for text in variants
+            for text in whole_variants
             for pattern in _HIGH_RISK_PAYLOAD_PATTERNS
         ):
             return "high_risk_payload"
-        request_reason = _prohibited_request_reason_from_variants(variants)
-        for text in variants:
+        request_reason = _prohibited_request_reason_from_variants(
+            whole_variants, windowed_variants
+        )
+        for text in windowed_variants:
             behavioral_reason = _behavioral_rule_reason(
                 text,
                 assume_instruction=True,
