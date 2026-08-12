@@ -1,13 +1,3 @@
-"""Отдельный сервис (второй Render Web Service) для тяжёлых по памяти
-задач — скачивание фото/видео из Telegram и прогон через vision-модели
-NVIDIA. Живёт отдельно от основного бота, чтобы не делить с ним 512MB RAM.
-
-Доступ закрыт общим секретом (Bearer-токен), который знают только два
-сервиса. Никаких данных о пользователях бота или токене бота этот сервис
-не хранит — токен приходит только как часть одноразовой ссылки на файл
-Telegram, уже встроенной в присланный URL.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -19,6 +9,7 @@ import os
 import random
 import socket
 import time
+from collections import deque
 from urllib.parse import urlsplit
 
 from aiohttp import web
@@ -63,6 +54,32 @@ NVIDIA_TIMEOUT_VIDEO = aiohttp.ClientTimeout(total=90)
 # Не даём телу запроса от основного бота быть больше пары КБ — сюда прилетают
 # только ссылка+текст, а не сами байты медиа.
 MAX_REQUEST_BODY_BYTES = 32 * 1024
+
+# ─── Лимит нагрузки ──────────────────────────────────────────────────────
+# Даже с закрытым секретом стоит ограничить: (а) сколько задач выполняется
+# ОДНОВРЕМЕННО — сервис на 512MB, больше 2 видео параллельно не переживёт;
+# (б) сколько запросов в принципе допустимо в единицу времени — страховка
+# на случай утечки MEDIA_WORKER_SECRET, чтобы им не закидали наши NVIDIA-
+# ключи запросами.
+MAX_CONCURRENT_TASKS = int(os.getenv("MEDIA_WORKER_CONCURRENCY", "2"))
+_task_semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+CONCURRENCY_WAIT_TIMEOUT = 2.0  # секунд ждём свободный слот, потом 503
+
+RATE_LIMIT_MAX_REQUESTS = int(os.getenv("MEDIA_WORKER_RATE_LIMIT", "30"))
+RATE_LIMIT_WINDOW_SECONDS = 60.0
+_rate_limit_hits: deque[float] = deque()
+_rate_limit_lock = asyncio.Lock()
+
+
+async def _rate_limit_allows() -> bool:
+    now = time.monotonic()
+    async with _rate_limit_lock:
+        while _rate_limit_hits and now - _rate_limit_hits[0] > RATE_LIMIT_WINDOW_SECONDS:
+            _rate_limit_hits.popleft()
+        if len(_rate_limit_hits) >= RATE_LIMIT_MAX_REQUESTS:
+            return False
+        _rate_limit_hits.append(now)
+        return True
 
 
 # ─── Авторизация ────────────────────────────────────────────────────────
@@ -206,6 +223,23 @@ async def analyze(request: web.Request) -> web.Response:
     if request.content_length and request.content_length > MAX_REQUEST_BODY_BYTES:
         return web.json_response({"ok": False, "error": "request body too large"}, status=413)
 
+    if not await _rate_limit_allows():
+        return web.json_response({"ok": False, "error": "rate limited"}, status=429)
+
+    try:
+        await asyncio.wait_for(
+            _task_semaphore.acquire(), timeout=CONCURRENCY_WAIT_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        return web.json_response({"ok": False, "error": "server busy"}, status=503)
+
+    try:
+        return await _analyze_locked(request)
+    finally:
+        _task_semaphore.release()
+
+
+async def _analyze_locked(request: web.Request) -> web.Response:
     body = await request.json()
     kind = body.get("kind")
     file_url = body.get("file_url")
