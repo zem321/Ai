@@ -301,15 +301,14 @@ def _seconds_until_next_daily_run(hour_utc: int, minute_utc: int = 0) -> float:
 
 
 async def daily_healthcheck_loop(bot: Bot):
-    """Полный health-check всех ключей всех провайдеров + UptimeRobot,
-    раз в сутки в 07:00 UTC (10:00 МСК). Отчёт уходит админу в Telegram."""
-    from healthcheck import run_full_healthcheck, format_report
+    """Ежедневный краткий отчёт UptimeRobot в 07:00 UTC."""
+    from healthcheck import run_uptimerobot_check, format_uptimerobot_report
 
     while True:
         try:
             await asyncio.sleep(_seconds_until_next_daily_run(hour_utc=7))
-            report = await run_full_healthcheck()
-            text = format_report(report)
+            report = await run_uptimerobot_check()
+            text = format_uptimerobot_report(report)
             chunk = ""
             for line in text.split("\n"):
                 if len(chunk) + len(line) + 1 > 3800:
@@ -332,7 +331,7 @@ async def set_commands(bot: Bot):
         BotCommand(command="code", description="Код для входа на сайт"),
         BotCommand(command="admin", description="Админ панель"),
         BotCommand(command="model", description="Админу: выбрать конкретную AI-модель"),
-        BotCommand(command="healthcheck", description="Проверка всех AI-ключей"),
+        BotCommand(command="healthcheck", description="Uptime и инциденты"),
     ])
 
 
