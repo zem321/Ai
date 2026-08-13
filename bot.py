@@ -183,13 +183,7 @@ async def security_headers(request: web.Request, handler):
 
 
 async def health(request: web.Request) -> web.Response:
-    return web.json_response(
-        {
-            "status": "ok",
-            "build_sha": BUILD_SHA,
-            "build_branch": BUILD_BRANCH,
-        }
-    )
+    return web.Response(text="OK", content_type="text/plain")
 
 
 async def ready(request: web.Request) -> web.Response:
