@@ -25,6 +25,8 @@ from keyboards import (
     reasoning_level_keyboard,
     REASONING_LEVELS,
     DEFAULT_MODEL,
+    ADMIN_MODEL_IDS,
+    admin_model_keyboard,
     MODEL_FALLBACK_CHAINS,
     LEVEL_MODELS,
     MODELS,
@@ -1286,49 +1288,38 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
 
 # ------------------ Обработчики выбора моделей ------------------
 
-def _resolve_model_name(value: str) -> str | None:
-    """Возвращает ID модели по точному ID или её отображаемому имени."""
-    requested = value.strip()
-    if requested in MODELS:
-        return requested
-    requested_casefold = requested.casefold()
-    for model_id, title in MODELS.items():
-        if requested_casefold == title.casefold():
-            return model_id
-    return None
-
-
 @router.message(Command("model"))
-async def set_admin_model_by_name(message: Message, state: FSMContext):
-    """Позволяет админу писать напрямую в конкретную разрешённую модель."""
+async def show_admin_model_buttons(message: Message, state: FSMContext):
+    """Позволяет админу выбрать конкретную модель кнопкой."""
     if not message.from_user or message.from_user.id != ADMIN_ID:
         return
+    await message.answer(
+        "<b>Выберите модель</b>",
+        reply_markup=admin_model_keyboard(get_model(await state.get_data())),
+        parse_mode="HTML",
+    )
 
-    _, _, requested = (message.text or "").partition(" ")
-    model_id = _resolve_model_name(requested)
-    if model_id is None:
-        model_list = "\n".join(
-            f"• <code>{escape(model_id)}</code> — {escape(title)}"
-            for model_id, title in MODELS.items()
-        )
-        await message.answer(
-            "<b>Выберите модель командой:</b>\n"
-            "<code>/model имя_модели</code>\n\n"
-            "Можно указать технический ID или название из списка:\n"
-            f"{model_list}",
-            parse_mode="HTML",
-        )
+
+@router.callback_query(F.data.startswith("admin_model_"))
+async def set_admin_model(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    try:
+        model_index = int(callback.data.removeprefix("admin_model_"))
+        model_id = ADMIN_MODEL_IDS[model_index]
+    except (TypeError, ValueError, IndexError):
+        await callback.answer("Недоступная модель", show_alert=True)
         return
 
     await state.update_data(selected_model=model_id, chat_history=[])
     await state.set_state(BotStates.chat_mode)
-    await message.answer(
-        "<b>Режим администратора:</b> выбрана конкретная модель\n"
-        f"<code>{escape(model_id)}</code> — {escape(MODELS[model_id])}\n\n"
-        "Пиши сообщения. Модель вызывается напрямую, без цепочки уровней.",
+    await callback.message.edit_text(
+        "<b>Выбрана модель:</b> " + escape(MODELS[model_id]) + "\n\nПиши сообщения.",
         reply_markup=cancel_keyboard(),
         parse_mode="HTML",
     )
+    await callback.answer()
 
 @router.message(F.text == "/nvidia_models")
 async def show_nvidia_models(message: Message):
@@ -1397,15 +1388,14 @@ async def run_healthcheck_command(message: Message):
     if not message.from_user or message.from_user.id != ADMIN_ID:
         return
     status_msg = await message.answer(
-        "<i>Проверяю все ключи всех провайдеров по всем моделям, "
-        "плюс UptimeRobot...</i>",
+        "<i>Проверяю UptimeRobot...</i>",
         parse_mode="HTML",
     )
     try:
-        from healthcheck import run_full_healthcheck, format_report
+        from healthcheck import run_uptimerobot_check, format_uptimerobot_report
 
-        report = await run_full_healthcheck()
-        text = format_report(report)
+        report = await run_uptimerobot_check()
+        text = format_uptimerobot_report(report)
     except Exception:
         logger.exception("Ошибка при healthcheck")
         await status_msg.edit_text("❌ Не удалось выполнить healthcheck.")
