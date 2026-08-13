@@ -99,19 +99,13 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="Чат с ИИ", callback_data="mode_chat"),
             InlineKeyboardButton(text="Генерация фото", callback_data="mode_image_gen"),
-        ],
-        [
             InlineKeyboardButton(text="Редактировать фото", callback_data="mode_image_edit"),
         ],
         [
             InlineKeyboardButton(text="Очистить историю", callback_data="clear_history"),
-        ],
-        [
             InlineKeyboardButton(text="Код для сайта", callback_data="webapp_login_code"),
-        ],
-        [
             InlineKeyboardButton(text="Помощь", callback_data="help"),
-        ]
+        ],
     ])
 
 def reasoning_level_keyboard(current_model: str = "") -> InlineKeyboardMarkup:
