@@ -17,16 +17,13 @@ from pathlib import Path
 import unicodedata
 import aiohttp
 from aiogram import Router, F
-from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, BufferedInputFile, LinkPreviewOptions
+from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from keyboards import (
     cancel_keyboard,
     reasoning_level_keyboard,
     REASONING_LEVELS,
     DEFAULT_MODEL,
-    ADMIN_MODEL_IDS,
-    admin_model_keyboard,
     MODEL_FALLBACK_CHAINS,
     LEVEL_MODELS,
     MODELS,
@@ -251,9 +248,7 @@ def get_model(data):
     if not isinstance(selected, str):
         return DEFAULT_MODEL
     selected = canonical_model_id(selected)
-    # Обычные пользователи по-прежнему выбирают только понятные уровни.
-    # Точное имя из MODELS может сохранить лишь администратор командой /model.
-    return selected if selected in MODELS else DEFAULT_MODEL
+    return selected if selected in LEVEL_MODELS else DEFAULT_MODEL
 
 def trim_history(history: list) -> list:
     result = []
@@ -1288,39 +1283,6 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
 
 # ------------------ Обработчики выбора моделей ------------------
 
-@router.message(Command("model"))
-async def show_admin_model_buttons(message: Message, state: FSMContext):
-    """Позволяет админу выбрать конкретную модель кнопкой."""
-    if not message.from_user or message.from_user.id != ADMIN_ID:
-        return
-    await message.answer(
-        "<b>Выберите модель</b>",
-        reply_markup=admin_model_keyboard(get_model(await state.get_data())),
-        parse_mode="HTML",
-    )
-
-
-@router.callback_query(F.data.startswith("admin_model_"))
-async def set_admin_model(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    try:
-        model_index = int(callback.data.removeprefix("admin_model_"))
-        model_id = ADMIN_MODEL_IDS[model_index]
-    except (TypeError, ValueError, IndexError):
-        await callback.answer("Недоступная модель", show_alert=True)
-        return
-
-    await state.update_data(selected_model=model_id, chat_history=[])
-    await state.set_state(BotStates.chat_mode)
-    await callback.message.edit_text(
-        "<b>Выбрана модель:</b> " + escape(MODELS[model_id]) + "\n\nПиши сообщения.",
-        reply_markup=cancel_keyboard(),
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
 @router.message(F.text == "/nvidia_models")
 async def show_nvidia_models(message: Message):
     if not message.from_user or message.from_user.id != ADMIN_ID:
@@ -1388,7 +1350,8 @@ async def run_healthcheck_command(message: Message):
     if not message.from_user or message.from_user.id != ADMIN_ID:
         return
     status_msg = await message.answer(
-        "<i>Проверяю ключи AI и UptimeRobot...</i>",
+        "<i>Проверяю все ключи всех провайдеров по всем моделям, "
+        "плюс UptimeRobot...</i>",
         parse_mode="HTML",
     )
     try:
@@ -1405,11 +1368,7 @@ async def run_healthcheck_command(message: Message):
     chunk = ""
     for line in text.split("\n"):
         if len(chunk) + len(line) + 1 > 3800:
-            await message.answer(
-                chunk,
-                parse_mode="HTML",
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
-            )
+            await message.answer(chunk, parse_mode="HTML")
             chunk = ""
         chunk += line + "\n"
     if chunk.strip():
@@ -1755,4 +1714,3 @@ async def handle_document(message: Message, state: FSMContext):
 @router.message(BotStates.chat_mode)
 async def handle_unsupported_message(message: Message):
     await message.answer("Я могу обработать текст, фото, документы.", reply_markup=cancel_keyboard())
-
