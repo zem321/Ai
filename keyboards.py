@@ -102,17 +102,35 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="Редактировать фото", callback_data="mode_image_edit"),
-        ],
-        [
             InlineKeyboardButton(text="Очистить историю", callback_data="clear_history"),
         ],
         [
             InlineKeyboardButton(text="Код для сайта", callback_data="webapp_login_code"),
-        ],
-        [
             InlineKeyboardButton(text="Помощь", callback_data="help"),
-        ]
+        ],
     ])
+
+
+ADMIN_MODEL_IDS = tuple(MODELS)
+
+
+def admin_model_keyboard(current_model: str = "") -> InlineKeyboardMarkup:
+    """Кнопки выбора конкретной модели — только для экрана администратора."""
+    buttons = []
+    for index in range(0, len(ADMIN_MODEL_IDS), 2):
+        row = []
+        for model_id in ADMIN_MODEL_IDS[index:index + 2]:
+            title = MODELS[model_id]
+            label = f"✓ {title}" if model_id == current_model else title
+            row.append(
+                InlineKeyboardButton(
+                    text=label,
+                    callback_data=f"admin_model_{index + len(row)}",
+                )
+            )
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton(text="Меню", callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def reasoning_level_keyboard(current_model: str = "") -> InlineKeyboardMarkup:
     buttons = []
