@@ -28,7 +28,6 @@ from keyboards import (
     LEVEL_MODELS,
     MODELS,
     VISION_BRIDGE_MODEL,
-    VIDEO_MODEL,
     DIRECT_VISION_MODELS,
     canonical_model_id,
     reasoning_level_for_model,
@@ -45,7 +44,6 @@ from provider_keys import (
     mark_provider_key_success,
 )
 from admin_alerts import notify_admin_provider_failure
-import media_worker_client
 
 from states import BotStates
 import database as db
@@ -55,7 +53,6 @@ from safety import (
     AI_REQUESTS_ENABLED,
     ALLOW_USER_FILE_UPLOADS,
     ALLOW_USER_IMAGE_UPLOADS,
-    ALLOW_USER_VIDEO_UPLOADS,
     contains_high_risk_payload,
     contains_probable_secret,
     dangerous_binary_signature,
@@ -1583,62 +1580,7 @@ async def handle_photo(message: Message, state: FSMContext):
     except Exception as e:
         await edit_error(status_msg, "Ошибка", e)
 
-@router.message(BotStates.chat_mode, F.video)
-@single_user_ai_request
-async def handle_video(message: Message, state: FSMContext):
-    if not AI_REQUESTS_ENABLED:
-        await message.answer(AI_DISABLED_MESSAGE)
-        return
-    if not ALLOW_USER_VIDEO_UPLOADS:
-        await message.answer(
-            "Обработка видео пока отключена."
-        )
-        return
-    if not media_worker_client.media_worker_configured():
-        await message.answer(
-            "Обработка видео временно недоступна (не настроен media_worker)."
-        )
-        return
-    data = await state.get_data()
-    caption = message.caption or ""
-    prohibited_reason = prohibited_request_reason(caption)
-    if prohibited_reason:
-        await message.answer(safety_response_for_reason(prohibited_reason))
-        return
-    if contains_probable_secret(caption):
-        await message.answer("Подпись похожа на секрет и не была отправлена.")
-        return
-    if not await reserve_bot_ai_request(message, VIDEO_MODEL):
-        return
-    status_msg = await message.answer("<i>Обрабатываю видео, это может занять минуту...</i>", parse_mode="HTML")
-    try:
-        video = message.video
-        task_text = caption.strip() or "Опиши, что происходит на этом видео."
-        reply = await asyncio.wait_for(
-            media_worker_client.analyze_media(
-                message.bot,
-                kind="video",
-                file_id=video.file_id,
-                prompt=task_text,
-                model=VIDEO_MODEL,
-                declared_mime=video.mime_type or "video/mp4",
-            ),
-            timeout=100,
-        )
-        history = list(get_history(data))
-        history.append(
-            {"role": "user", "content": f"[Видео] {caption}".strip()}
-        )
-        history.append({"role": "assistant", "content": reply})
-        await state.update_data(chat_history=trim_history(history))
-
-        await send_ai_reply(status_msg, reply)
-    except media_worker_client.MediaWorkerUnavailable as e:
-        await edit_error(status_msg, "Не удалось обработать видео", e)
-    except Exception as e:
-        await edit_error(status_msg, "Ошибка", e)
-
-
+@router.message(BotStates.chat_mode, F.document)
 @single_user_ai_request
 async def handle_document(message: Message, state: FSMContext):
     if not AI_REQUESTS_ENABLED:
