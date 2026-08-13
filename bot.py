@@ -196,13 +196,10 @@ async def ready(request: web.Request) -> web.Response:
         raise
     except Exception:
         database_ready = False
-    return web.json_response(
-        {
-            "status": "ready" if database_ready else "not_ready",
-            "build_sha": BUILD_SHA,
-            "build_branch": BUILD_BRANCH,
-        },
+    return web.Response(
+        text="OK" if database_ready else "NOT READY",
         status=200 if database_ready else 503,
+        content_type="text/plain",
     )
 
 
@@ -372,3 +369,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
