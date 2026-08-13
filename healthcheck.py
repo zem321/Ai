@@ -180,9 +180,7 @@ async def _attach_uptimerobot(report: HealthReport) -> None:
             return
         report.uptimerobot = [
             {
-                "name": m.get("friendly_name"),
                 "status": m.get("status"),
-                "url": m.get("url"),
             }
             for m in data.get("monitors", [])
         ]
@@ -232,13 +230,18 @@ def format_report(report: HealthReport) -> str:
     if report.uptimerobot_error:
         lines.append(f"\n⚠️ UptimeRobot: {report.uptimerobot_error}")
     elif report.uptimerobot is not None:
-        down = [m for m in report.uptimerobot if m["status"] not in (2, 1)]
+        down = [
+            (index, m)
+            for index, m in enumerate(report.uptimerobot, start=1)
+            if m["status"] not in (2, 1)
+        ]
         lines.append(f"\n<b>UptimeRobot</b>: {len(report.uptimerobot)} монитор(ов)")
         if down:
-            for m in down:
+            for index, m in down:
                 label = _UPTIMEROBOT_STATUS_LABELS.get(m["status"], m["status"])
-                lines.append(f"  ⚠️ {m['name']}: {label}")
+                lines.append(f"  ⚠️ монитор #{index}: {label}")
         else:
             lines.append("  ✅ все мониторы up")
 
     return "\n".join(lines)
+
