@@ -1388,14 +1388,14 @@ async def run_healthcheck_command(message: Message):
     if not message.from_user or message.from_user.id != ADMIN_ID:
         return
     status_msg = await message.answer(
-        "<i>Проверяю UptimeRobot...</i>",
+        "<i>Проверяю ключи AI и UptimeRobot...</i>",
         parse_mode="HTML",
     )
     try:
-        from healthcheck import run_uptimerobot_check, format_uptimerobot_report
+        from healthcheck import run_full_healthcheck, format_report
 
-        report = await run_uptimerobot_check()
-        text = format_uptimerobot_report(report)
+        report = await run_full_healthcheck()
+        text = format_report(report)
     except Exception:
         logger.exception("Ошибка при healthcheck")
         await status_msg.edit_text("❌ Не удалось выполнить healthcheck.")
