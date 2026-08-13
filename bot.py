@@ -331,6 +331,7 @@ async def set_commands(bot: Bot):
         BotCommand(command="clear", description="Очистить историю"),
         BotCommand(command="code", description="Код для входа на сайт"),
         BotCommand(command="admin", description="Админ панель"),
+        BotCommand(command="model", description="Админу: выбрать конкретную AI-модель"),
         BotCommand(command="healthcheck", description="Проверка всех AI-ключей"),
     ])
 
