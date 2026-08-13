@@ -17,7 +17,7 @@ from pathlib import Path
 import unicodedata
 import aiohttp
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, BufferedInputFile
+from aiogram.types import Message, CallbackQuery, BufferedInputFile, LinkPreviewOptions
 from aiogram.fsm.context import FSMContext
 from keyboards import (
     cancel_keyboard,
@@ -1368,11 +1368,19 @@ async def run_healthcheck_command(message: Message):
     chunk = ""
     for line in text.split("\n"):
         if len(chunk) + len(line) + 1 > 3800:
-            await message.answer(chunk, parse_mode="HTML")
+            await message.answer(
+                chunk,
+                parse_mode="HTML",
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
             chunk = ""
         chunk += line + "\n"
     if chunk.strip():
-        await message.answer(chunk, parse_mode="HTML")
+        await message.answer(
+            chunk,
+            parse_mode="HTML",
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
 
 
 @router.callback_query(F.data == "select_model")
@@ -1714,3 +1722,4 @@ async def handle_document(message: Message, state: FSMContext):
 @router.message(BotStates.chat_mode)
 async def handle_unsupported_message(message: Message):
     await message.answer("Я могу обработать текст, фото, документы.", reply_markup=cancel_keyboard())
+
