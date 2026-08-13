@@ -5,8 +5,6 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from html import escape
 
 import aiohttp
 
@@ -168,10 +166,7 @@ async def _attach_uptimerobot(report: HealthReport) -> None:
                 data={
                     "api_key": UPTIMEROBOT_API_KEY,
                     "format": "json",
-                    # Общий uptime и журнал инцидентов — без лишней диагностики.
-                    "all_time_uptime_ratio": "1",
-                    "logs": "1",
-                    "logs_limit": "50",
+                    "logs": "0",
                 },
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
@@ -188,8 +183,6 @@ async def _attach_uptimerobot(report: HealthReport) -> None:
                 "name": m.get("friendly_name"),
                 "status": m.get("status"),
                 "url": m.get("url"),
-                "uptime_all_time": m.get("all_time_uptime_ratio"),
-                "incidents": _uptimerobot_incidents(m),
             }
             for m in data.get("monitors", [])
         ]
@@ -198,22 +191,6 @@ async def _attach_uptimerobot(report: HealthReport) -> None:
     except Exception as exc:
         report.uptimerobot_error = f"{type(exc).__name__}: {exc}"
         logger.exception("Не удалось получить статусы UptimeRobot")
-
-
-def _uptimerobot_incidents(monitor: dict) -> list[dict]:
-    """Инцидент — запись журнала UptimeRobot с типом 1 (down)."""
-    incidents = []
-    for log in monitor.get("logs") or []:
-        if not isinstance(log, dict) or log.get("type") != 1:
-            continue
-        incidents.append(
-            {
-                "datetime": log.get("datetime"),
-                "duration": log.get("duration"),
-                "reason": log.get("reason"),
-            }
-        )
-    return incidents
 
 
 # Коды статусов мониторов UptimeRobot.
@@ -226,75 +203,42 @@ _UPTIMEROBOT_STATUS_LABELS = {
 }
 
 
-def _format_uptime(monitor: dict) -> str:
-    ratio = monitor.get("uptime_all_time")
-    return f"uptime: {ratio}%" if ratio is not None else "нет данных об uptime"
-
-
-def _format_incident(incident: dict) -> str:
-    timestamp = incident.get("datetime")
-    if isinstance(timestamp, (int, float)):
-        happened_at = datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime(
-            "%d.%m %H:%M UTC"
-        )
-    else:
-        happened_at = "время неизвестно"
-    duration = incident.get("duration")
-    duration_text = f", {duration} сек." if isinstance(duration, (int, float)) else ""
-    reason = str(incident.get("reason") or "").strip()
-    reason_text = f", {escape(reason)}" if reason else ""
-    return f"{happened_at}{duration_text}{reason_text}"
-
-
-def format_uptimerobot_report(report: HealthReport) -> str:
-    """Короткий отчёт: проценты uptime и факт инцидентов."""
-    if report.uptimerobot_error:
-        return f"⚠️ UptimeRobot: {escape(report.uptimerobot_error)}"
-    if report.uptimerobot is None:
-        return "⚠️ UPTIMEROBOT_API_KEY не задан."
-
-    lines = ["<b>UptimeRobot</b>"]
-    for monitor in report.uptimerobot:
-        name = escape(str(monitor.get("name") or "Без названия"))
-        lines.append(f"• {name}: {_format_uptime(monitor)}")
-
-    incidents = [
-        (monitor, incident)
-        for monitor in report.uptimerobot
-        for incident in monitor.get("incidents", [])
-    ]
-    if incidents:
-        lines.append(f"⚠️ Инциденты: {len(incidents)}")
-        for monitor, incident in incidents:
-            name = escape(str(monitor.get("name") or "Без названия"))
-            lines.append(f"• {name}: {_format_incident(incident)}")
-    else:
-        lines.append("✅ Инцидентов нет")
-    return "\n".join(lines)
-
-
 def format_report(report: HealthReport) -> str:
-    """Проверка ключей с коротким дополнением от UptimeRobot."""
+    lines: list[str] = []
+    total = len(report.results)
     failed = report.failures
-    lines = [
-        "<b>Health-check провайдеров</b>",
-        f"Проверено связок ключ×модель: {len(report.results)}",
-        f"Проблем: {len(failed)}",
-    ]
+    lines.append(
+        f"<b>Health-check провайдеров</b>\n"
+        f"Проверено связок ключ×модель: {total}\n"
+        f"Проблем: {len(failed)}"
+    )
+
     if not failed:
-        lines.append("✅ Все ключи и модели отвечают.")
+        lines.append("\n✅ Все ключи и модели отвечают.")
     else:
         by_provider: dict[str, list[KeyModelResult]] = {}
-        for result in failed:
-            by_provider.setdefault(result.provider, []).append(result)
+        for r in failed:
+            by_provider.setdefault(r.provider, []).append(r)
         for provider, items in by_provider.items():
-            lines.append(f"<b>{provider}</b>:")
-            for result in items:
-                status = result.status if result.status is not None else "нет ответа"
+            lines.append(f"\n<b>{provider}</b>:")
+            for r in items:
+                status = r.status if r.status is not None else "нет ответа"
                 lines.append(
-                    f"• ключ #{result.key_index} × <code>{result.model_id}</code> "
-                    f"→ {status} ({result.latency_ms} мс)"
+                    f"  ключ #{r.key_index} × <code>{r.model_id}</code> "
+                    f"→ {status} ({r.latency_ms} мс)"
+                    + (f"\n    {r.error}" if r.error else "")
                 )
 
-    lines.extend(("", format_uptimerobot_report(report)))
+    if report.uptimerobot_error:
+        lines.append(f"\n⚠️ UptimeRobot: {report.uptimerobot_error}")
+    elif report.uptimerobot is not None:
+        down = [m for m in report.uptimerobot if m["status"] not in (2, 1)]
+        lines.append(f"\n<b>UptimeRobot</b>: {len(report.uptimerobot)} монитор(ов)")
+        if down:
+            for m in down:
+                label = _UPTIMEROBOT_STATUS_LABELS.get(m["status"], m["status"])
+                lines.append(f"  ⚠️ {m['name']}: {label}")
+        else:
+            lines.append("  ✅ все мониторы up")
+
     return "\n".join(lines)
