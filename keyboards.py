@@ -59,10 +59,7 @@ MODEL_FALLBACK_CHAINS = {
 }
 
 # Лёгкая vision-модель описывает фото перед передачей текстовым моделям.
-VISION_BRIDGE_MODEL = "google/gemma-3-12b-it"
-# Отдельная модель для видео — умеет нативно понимать видео (до 60 сек),
-# а не только фото, в отличие от Gemma 3.
-VIDEO_MODEL = "google/gemma-4-31b-it"
+VISION_BRIDGE_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
 DIRECT_VISION_MODELS = frozenset({
     REASONING_LEVELS["balanced"]["model_id"],
     VISION_BRIDGE_MODEL,
@@ -79,9 +76,7 @@ MODELS = {
     "z-ai/glm-5.2": "GLM-5.2",
     "groq/llama-3.1-8b-instant": "Llama 3.1 8B Instant",
     "groq/openai/gpt-oss-120b": "GPT-OSS 120B",
-    "nvidia/nemotron-nano-12b-v2-vl": "Nemotron Nano 12B VL",
-    VISION_BRIDGE_MODEL: "Gemma 3 12B (vision)",
-    VIDEO_MODEL: "Gemma 4 31B (video)",
+    VISION_BRIDGE_MODEL: "Nemotron Nano 12B VL",
 }
 
 
