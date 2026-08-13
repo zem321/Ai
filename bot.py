@@ -8,7 +8,7 @@ import secrets
 from pathlib import Path
 from aiohttp import web
 from aiogram import Bot, Dispatcher
-from aiogram.types import BotCommand, LinkPreviewOptions
+from aiogram.types import BotCommand
 from aiogram.fsm.storage.memory import MemoryStorage
 
 import database as db
@@ -313,12 +313,7 @@ async def daily_healthcheck_loop(bot: Bot):
             chunk = ""
             for line in text.split("\n"):
                 if len(chunk) + len(line) + 1 > 3800:
-                    await bot.send_message(
-                        ADMIN_ID,
-                        chunk,
-                        parse_mode="HTML",
-                        link_preview_options=LinkPreviewOptions(is_disabled=True),
-                    )
+                    await bot.send_message(ADMIN_ID, chunk, parse_mode="HTML")
                     chunk = ""
                 chunk += line + "\n"
             if chunk.strip():
@@ -383,4 +378,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
