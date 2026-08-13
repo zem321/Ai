@@ -17,6 +17,7 @@ from pathlib import Path
 import unicodedata
 import aiohttp
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from keyboards import (
@@ -248,7 +249,9 @@ def get_model(data):
     if not isinstance(selected, str):
         return DEFAULT_MODEL
     selected = canonical_model_id(selected)
-    return selected if selected in LEVEL_MODELS else DEFAULT_MODEL
+    # Обычные пользователи по-прежнему выбирают только понятные уровни.
+    # Точное имя из MODELS может сохранить лишь администратор командой /model.
+    return selected if selected in MODELS else DEFAULT_MODEL
 
 def trim_history(history: list) -> list:
     result = []
@@ -1282,6 +1285,50 @@ async def call_ai(model_id: str, messages: list) -> tuple[str, dict]:
 
 
 # ------------------ Обработчики выбора моделей ------------------
+
+def _resolve_model_name(value: str) -> str | None:
+    """Возвращает ID модели по точному ID или её отображаемому имени."""
+    requested = value.strip()
+    if requested in MODELS:
+        return requested
+    requested_casefold = requested.casefold()
+    for model_id, title in MODELS.items():
+        if requested_casefold == title.casefold():
+            return model_id
+    return None
+
+
+@router.message(Command("model"))
+async def set_admin_model_by_name(message: Message, state: FSMContext):
+    """Позволяет админу писать напрямую в конкретную разрешённую модель."""
+    if not message.from_user or message.from_user.id != ADMIN_ID:
+        return
+
+    _, _, requested = (message.text or "").partition(" ")
+    model_id = _resolve_model_name(requested)
+    if model_id is None:
+        model_list = "\n".join(
+            f"• <code>{escape(model_id)}</code> — {escape(title)}"
+            for model_id, title in MODELS.items()
+        )
+        await message.answer(
+            "<b>Выберите модель командой:</b>\n"
+            "<code>/model имя_модели</code>\n\n"
+            "Можно указать технический ID или название из списка:\n"
+            f"{model_list}",
+            parse_mode="HTML",
+        )
+        return
+
+    await state.update_data(selected_model=model_id, chat_history=[])
+    await state.set_state(BotStates.chat_mode)
+    await message.answer(
+        "<b>Режим администратора:</b> выбрана конкретная модель\n"
+        f"<code>{escape(model_id)}</code> — {escape(MODELS[model_id])}\n\n"
+        "Пиши сообщения. Модель вызывается напрямую, без цепочки уровней.",
+        reply_markup=cancel_keyboard(),
+        parse_mode="HTML",
+    )
 
 @router.message(F.text == "/nvidia_models")
 async def show_nvidia_models(message: Message):
