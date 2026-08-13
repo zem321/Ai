@@ -183,7 +183,13 @@ async def security_headers(request: web.Request, handler):
 
 
 async def health(request: web.Request) -> web.Response:
-    return web.Response(text="OK", content_type="text/plain")
+    return web.json_response(
+        {
+            "status": "ok",
+            "build_sha": BUILD_SHA,
+            "build_branch": BUILD_BRANCH,
+        }
+    )
 
 
 async def ready(request: web.Request) -> web.Response:
@@ -196,10 +202,13 @@ async def ready(request: web.Request) -> web.Response:
         raise
     except Exception:
         database_ready = False
-    return web.Response(
-        text="OK" if database_ready else "NOT READY",
+    return web.json_response(
+        {
+            "status": "ready" if database_ready else "not_ready",
+            "build_sha": BUILD_SHA,
+            "build_branch": BUILD_BRANCH,
+        },
         status=200 if database_ready else 503,
-        content_type="text/plain",
     )
 
 
@@ -292,7 +301,8 @@ def _seconds_until_next_daily_run(hour_utc: int, minute_utc: int = 0) -> float:
 
 
 async def daily_healthcheck_loop(bot: Bot):
-    """Ежедневная проверка ключей AI с кратким UptimeRobot-отчётом."""
+    """Полный health-check всех ключей всех провайдеров + UptimeRobot,
+    раз в сутки в 07:00 UTC (10:00 МСК). Отчёт уходит админу в Telegram."""
     from healthcheck import run_full_healthcheck, format_report
 
     while True:
@@ -321,8 +331,7 @@ async def set_commands(bot: Bot):
         BotCommand(command="clear", description="Очистить историю"),
         BotCommand(command="code", description="Код для входа на сайт"),
         BotCommand(command="admin", description="Админ панель"),
-        BotCommand(command="model", description="Админу: выбрать конкретную AI-модель"),
-        BotCommand(command="healthcheck", description="Проверка ключей AI и uptime"),
+        BotCommand(command="healthcheck", description="Проверка всех AI-ключей"),
     ])
 
 
@@ -369,4 +378,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
