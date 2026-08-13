@@ -5,6 +5,8 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from html import escape
 
 import aiohttp
 
@@ -166,7 +168,12 @@ async def _attach_uptimerobot(report: HealthReport) -> None:
                 data={
                     "api_key": UPTIMEROBOT_API_KEY,
                     "format": "json",
-                    "logs": "0",
+                    # Проценты доступны за сутки, неделю, месяц и за всё время;
+                    # журнал нужен, чтобы в ежедневном отчёте показать инциденты.
+                    "custom_uptime_ratios": "1-7-30",
+                    "all_time_uptime_ratio": "1",
+                    "logs": "1",
+                    "logs_limit": "50",
                 },
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
@@ -183,6 +190,11 @@ async def _attach_uptimerobot(report: HealthReport) -> None:
                 "name": m.get("friendly_name"),
                 "status": m.get("status"),
                 "url": m.get("url"),
+                "uptime_1d": _uptime_ratio(m, 0),
+                "uptime_7d": _uptime_ratio(m, 1),
+                "uptime_30d": _uptime_ratio(m, 2),
+                "uptime_all_time": m.get("all_time_uptime_ratio"),
+                "incidents": _uptimerobot_incidents(m),
             }
             for m in data.get("monitors", [])
         ]
@@ -193,6 +205,31 @@ async def _attach_uptimerobot(report: HealthReport) -> None:
         logger.exception("Не удалось получить статусы UptimeRobot")
 
 
+def _uptime_ratio(monitor: dict, position: int) -> str | None:
+    """Берёт заданный API процент из строки значений, разделённых дефисом."""
+    ratios = str(monitor.get("custom_uptime_ratios") or "").split("-")
+    if position >= len(ratios):
+        return None
+    value = ratios[position].strip()
+    return value or None
+
+
+def _uptimerobot_incidents(monitor: dict) -> list[dict]:
+    """Инцидент — запись журнала UptimeRobot с типом 1 (down)."""
+    incidents = []
+    for log in monitor.get("logs") or []:
+        if not isinstance(log, dict) or log.get("type") != 1:
+            continue
+        incidents.append(
+            {
+                "datetime": log.get("datetime"),
+                "duration": log.get("duration"),
+                "reason": log.get("reason"),
+            }
+        )
+    return incidents
+
+
 # Коды статусов мониторов UptimeRobot.
 _UPTIMEROBOT_STATUS_LABELS = {
     0: "paused",
@@ -201,6 +238,32 @@ _UPTIMEROBOT_STATUS_LABELS = {
     8: "seems down",
     9: "down",
 }
+
+
+def _format_uptime(monitor: dict) -> str:
+    periods = (
+        ("1 дн.", monitor.get("uptime_1d")),
+        ("7 дн.", monitor.get("uptime_7d")),
+        ("30 дн.", monitor.get("uptime_30d")),
+        ("за всё время", monitor.get("uptime_all_time")),
+    )
+    values = [f"{label}: {value}%" for label, value in periods if value is not None]
+    return "; ".join(values) if values else "нет данных об uptime"
+
+
+def _format_incident(incident: dict) -> str:
+    timestamp = incident.get("datetime")
+    if isinstance(timestamp, (int, float)):
+        happened_at = datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime(
+            "%d.%m %H:%M UTC"
+        )
+    else:
+        happened_at = "время неизвестно"
+    duration = incident.get("duration")
+    duration_text = f", {duration} сек." if isinstance(duration, (int, float)) else ""
+    reason = str(incident.get("reason") or "").strip()
+    reason_text = f", {escape(reason)}" if reason else ""
+    return f"{happened_at}{duration_text}{reason_text}"
 
 
 def format_report(report: HealthReport) -> str:
@@ -234,11 +297,27 @@ def format_report(report: HealthReport) -> str:
     elif report.uptimerobot is not None:
         down = [m for m in report.uptimerobot if m["status"] not in (2, 1)]
         lines.append(f"\n<b>UptimeRobot</b>: {len(report.uptimerobot)} монитор(ов)")
+        for monitor in report.uptimerobot:
+            name = escape(str(monitor.get("name") or "Без названия"))
+            lines.append(f"  • {name} — {_format_uptime(monitor)}")
         if down:
             for m in down:
                 label = _UPTIMEROBOT_STATUS_LABELS.get(m["status"], m["status"])
-                lines.append(f"  ⚠️ {m['name']}: {label}")
+                lines.append(f"  ⚠️ {escape(str(m['name']))}: {label}")
         else:
             lines.append("  ✅ все мониторы up")
+
+        incidents = [
+            (monitor, incident)
+            for monitor in report.uptimerobot
+            for incident in monitor.get("incidents", [])
+        ]
+        if incidents:
+            lines.append(f"  ⚠️ Инцидентов в доступном журнале: {len(incidents)}")
+            for monitor, incident in incidents:
+                name = escape(str(monitor.get("name") or "Без названия"))
+                lines.append(f"    • {name}: {_format_incident(incident)}")
+        else:
+            lines.append("  ✅ Инцидентов в доступном журнале нет")
 
     return "\n".join(lines)
