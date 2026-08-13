@@ -158,13 +158,6 @@ async def run_full_healthcheck() -> HealthReport:
     return report
 
 
-async def run_uptimerobot_check() -> HealthReport:
-    """Получает только краткий статус UptimeRobot, без проверки AI-ключей."""
-    report = HealthReport()
-    await _attach_uptimerobot(report)
-    return report
-
-
 async def _attach_uptimerobot(report: HealthReport) -> None:
     if not UPTIMEROBOT_API_KEY:
         return
@@ -277,4 +270,31 @@ def format_uptimerobot_report(report: HealthReport) -> str:
             lines.append(f"• {name}: {_format_incident(incident)}")
     else:
         lines.append("✅ Инцидентов нет")
+    return "\n".join(lines)
+
+
+def format_report(report: HealthReport) -> str:
+    """Проверка ключей с коротким дополнением от UptimeRobot."""
+    failed = report.failures
+    lines = [
+        "<b>Health-check провайдеров</b>",
+        f"Проверено связок ключ×модель: {len(report.results)}",
+        f"Проблем: {len(failed)}",
+    ]
+    if not failed:
+        lines.append("✅ Все ключи и модели отвечают.")
+    else:
+        by_provider: dict[str, list[KeyModelResult]] = {}
+        for result in failed:
+            by_provider.setdefault(result.provider, []).append(result)
+        for provider, items in by_provider.items():
+            lines.append(f"<b>{provider}</b>:")
+            for result in items:
+                status = result.status if result.status is not None else "нет ответа"
+                lines.append(
+                    f"• ключ #{result.key_index} × <code>{result.model_id}</code> "
+                    f"→ {status} ({result.latency_ms} мс)"
+                )
+
+    lines.extend(("", format_uptimerobot_report(report)))
     return "\n".join(lines)
