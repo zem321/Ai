@@ -158,6 +158,13 @@ async def run_full_healthcheck() -> HealthReport:
     return report
 
 
+async def run_uptimerobot_check() -> HealthReport:
+    """Получает только краткий статус UptimeRobot, без проверки AI-ключей."""
+    report = HealthReport()
+    await _attach_uptimerobot(report)
+    return report
+
+
 async def _attach_uptimerobot(report: HealthReport) -> None:
     if not UPTIMEROBOT_API_KEY:
         return
@@ -168,9 +175,7 @@ async def _attach_uptimerobot(report: HealthReport) -> None:
                 data={
                     "api_key": UPTIMEROBOT_API_KEY,
                     "format": "json",
-                    # Проценты доступны за сутки, неделю, месяц и за всё время;
-                    # журнал нужен, чтобы в ежедневном отчёте показать инциденты.
-                    "custom_uptime_ratios": "1-7-30",
+                    # Общий uptime и журнал инцидентов — без лишней диагностики.
                     "all_time_uptime_ratio": "1",
                     "logs": "1",
                     "logs_limit": "50",
@@ -190,9 +195,6 @@ async def _attach_uptimerobot(report: HealthReport) -> None:
                 "name": m.get("friendly_name"),
                 "status": m.get("status"),
                 "url": m.get("url"),
-                "uptime_1d": _uptime_ratio(m, 0),
-                "uptime_7d": _uptime_ratio(m, 1),
-                "uptime_30d": _uptime_ratio(m, 2),
                 "uptime_all_time": m.get("all_time_uptime_ratio"),
                 "incidents": _uptimerobot_incidents(m),
             }
@@ -203,15 +205,6 @@ async def _attach_uptimerobot(report: HealthReport) -> None:
     except Exception as exc:
         report.uptimerobot_error = f"{type(exc).__name__}: {exc}"
         logger.exception("Не удалось получить статусы UptimeRobot")
-
-
-def _uptime_ratio(monitor: dict, position: int) -> str | None:
-    """Берёт заданный API процент из строки значений, разделённых дефисом."""
-    ratios = str(monitor.get("custom_uptime_ratios") or "").split("-")
-    if position >= len(ratios):
-        return None
-    value = ratios[position].strip()
-    return value or None
 
 
 def _uptimerobot_incidents(monitor: dict) -> list[dict]:
@@ -241,14 +234,8 @@ _UPTIMEROBOT_STATUS_LABELS = {
 
 
 def _format_uptime(monitor: dict) -> str:
-    periods = (
-        ("1 дн.", monitor.get("uptime_1d")),
-        ("7 дн.", monitor.get("uptime_7d")),
-        ("30 дн.", monitor.get("uptime_30d")),
-        ("за всё время", monitor.get("uptime_all_time")),
-    )
-    values = [f"{label}: {value}%" for label, value in periods if value is not None]
-    return "; ".join(values) if values else "нет данных об uptime"
+    ratio = monitor.get("uptime_all_time")
+    return f"uptime: {ratio}%" if ratio is not None else "нет данных об uptime"
 
 
 def _format_incident(incident: dict) -> str:
@@ -266,58 +253,28 @@ def _format_incident(incident: dict) -> str:
     return f"{happened_at}{duration_text}{reason_text}"
 
 
-def format_report(report: HealthReport) -> str:
-    lines: list[str] = []
-    total = len(report.results)
-    failed = report.failures
-    lines.append(
-        f"<b>Health-check провайдеров</b>\n"
-        f"Проверено связок ключ×модель: {total}\n"
-        f"Проблем: {len(failed)}"
-    )
-
-    if not failed:
-        lines.append("\n✅ Все ключи и модели отвечают.")
-    else:
-        by_provider: dict[str, list[KeyModelResult]] = {}
-        for r in failed:
-            by_provider.setdefault(r.provider, []).append(r)
-        for provider, items in by_provider.items():
-            lines.append(f"\n<b>{provider}</b>:")
-            for r in items:
-                status = r.status if r.status is not None else "нет ответа"
-                lines.append(
-                    f"  ключ #{r.key_index} × <code>{r.model_id}</code> "
-                    f"→ {status} ({r.latency_ms} мс)"
-                    + (f"\n    {r.error}" if r.error else "")
-                )
-
+def format_uptimerobot_report(report: HealthReport) -> str:
+    """Короткий отчёт: проценты uptime и факт инцидентов."""
     if report.uptimerobot_error:
-        lines.append(f"\n⚠️ UptimeRobot: {report.uptimerobot_error}")
-    elif report.uptimerobot is not None:
-        down = [m for m in report.uptimerobot if m["status"] not in (2, 1)]
-        lines.append(f"\n<b>UptimeRobot</b>: {len(report.uptimerobot)} монитор(ов)")
-        for monitor in report.uptimerobot:
+        return f"⚠️ UptimeRobot: {escape(report.uptimerobot_error)}"
+    if report.uptimerobot is None:
+        return "⚠️ UPTIMEROBOT_API_KEY не задан."
+
+    lines = ["<b>UptimeRobot</b>"]
+    for monitor in report.uptimerobot:
+        name = escape(str(monitor.get("name") or "Без названия"))
+        lines.append(f"• {name}: {_format_uptime(monitor)}")
+
+    incidents = [
+        (monitor, incident)
+        for monitor in report.uptimerobot
+        for incident in monitor.get("incidents", [])
+    ]
+    if incidents:
+        lines.append(f"⚠️ Инциденты: {len(incidents)}")
+        for monitor, incident in incidents:
             name = escape(str(monitor.get("name") or "Без названия"))
-            lines.append(f"  • {name} — {_format_uptime(monitor)}")
-        if down:
-            for m in down:
-                label = _UPTIMEROBOT_STATUS_LABELS.get(m["status"], m["status"])
-                lines.append(f"  ⚠️ {escape(str(m['name']))}: {label}")
-        else:
-            lines.append("  ✅ все мониторы up")
-
-        incidents = [
-            (monitor, incident)
-            for monitor in report.uptimerobot
-            for incident in monitor.get("incidents", [])
-        ]
-        if incidents:
-            lines.append(f"  ⚠️ Инцидентов в доступном журнале: {len(incidents)}")
-            for monitor, incident in incidents:
-                name = escape(str(monitor.get("name") or "Без названия"))
-                lines.append(f"    • {name}: {_format_incident(incident)}")
-        else:
-            lines.append("  ✅ Инцидентов в доступном журнале нет")
-
+            lines.append(f"• {name}: {_format_incident(incident)}")
+    else:
+        lines.append("✅ Инцидентов нет")
     return "\n".join(lines)
