@@ -429,13 +429,21 @@ def _plain_telegram_table_cell(value: str) -> str:
         r"\1",
         value,
     )
-    value = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", r"\1", value)
     value = re.sub(
-        r"(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)",
-        r"\1",
+        r"\*\*(.+?)\*\*|__(.+?)__",
+        lambda match: match.group(1) or match.group(2),
         value,
     )
-    value = re.sub(r"~~(.+?)~~|\|\|(.+?)\|\|", r"\1", value)
+    value = re.sub(
+        r"(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)",
+        lambda match: match.group(1) or match.group(2),
+        value,
+    )
+    value = re.sub(
+        r"~~(.+?)~~|\|\|(.+?)\|\|",
+        lambda match: match.group(1) or match.group(2),
+        value,
+    )
     return value.replace("\\|", "|").strip()
 
 
