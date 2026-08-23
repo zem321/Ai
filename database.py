@@ -53,19 +53,9 @@ GLOBAL_DAILY_AI_LIMIT = _env_int(
 GLOBAL_DAILY_IMAGE_LIMIT = _env_int(
     "GLOBAL_DAILY_IMAGE_LIMIT", 500, 1, 100_000
 )
-LOGIN_CODE_MIN_INTERVAL_SECONDS = _env_int(
-    "LOGIN_CODE_MIN_INTERVAL_SECONDS", 30, 1, 3600
-)
-MAX_WEB_SESSIONS_PER_USER = _env_int(
-    "MAX_WEB_SESSIONS_PER_USER", 5, 1, 20
-)
-WEB_SESSION_TOUCH_INTERVAL_SECONDS = _env_int(
-    "WEB_SESSION_TOUCH_INTERVAL_SECONDS", 300, 60, 3600
-)
 USER_REQUEST_LEASE_SECONDS = _env_int(
     "USER_REQUEST_LEASE_SECONDS", 600, 60, 1800
 )
-LOGIN_CODE_PEPPER = os.getenv("LOGIN_CODE_PEPPER", "")
 
 # Telegram ID сохраняются в базе без изменений, чтобы обновление не требовало
 # миграции существующих пользователей. VK ID получают отдельное пространство
@@ -151,37 +141,6 @@ async def init_db():
     logger.info("database module loaded: build=render-system-ca-v2")
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL не задан")
-    if len(LOGIN_CODE_PEPPER.encode("utf-8")) < 32:
-        raise RuntimeError(
-            "LOGIN_CODE_PEPPER должен быть отдельным случайным секретом длиной не менее 32 байт"
-        )
-    if (
-        len(set(LOGIN_CODE_PEPPER)) < 8
-        or LOGIN_CODE_PEPPER.strip().lower()
-        in {"changeme", "change-me", "replace-me", "your-secret-here"}
-    ):
-        raise RuntimeError("LOGIN_CODE_PEPPER выглядит предсказуемым; сгенерируйте случайный секрет")
-    forbidden_peppers = {
-        value
-        for value in (
-            os.getenv("BOT_TOKEN"),
-            os.getenv("GEMINI_API_KEY"),
-            os.getenv("GEMINI_API_KEY_2"),
-            os.getenv("GEMINI_API_KEY_3"),
-            os.getenv("NVIDIA_API_KEY"),
-            os.getenv("NVIDIA_API_KEY_2"),
-            os.getenv("NVIDIA_API_KEY_3"),
-            os.getenv("GROQ_API_KEY"),
-            os.getenv("GROQ_API_KEY_2"),
-            os.getenv("GROQ_API_KEY_3"),
-            DATABASE_URL,
-        )
-        if value
-    }
-    if LOGIN_CODE_PEPPER in forbidden_peppers:
-        raise RuntimeError(
-            "LOGIN_CODE_PEPPER должен отличаться от токенов, API-ключей и DATABASE_URL"
-        )
     if DATABASE_SSLMODE not in _ALLOWED_SSL_MODES:
         raise RuntimeError("DATABASE_SSLMODE должен быть verify-full")
 
@@ -321,7 +280,7 @@ async def init_db():
                 id BIGSERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL,
                 model TEXT NOT NULL DEFAULT '',
-                source TEXT NOT NULL DEFAULT 'bot' CHECK (source IN ('bot', 'webapp')),
+                source TEXT NOT NULL DEFAULT 'bot' CHECK (source = 'bot'),
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
             """
@@ -438,78 +397,7 @@ async def init_db():
             "ON provider_incidents(created_at)"
         )
 
-        # ─── Вход на сайт по коду (вне Telegram Mini App) ──────────────────
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS login_codes (
-                code TEXT PRIMARY KEY,
-                user_id BIGINT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                expires_at TIMESTAMPTZ NOT NULL,
-                used BOOLEAN NOT NULL DEFAULT FALSE
-            )
-            """
-        )
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS web_sessions (
-                token_hash TEXT PRIMARY KEY,
-                user_id BIGINT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                expires_at TIMESTAMPTZ NOT NULL,
-                last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_login_codes_user ON login_codes(user_id)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_login_codes_expires ON login_codes(expires_at)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(user_id)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_web_sessions_expires ON web_sessions(expires_at)"
-        )
-
-        # В старой версии в login_codes.code хранился код открытым текстом.
-        # Теперь в этом legacy-столбце хранится только HMAC-SHA-256. Старые короткие
-        # коды намеренно инвалидируются при первом запуске обновлённой версии.
-        await conn.execute("DELETE FROM login_codes WHERE LENGTH(code) <> 64")
-        # До установки уникальности оставляем только самый новый код пользователя.
-        # Это также безопасно мигрирует базу, если старая версия успела создать
-        # несколько кодов из-за параллельных запросов.
-        await conn.execute(
-            """
-            DELETE FROM login_codes AS old_code
-            USING login_codes AS newer_code
-            WHERE old_code.user_id = newer_code.user_id
-              AND (
-                    old_code.created_at < newer_code.created_at
-                    OR (
-                        old_code.created_at = newer_code.created_at
-                        AND old_code.code < newer_code.code
-                    )
-                  )
-            """
-        )
-        await conn.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_login_codes_user
-            ON login_codes(user_id)
-            """
-        )
-        # Сессии отклонённых пользователей не должны оживать после одобрения.
-        await conn.execute(
-            """
-            DELETE FROM web_sessions ws
-            USING users u
-            WHERE ws.user_id = u.user_id AND u.status <> 'approved'
-            """
-        )
-        await cleanup_expired_auth(conn=conn)
+        await cleanup_expired_data(conn=conn)
 
 
 _PROVIDER_NAMES = frozenset({"nvidia", "gemini", "groq"})
@@ -763,8 +651,6 @@ async def reject_user(user_id: int):
                 """,
                 user_id,
             )
-            await conn.execute("DELETE FROM login_codes WHERE user_id = $1", user_id)
-            await conn.execute("DELETE FROM web_sessions WHERE user_id = $1", user_id)
             # Отзыв доступа должен останавливать и уже выполняющийся AI-запрос.
             # Heartbeat активного обработчика увидит потерю аренды и отменит
             # операцию до выдачи результата.
@@ -1307,7 +1193,7 @@ async def reserve_request(
     Квота общая для сайта и Telegram-бота и поэтому не обходится сменой
     интерфейса или запуском нескольких процессов приложения.
     """
-    if source not in {"bot", "webapp"}:
+    if source != "bot":
         raise ValueError("Недопустимый источник запроса")
     safe_model = str(model or "")[:128]
     if not safe_model:
@@ -1539,243 +1425,9 @@ async def get_all_users_with_stats(limit: int = 200, offset: int = 0) -> list[di
     return result
 
 
-# ─── Вход на сайт по коду (вне Telegram Mini App) ──────────────────────────────
-# Код одноразовый и короткоживущий, выдаётся ботом по команде /code.
-# После успешного ввода кода сайт получает HttpOnly-cookie веб-сессии.
-# Статус approved/pending/rejected проверяется при каждом запросе.
-
-_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"  # без 0/O/1/I/L
-
-
-async def create_login_code(user_id: int, length: int = 10, ttl_seconds: int = 600) -> str:
-    """Создаёт один активный код. В БД сохраняется только HMAC-SHA-256 кода."""
-    if length < 10:
-        raise ValueError("Код входа должен содержать минимум 10 символов")
-    ttl_seconds = max(60, min(int(ttl_seconds), 1800))
-
-    async with _pool.acquire() as conn:
-        async with conn.transaction():
-            # Блокировка действует только в этой транзакции и сериализует
-            # параллельные запросы кода для одного Telegram user_id.
-            await conn.execute("SELECT pg_advisory_xact_lock($1::bigint)", user_id)
-            too_soon = await conn.fetchval(
-                """
-                SELECT EXISTS(
-                    SELECT 1 FROM login_codes
-                    WHERE user_id = $1
-                      AND created_at > NOW() - ($2::integer * INTERVAL '1 second')
-                )
-                """,
-                user_id,
-                LOGIN_CODE_MIN_INTERVAL_SECONDS,
-            )
-            if too_soon:
-                raise RuntimeError(
-                    f"Новый код можно запросить через {LOGIN_CODE_MIN_INTERVAL_SECONDS} секунд."
-                )
-
-            await conn.execute("DELETE FROM login_codes WHERE user_id = $1", user_id)
-            for _ in range(5):
-                code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(length))
-                code_hash = _hash_login_code(code)
-                inserted = await conn.fetchval(
-                    """
-                    INSERT INTO login_codes(code, user_id, expires_at)
-                    VALUES ($1, $2, NOW() + ($3::integer * INTERVAL '1 second'))
-                    ON CONFLICT (code) DO NOTHING
-                    RETURNING code
-                    """,
-                    code_hash,
-                    user_id,
-                    ttl_seconds,
-                )
-                if inserted:
-                    return code
-    raise RuntimeError("Не удалось создать код входа. Попробуйте ещё раз.")
-
-
-async def consume_login_code(code: str) -> int | None:
-    """Если код существует, не использован и не истёк — помечает его
-    использованным и возвращает user_id. Иначе — None. Код одноразовый:
-    повторный ввод того же кода всегда вернёт None."""
-    async with _pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE login_codes
-            SET used = TRUE
-            WHERE code = $1 AND used = FALSE AND expires_at > NOW()
-            RETURNING user_id
-            """,
-            _hash_login_code(code),
-        )
-    return row["user_id"] if row else None
-
-
-def _hash_token(token: str) -> str:
-    # В БД храним только хэш токена — сам токен нигде на сервере не хранится,
-    # это защищает активные сессии даже при утечке базы.
-    return hashlib.sha256(token.encode()).hexdigest()
-
-
-def _pepper_bytes() -> bytes:
-    pepper = LOGIN_CODE_PEPPER.encode("utf-8")
-    if len(pepper) < 32:
-        raise RuntimeError("LOGIN_CODE_PEPPER не задан или слишком короткий")
-    return pepper
-
-
-def _hash_login_code(code: str) -> str:
-    return hmac.new(
-        _pepper_bytes(),
-        code.encode(),
-        hashlib.sha256,
-    ).hexdigest()
-
-
-_SESSION_TOKEN_VERSION = 1
-_SESSION_TOKEN_DOMAIN = b"web-session-v1:"
-_SESSION_TOKEN_ALPHABET = frozenset(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-)
-
-
-def generate_web_session_token() -> str:
-    """Создаёт непрозрачный токен с подписью для раннего отсева подделок."""
-    opaque = secrets.token_urlsafe(32)
-    signature = hmac.new(
-        _pepper_bytes(),
-        _SESSION_TOKEN_DOMAIN + opaque.encode("ascii"),
-        hashlib.sha256,
-    ).hexdigest()
-    return f"v{_SESSION_TOKEN_VERSION}.{opaque}.{signature}"
-
-
-def is_valid_web_session_token(token: str) -> bool:
-    """Проверяет формат и подпись токена до обращения к PostgreSQL."""
-    if not isinstance(token, str) or len(token) > 128:
-        return False
-    try:
-        prefix, opaque, signature = token.split(".")
-    except ValueError:
-        return False
-    if prefix != f"v{_SESSION_TOKEN_VERSION}" or not 40 <= len(opaque) <= 64:
-        return False
-    if any(char not in _SESSION_TOKEN_ALPHABET for char in opaque):
-        return False
-    if len(signature) != 64:
-        return False
-    try:
-        bytes.fromhex(signature)
-    except ValueError:
-        return False
-    expected = hmac.new(
-        _pepper_bytes(),
-        _SESSION_TOKEN_DOMAIN + opaque.encode("ascii"),
-        hashlib.sha256,
-    ).hexdigest()
-    return hmac.compare_digest(signature, expected)
-
-
-async def create_web_session(token: str, user_id: int, ttl_seconds: int) -> None:
-    if not is_valid_web_session_token(token):
-        raise ValueError("Некорректный токен веб-сессии")
-    ttl_seconds = max(300, min(int(ttl_seconds), 30 * 24 * 60 * 60))
-    async with _pool.acquire() as conn:
-        async with conn.transaction():
-            # Атомарно применяем лимит сессий при параллельных входах.
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock($1::bigint)",
-                user_id,
-            )
-            await conn.execute(
-                "DELETE FROM web_sessions WHERE expires_at <= NOW()"
-            )
-            await conn.execute(
-                """
-                DELETE FROM web_sessions
-                WHERE user_id = $1
-                  AND token_hash NOT IN (
-                      SELECT token_hash
-                      FROM web_sessions
-                      WHERE user_id = $1
-                      ORDER BY created_at DESC
-                      LIMIT $2
-                  )
-                """,
-                user_id,
-                max(0, MAX_WEB_SESSIONS_PER_USER - 1),
-            )
-            await conn.execute(
-                """
-                INSERT INTO web_sessions(token_hash, user_id, expires_at)
-                VALUES ($1, $2, NOW() + ($3::integer * INTERVAL '1 second'))
-                """,
-                _hash_token(token),
-                user_id,
-                ttl_seconds,
-            )
-
-
-async def get_web_session_user(token: str, idle_seconds: int = 24 * 60 * 60) -> int | None:
-    """Возвращает user_id по токену сессии, если он ещё не истёк.
-    Обновляет last_seen_at с ограниченной частотой."""
-    if not is_valid_web_session_token(token):
-        return None
-    idle_seconds = max(300, min(int(idle_seconds), 30 * 24 * 60 * 60))
-    # Интервал обновления всегда меньше idle TTL, иначе активно используемая
-    # сессия могла бы истечь между редкими touch-запросами.
-    touch_interval = min(
-        WEB_SESSION_TOUCH_INTERVAL_SECONDS,
-        max(60, idle_seconds // 2),
-    )
-    token_hash = _hash_token(token)
-    async with _pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT
-                user_id,
-                last_seen_at <= NOW() - ($3::integer * INTERVAL '1 second')
-                    AS should_touch
-            FROM web_sessions
-            WHERE token_hash = $1
-              AND expires_at > NOW()
-              AND last_seen_at > NOW() - ($2::integer * INTERVAL '1 second')
-            """,
-            token_hash,
-            idle_seconds,
-            touch_interval,
-        )
-        if row and row["should_touch"]:
-            await conn.execute(
-                """
-                UPDATE web_sessions
-                SET last_seen_at = NOW()
-                WHERE token_hash = $1
-                  AND last_seen_at <= NOW() - ($2::integer * INTERVAL '1 second')
-                """,
-                token_hash,
-                touch_interval,
-            )
-    return row["user_id"] if row else None
-
-
-async def delete_web_session(token: str) -> None:
-    if not is_valid_web_session_token(token):
-        return
-    async with _pool.acquire() as conn:
-        await conn.execute("DELETE FROM web_sessions WHERE token_hash = $1", _hash_token(token))
-
-
-async def delete_all_web_sessions(user_id: int) -> None:
-    async with _pool.acquire() as conn:
-        await conn.execute("DELETE FROM web_sessions WHERE user_id = $1", user_id)
-
-
-async def cleanup_expired_auth(conn=None) -> None:
+async def cleanup_expired_data(conn=None) -> None:
     """Удаляет истёкшие данные аутентификации, историю и статистику."""
     if conn is not None:
-        await conn.execute("DELETE FROM login_codes WHERE expires_at < NOW()")
-        await conn.execute("DELETE FROM web_sessions WHERE expires_at < NOW()")
         await conn.execute(
             "DELETE FROM active_user_requests WHERE expires_at <= NOW()"
         )
@@ -1816,7 +1468,7 @@ async def cleanup_expired_auth(conn=None) -> None:
         )
         return
     async with _pool.acquire() as acquired:
-        await cleanup_expired_auth(conn=acquired)
+        await cleanup_expired_data(conn=acquired)
 
 
 async def healthcheck() -> bool:
@@ -1836,3 +1488,4 @@ async def close_db() -> None:
     if _pool is not None:
         await _pool.close()
         _pool = None
+
