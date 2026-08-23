@@ -122,8 +122,6 @@ async def ready(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "status": "ready" if database_ready else "not_ready",
-            "build_sha": BUILD_SHA,
-            "build_branch": BUILD_BRANCH,
         },
         status=200 if database_ready else 503,
     )
