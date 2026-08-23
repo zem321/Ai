@@ -18,7 +18,13 @@ import unicodedata
 import aiohttp
 from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import Message, CallbackQuery, BufferedInputFile, LinkPreviewOptions
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    BufferedInputFile,
+    InputRichMessage,
+    LinkPreviewOptions,
+)
 from aiogram.fsm.context import FSMContext
 from keyboards import (
     cancel_keyboard,
@@ -109,10 +115,13 @@ SYSTEM_PROMPT = (
 TELEGRAM_SYSTEM_PROMPT = (
     SYSTEM_PROMPT
     + "\n\nФОРМАТ ОТВЕТА В TELEGRAM:\n"
-    "- Используй обычный Markdown: # заголовки, - списки, 1. нумерацию, > цитаты, "
-    "таблицы через |, *жирный*, _курсив_, `код` и тройные обратные кавычки.\n"
-    "- Не используй HTML и не добавляй пояснения о правилах разметки.\n"
-    "- Служебные символы разметки не должны отображаться как отдельный текст."
+    "- Используй Rich Markdown Telegram: # заголовки, - списки, 1. нумерацию, > цитаты, "
+    "таблицы через |, **жирный**, *курсив*, ~~зачёркивание~~, ==выделение==, "
+    "||spoiler||, __подчёркивание в Rich Markdown__, код, ссылки, сноски [^id], "
+    "формулы $$...$$ и блоки ```.\n"
+    "- Не используй MarkdownV2-экранирование обратными слэшами и не добавляй "
+    "пояснения о правилах разметки.\n"
+    "- Не оборачивай обычный ответ целиком в кодовый блок."
 )
 
 MAX_HISTORY = 20
@@ -328,311 +337,66 @@ async def edit_error(status_msg: Message, title: str, error: Exception):
         reply_markup=cancel_keyboard(),
     )
 
-TELEGRAM_MARKDOWN_V2_SPECIAL_RE = re.compile(
-    r"([\\_*\[\]()~>#+\-=|{}.!]|" + re.escape(chr(96)) + r")"
-)
-
-
-def _escape_telegram_markdown_text(value: str) -> str:
-    return TELEGRAM_MARKDOWN_V2_SPECIAL_RE.sub(r"\\\1", value)
-
-
-def _escape_telegram_code(value: str) -> str:
-    return value.replace("\\", "\\\\").replace(chr(96), "\\" + chr(96))
-
-
-def _escape_telegram_link_url(value: str) -> str:
-    return value.replace("\\", "\\\\").replace(")", "\\)")
-
-
-def _format_telegram_inline(value: str) -> str:
-    tokens: dict[str, str] = {}
-
-    def protect(rendered: str) -> str:
-        token = chr(0xE000) + str(len(tokens)) + chr(0xE001)
-        tokens[token] = rendered
-        return token
-
-    inline_code_re = re.compile(
-        re.escape(chr(96)) + r"([^" + re.escape(chr(96)) + r"\n]*)"
-        + re.escape(chr(96))
-    )
-    value = inline_code_re.sub(
-        lambda match: protect(
-            chr(96) + _escape_telegram_code(match.group(1)) + chr(96)
-        ),
-        value,
-    )
-    value = re.sub(
-        r"\[([^\]\n]+)\]\(([^()\n]+(?:\([^()\n]*\)[^()\n]*)*)\)",
-        lambda match: protect(
-            "[" + _escape_telegram_markdown_text(match.group(1)) + "]"
-            + "(" + _escape_telegram_link_url(match.group(2)) + ")"
-        ),
-        value,
-    )
-    value = re.sub(
-        r"\|\|(.+?)\|\|",
-        lambda match: protect(
-            "||" + _escape_telegram_markdown_text(match.group(1)) + "||"
-        ),
-        value,
-    )
-    value = re.sub(
-        r"\*\*(.+?)\*\*|__(.+?)__",
-        lambda match: protect(
-            "*" + _escape_telegram_markdown_text(
-                match.group(1) or match.group(2)
-            ) + "*"
-        ),
-        value,
-    )
-    value = re.sub(
-        r"(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)",
-        lambda match: protect(
-            "_" + _escape_telegram_markdown_text(
-                match.group(1) or match.group(2)
-            ) + "_"
-        ),
-        value,
-    )
-    value = re.sub(
-        r"~~(.+?)~~",
-        lambda match: protect(
-            "~" + _escape_telegram_markdown_text(match.group(1)) + "~"
-        ),
-        value,
-    )
-    value = _escape_telegram_markdown_text(value)
-    for token, rendered in tokens.items():
-        value = value.replace(token, rendered)
-    return value
-
-
-def _split_telegram_table_row(value: str) -> list[str]:
-    value = value.strip()
-    if value.startswith("|"):
-        value = value[1:]
-    if value.endswith("|") and not value.endswith("\\|"):
-        value = value[:-1]
-    return [cell.strip() for cell in value.split("|")]
-
-
-def _is_telegram_table_separator(value: str) -> bool:
-    cells = _split_telegram_table_row(value)
-    return bool(cells) and all(
-        re.fullmatch(r":?-{3,}:?", cell.strip())
-        for cell in cells
-    )
-
-
-def _plain_telegram_table_cell(value: str) -> str:
-    inline_code_re = re.compile(
-        re.escape(chr(96)) + r"([^" + re.escape(chr(96)) + r"\n]*)"
-        + re.escape(chr(96))
-    )
-    value = inline_code_re.sub(r"\1", value)
-    value = re.sub(
-        r"\[([^\]\n]+)\]\(([^()\n]+(?:\([^()\n]*\)[^()\n]*)*)\)",
-        r"\1",
-        value,
-    )
-    value = re.sub(
-        r"\*\*(.+?)\*\*|__(.+?)__",
-        lambda match: match.group(1) or match.group(2),
-        value,
-    )
-    value = re.sub(
-        r"(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)",
-        lambda match: match.group(1) or match.group(2),
-        value,
-    )
-    value = re.sub(
-        r"~~(.+?)~~|\|\|(.+?)\|\|",
-        lambda match: match.group(1) or match.group(2),
-        value,
-    )
-    return value.replace("\\|", "|").strip()
-
-
-def _render_telegram_table(rows: list[list[str]]) -> list[str]:
-    plain_rows = [
-        [_plain_telegram_table_cell(cell) for cell in row]
-        for row in rows
-    ]
-    column_count = max((len(row) for row in plain_rows), default=0)
-    if not column_count:
-        return []
-
-    normalized = [
-        row + [""] * (column_count - len(row))
-        for row in plain_rows
-    ]
-    widths = [
-        max(len(row[column]) for row in normalized)
-        for column in range(column_count)
-    ]
-    body = [
-        " | ".join(cell.ljust(widths[column]) for column, cell in enumerate(row))
-        for row in normalized
-    ]
-    separator = "-+-".join("-" * width for width in widths)
-    if len(body) > 1:
-        body.insert(1, separator)
-
-    fence = chr(96) * 3
-    return [fence] + [_escape_telegram_code(line) for line in body] + [fence]
-
-
-def _render_telegram_markdown(value: str) -> str:
-    lines = value.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    rendered: list[str] = []
-    fence = chr(96) * 3
-    in_code = False
-    index = 0
-
-    while index < len(lines):
-        line = lines[index]
-        stripped = line.strip()
-
-        if stripped.startswith(fence):
-            rendered.append(fence)
-            in_code = not in_code
-            index += 1
-            continue
-
-        if in_code:
-            rendered.append(_escape_telegram_code(line))
-            index += 1
-            continue
-
-        if (
-            index + 1 < len(lines)
-            and "|" in line
-            and _is_telegram_table_separator(lines[index + 1])
-        ):
-            table_rows = [_split_telegram_table_row(line)]
-            index += 2
-            while (
-                index < len(lines)
-                and "|" in lines[index]
-                and lines[index].strip()
-            ):
-                table_rows.append(_split_telegram_table_row(lines[index]))
-                index += 1
-            rendered.extend(_render_telegram_table(table_rows))
-            continue
-
-        heading = re.match(r"^\s{0,3}#{1,6}\s*(.+?)\s*$", line)
-        if heading:
-            rendered.append(
-                "*" + _format_telegram_inline(heading.group(1)) + "*"
-            )
-            index += 1
-            continue
-
-        quote = re.match(r"^\s*>+\s?(.*)$", line)
-        if quote:
-            rendered.append(
-                ">" + _format_telegram_inline(quote.group(1))
-            )
-            index += 1
-            continue
-
-        task = re.match(r"^\s*[-+*]\s+\[([ xX])\]\s+(.+)$", line)
-        if task:
-            marker = "☑" if task.group(1).lower() == "x" else "☐"
-            rendered.append(
-                marker + " " + _format_telegram_inline(task.group(2))
-            )
-            index += 1
-            continue
-
-        unordered = re.match(r"^\s*[-+*]\s+(.+)$", line)
-        if unordered:
-            rendered.append(
-                "• " + _format_telegram_inline(unordered.group(1))
-            )
-            index += 1
-            continue
-
-        ordered = re.match(r"^\s*(\d+)[.)]\s+(.+)$", line)
-        if ordered:
-            rendered.append(
-                ordered.group(1) + "\\. "
-                + _format_telegram_inline(ordered.group(2))
-            )
-            index += 1
-            continue
-
-        if re.fullmatch(r"\s{0,3}([-*_])(?:\s*\1){2,}\s*", line):
-            rendered.append("──────────")
-            index += 1
-            continue
-
-        rendered.append(_format_telegram_inline(line))
-        index += 1
-
-    if in_code:
-        rendered.append(fence)
-
-    return "\n".join(rendered)
-
-
 async def _edit_ai_reply(message: Message, text: str, **kwargs):
-    formatted = _render_telegram_markdown(text)
     try:
         return await message.edit_text(
-            formatted,
-            parse_mode="MarkdownV2",
+            rich_message=InputRichMessage(markdown=text),
             **kwargs,
         )
-    except TelegramBadRequest as exc:
+    except (TelegramBadRequest, AttributeError) as exc:
         logger.warning(
-            "Telegram MarkdownV2 formatting rejected for edited reply: %s",
+            "Telegram Rich Markdown rejected for edited reply: %s",
             exc,
         )
-        return await message.edit_text(text, **kwargs)
+        try:
+            return await message.edit_text(
+                text,
+                parse_mode="MarkdownV2",
+                **kwargs,
+            )
+        except TelegramBadRequest as fallback_exc:
+            logger.warning(
+                "Telegram MarkdownV2 fallback rejected for edited reply: %s",
+                fallback_exc,
+            )
+            return await message.edit_text(text, **kwargs)
 
 
 async def _answer_ai_reply(message: Message, text: str, **kwargs):
-    formatted = _render_telegram_markdown(text)
     try:
-        return await message.answer(
-            formatted,
-            parse_mode="MarkdownV2",
+        return await message.answer_rich(
+            InputRichMessage(markdown=text),
             **kwargs,
         )
-    except TelegramBadRequest as exc:
+    except (TelegramBadRequest, AttributeError) as exc:
         logger.warning(
-            "Telegram MarkdownV2 formatting rejected for reply: %s",
+            "Telegram Rich Markdown rejected for reply: %s",
             exc,
         )
-        return await message.answer(text, **kwargs)
+        try:
+            return await message.answer(
+                text,
+                parse_mode="MarkdownV2",
+                **kwargs,
+            )
+        except TelegramBadRequest as fallback_exc:
+            logger.warning(
+                "Telegram MarkdownV2 fallback rejected for reply: %s",
+                fallback_exc,
+            )
+            return await message.answer(text, **kwargs)
 
 
 async def send_ai_reply(status_msg: Message, reply: str):
     if not reply:
         reply = "Пустой ответ от модели."
 
-    chunks = [reply[i:i + 3900] for i in range(0, len(reply), 3900)]
+    await _edit_ai_reply(
+        status_msg,
+        reply,
+        reply_markup=cancel_keyboard(),
+    )
 
-    if len(chunks) == 1:
-        await _edit_ai_reply(
-            status_msg,
-            chunks[0],
-            reply_markup=cancel_keyboard(),
-        )
-        return
-
-    await _edit_ai_reply(status_msg, chunks[0])
-    for index, chunk in enumerate(chunks[1:], start=1):
-        is_last = index == len(chunks) - 1
-        await _answer_ai_reply(
-            status_msg,
-            chunk,
-            reply_markup=cancel_keyboard() if is_last else None,
-        )
 
 # --- Работа с файлами ---
 def strip_code_fences(text: str) -> str:
