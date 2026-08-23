@@ -109,9 +109,10 @@ SYSTEM_PROMPT = (
 TELEGRAM_SYSTEM_PROMPT = (
     SYSTEM_PROMPT
     + "\n\nФОРМАТ ОТВЕТА В TELEGRAM:\n"
-    "- Используй MarkdownV2 только там, где он помогает читать ответ.\n"
-    "- Служебные символы MarkdownV2 не должны отображаться как отдельный текст.\n"
-    "- Соблюдай синтаксис MarkdownV2; код оформляй тройными обратными кавычками.\n"
+    "- Используй Telegram Markdown: *жирный*, _курсив_, `код`, "
+    "тройные обратные кавычки для блока кода и [текст](https://example.com) для ссылок.\n"
+    "- Не используй MarkdownV2, HTML или двойные звездочки.\n"
+    "- Служебные символы разметки не должны отображаться как отдельный текст.\n"
     "- Не добавляй пояснения о формате или о правилах разметки."
 )
 
@@ -332,10 +333,14 @@ async def _edit_ai_reply(message: Message, text: str, **kwargs):
     try:
         return await message.edit_text(
             text,
-            parse_mode="MarkdownV2",
+            parse_mode="Markdown",
             **kwargs,
         )
-    except TelegramBadRequest:
+    except TelegramBadRequest as exc:
+        logger.warning(
+            "Telegram Markdown formatting rejected for edited reply: %s",
+            exc,
+        )
         return await message.edit_text(text, **kwargs)
 
 
@@ -346,7 +351,11 @@ async def _answer_ai_reply(message: Message, text: str, **kwargs):
             parse_mode="MarkdownV2",
             **kwargs,
         )
-    except TelegramBadRequest:
+    except TelegramBadRequest as exc:
+        logger.warning(
+            "Telegram Markdown formatting rejected for reply: %s",
+            exc,
+        )
         return await message.answer(text, **kwargs)
 
 
