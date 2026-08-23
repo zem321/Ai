@@ -17,6 +17,7 @@ from pathlib import Path
 import unicodedata
 import aiohttp
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message, CallbackQuery, BufferedInputFile, LinkPreviewOptions
 from aiogram.fsm.context import FSMContext
 from keyboards import (
@@ -103,6 +104,15 @@ SYSTEM_PROMPT = (
     "Если нужно пояснение — кратко после содержимого.\n"
     "- Не оборачивай весь ответ в тройные кавычки, если тебя об этом явно не просили. "
     "Выдавай чистый контент, готовый для сохранения."
+)
+
+TELEGRAM_SYSTEM_PROMPT = (
+    SYSTEM_PROMPT
+    + "\n\nФОРМАТ ОТВЕТА В TELEGRAM:\n"
+    "- Используй MarkdownV2 только там, где он помогает читать ответ.\n"
+    "- Служебные символы MarkdownV2 не должны отображаться как отдельный текст.\n"
+    "- Соблюдай синтаксис MarkdownV2; код оформляй тройными обратными кавычками.\n"
+    "- Не добавляй пояснения о формате или о правилах разметки."
 )
 
 MAX_HISTORY = 20
@@ -318,6 +328,28 @@ async def edit_error(status_msg: Message, title: str, error: Exception):
         reply_markup=cancel_keyboard(),
     )
 
+async def _edit_ai_reply(message: Message, text: str, **kwargs):
+    try:
+        return await message.edit_text(
+            text,
+            parse_mode="MarkdownV2",
+            **kwargs,
+        )
+    except TelegramBadRequest:
+        return await message.edit_text(text, **kwargs)
+
+
+async def _answer_ai_reply(message: Message, text: str, **kwargs):
+    try:
+        return await message.answer(
+            text,
+            parse_mode="MarkdownV2",
+            **kwargs,
+        )
+    except TelegramBadRequest:
+        return await message.answer(text, **kwargs)
+
+
 async def send_ai_reply(status_msg: Message, reply: str):
     if not reply:
         reply = "Пустой ответ от модели."
@@ -325,13 +357,18 @@ async def send_ai_reply(status_msg: Message, reply: str):
     chunks = [reply[i:i + 3900] for i in range(0, len(reply), 3900)]
 
     if len(chunks) == 1:
-        await status_msg.edit_text(chunks[0], reply_markup=cancel_keyboard())
+        await _edit_ai_reply(
+            status_msg,
+            chunks[0],
+            reply_markup=cancel_keyboard(),
+        )
         return
 
-    await status_msg.edit_text(chunks[0])
+    await _edit_ai_reply(status_msg, chunks[0])
     for index, chunk in enumerate(chunks[1:], start=1):
         is_last = index == len(chunks) - 1
-        await status_msg.answer(
+        await _answer_ai_reply(
+            status_msg,
             chunk,
             reply_markup=cancel_keyboard() if is_last else None,
         )
@@ -574,6 +611,7 @@ async def call_ai_with_telegram_image(
             caption=caption,
             history=history,
             model_id=model_id,
+            system_prompt=TELEGRAM_SYSTEM_PROMPT,
         )
 
 
@@ -583,6 +621,7 @@ async def call_ai_with_image_bytes(
     caption: str,
     history: list,
     model_id: str,
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> tuple[str, dict]:
     """Общий безопасный vision-путь для Telegram, VK и HTTP-интерфейса."""
     image_data_url = image_bytes_to_data_url(
@@ -594,7 +633,7 @@ async def call_ai_with_image_bytes(
         image_data_url=image_data_url,
     )
     messages = (
-        [{"role": "system", "content": SYSTEM_PROMPT}]
+        [{"role": "system", "content": system_prompt}]
         + trim_history(history)
         + [{"role": "user", "content": user_content}]
     )
@@ -1448,7 +1487,7 @@ async def handle_text(message: Message, state: FSMContext):
     try:
         history = list(get_history(data))
         history.append({"role": "user", "content": user_content_for_model})
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trim_history(history)
+        messages = [{"role": "system", "content": TELEGRAM_SYSTEM_PROMPT}] + trim_history(history)
         
         async with _bot_ai_semaphore:
             reply, debug = await asyncio.wait_for(
@@ -1634,7 +1673,7 @@ async def handle_document(message: Message, state: FSMContext):
         )
 
         history.append({"role": "user", "content": full_prompt})
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + trim_history(history)
+        messages = [{"role": "system", "content": TELEGRAM_SYSTEM_PROMPT}] + trim_history(history)
 
         await status_msg.edit_text("<i>Думаю...</i>", parse_mode="HTML")
         async with _bot_ai_semaphore:
