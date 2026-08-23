@@ -28,13 +28,9 @@ from handlers.chat_handler import (
     SYSTEM_PROMPT,
     TEXT_EXTENSIONS,
     VISION_MODEL_CHAIN,
-    VISION_BRIDGE_SYSTEM_PROMPT,
     call_ai,
     extract_text_bounded,
-    make_text_model_image_prompt,
-    make_vision_bridge_prompt,
     make_vision_content,
-    model_accepts_images,
     trim_history,
 )
 from handlers.image_handler import generate_image
@@ -1441,82 +1437,24 @@ async def _api_chat_for_user(
         if not a["is_image"]
     ]
 
-    # Мультимодальным моделям (см. DIRECT_VISION_MODELS) фото передаём
-    # напрямую. Остальным — как в Telegram/VK-версии: сначала Llama Vision
-    # (VISION_MODEL_CHAIN) описывает изображение текстом, затем выбранная
-    # текстовая модель отвечает уже по этому описанию.
-    uses_vision_bridge = bool(image_attachments) and not model_accepts_images(model_id)
-
+    # Фото обрабатывает отдельная мультимодальная цепочка:
+    # Qwen используется первой, Nemotron — как резервная модель.
     if image_attachments or file_attachments:
         # Build multi-part content
         content_parts = []
 
-        # Add user text first — only if no file attachments (for files, text is embedded in prompt)
-        # and only if we're not going through the vision bridge (its prompt already embeds the task).
+        # Add user text first — only if no file attachments (for files, text is embedded in prompt).
         has_files = bool(file_attachments)
-        if user_text and user_text != "Вложения" and not has_files and not uses_vision_bridge:
+        if user_text and user_text != "Вложения" and not has_files:
             content_parts.append({"type": "text", "text": user_text})
 
-        if uses_vision_bridge:
-            descriptions = []
-            for index, img in enumerate(image_attachments, start=1):
-                media_type = img["type"]
-                b64data = base64.b64encode(img["raw"]).decode("ascii")
-                bridge_messages = [
-                    {"role": "system", "content": VISION_BRIDGE_SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": make_vision_content(
-                            prompt=make_vision_bridge_prompt(user_text),
-                            image_data_url=f"data:{media_type};base64,{b64data}",
-                        ),
-                    },
-                ]
-                try:
-                    async with _ai_semaphore:
-                        description, _bridge_debug = await asyncio.wait_for(
-                            call_ai(
-                                VISION_MODEL_CHAIN[0],
-                                bridge_messages,
-                                fallback_chain=VISION_MODEL_CHAIN,
-                            ),
-                            timeout=AI_TIMEOUT_SECONDS,
-                        )
-                except asyncio.TimeoutError:
-                    return web.json_response(
-                        {"error": "ai_timeout", "message": "Ответ модели занял слишком много времени."},
-                        status=504,
-                    )
-                except Exception:
-                    logger.exception("webapp_api: ошибка vision-bridge")
-                    return web.json_response(
-                        {"error": "ai_failed", "message": "Не удалось обработать изображение."},
-                        status=502,
-                    )
-                description = (description or "").strip()
-                if not description:
-                    return web.json_response(
-                        {"error": "ai_failed", "message": "Не удалось распознать изображение."},
-                        status=502,
-                    )
-                label = f"Изображение {index}" if len(image_attachments) > 1 else "Изображение"
-                descriptions.append(f"[{label}]\n{description}")
+        for img in image_attachments:
+            media_type = img["type"]
+            b64data = base64.b64encode(img["raw"]).decode("ascii")
             content_parts.append({
-                "type": "text",
-                "text": make_text_model_image_prompt(
-                    caption=user_text,
-                    description="\n\n".join(descriptions),
-                ),
+                "type": "image_url",
+                "image_url": {"url": f"data:{media_type};base64,{b64data}"}
             })
-        else:
-            # Add images via vision
-            for img in image_attachments:
-                media_type = img["type"]
-                b64data = base64.b64encode(img["raw"]).decode("ascii")
-                content_parts.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{media_type};base64,{b64data}"}
-                })
 
         # Документы разбираются тем же изолированным парсером с лимитами CPU,
         # памяти и времени, что и вложения Telegram-бота.
@@ -1572,7 +1510,11 @@ async def _api_chat_for_user(
     try:
         async with _ai_semaphore:
             reply, debug = await asyncio.wait_for(
-                call_ai(model_id, messages),
+                call_ai(
+                    VISION_MODEL_CHAIN[0] if image_attachments else model_id,
+                    messages,
+                    fallback_chain=VISION_MODEL_CHAIN if image_attachments else None,
+                ),
                 timeout=AI_TIMEOUT_SECONDS,
             )
     except asyncio.TimeoutError:
