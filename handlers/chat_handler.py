@@ -353,8 +353,14 @@ def _normalize_telegram_rich_markdown(value: str) -> str:
     in_code = False
 
     for line in lines:
-        if line.lstrip().startswith(fence):
+        leading = line[: len(line) - len(line.lstrip())]
+        stripped = line.lstrip()
+        if stripped.startswith(fence):
             rendered.append(line)
+            in_code = not in_code
+            continue
+        if stripped.startswith("\\" + fence):
+            rendered.append(leading + stripped[1:])
             in_code = not in_code
             continue
 
