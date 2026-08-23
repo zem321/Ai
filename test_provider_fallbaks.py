@@ -8,6 +8,8 @@ from keyboards import (
     MODELS,
     MODEL_FALLBACK_CHAINS,
     REASONING_LEVELS,
+    VISION_MODEL_CHAIN,
+    canonical_model_id,
 )
 from provider_keys import (
     NVIDIA_REQUESTS_PER_MINUTE_PER_KEY,
@@ -26,7 +28,7 @@ class ModelFallbackConfigurationTests(unittest.TestCase):
             (
                 "nvidia/nemotron-3-nano-30b-a3b",
                 "gemini/gemini-3.5-flash-lite",
-                "groq/llama-3.1-8b-instant",
+                "groq/openai/gpt-oss-20b",
             ),
         )
         self.assertEqual(
@@ -34,7 +36,7 @@ class ModelFallbackConfigurationTests(unittest.TestCase):
                 REASONING_LEVELS["balanced"]["model_id"]
             ],
             (
-                "qwen/qwen3.6-27b",
+                "groq/qwen/qwen3.6-27b",
                 "gemini/gemini-3.6-flash",
                 "nvidia/nemotron-3-super-120b-a12b",
             ),
@@ -42,10 +44,25 @@ class ModelFallbackConfigurationTests(unittest.TestCase):
         self.assertEqual(
             MODEL_FALLBACK_CHAINS[REASONING_LEVELS["expert"]["model_id"]],
             (
-                "z-ai/glm-5.2",
+                "nvidia/nemotron-3-ultra-550b-a55b",
                 "gemini/gemini-3.6-flash",
                 "groq/openai/gpt-oss-120b",
             ),
+        )
+
+    def test_photo_models_have_requested_order(self):
+        self.assertEqual(
+            VISION_MODEL_CHAIN,
+            (
+                "groq/qwen/qwen3.6-27b",
+                "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+            ),
+        )
+
+    def test_legacy_glm_selection_maps_to_nemotron_ultra(self):
+        self.assertEqual(
+            canonical_model_id("z-ai/glm-5.2"),
+            REASONING_LEVELS["expert"]["model_id"],
         )
 
     def test_all_chain_models_are_allowlisted(self):
@@ -55,7 +72,7 @@ class ModelFallbackConfigurationTests(unittest.TestCase):
                 self.assertIn(model_id, MODELS)
 
     def test_balanced_is_default(self):
-        self.assertEqual(DEFAULT_MODEL, "qwen/qwen3.6-27b")
+        self.assertEqual(DEFAULT_MODEL, "groq/qwen/qwen3.6-27b")
 
 
 class ProviderKeySelectionTests(unittest.IsolatedAsyncioTestCase):
@@ -129,8 +146,32 @@ class ModelFallbackExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(debug["fallback_used"])
         self.assertEqual(
             debug["fallback_model"],
-            "groq/llama-3.1-8b-instant",
+            "groq/openai/gpt-oss-20b",
         )
+
+    async def test_photo_chain_uses_nemotron_after_qwen_failure(self):
+        with (
+            patch.object(
+                chat_handler,
+                "call_groq",
+                AsyncMock(side_effect=RuntimeError("groq unavailable")),
+            ) as groq,
+            patch.object(
+                chat_handler,
+                "call_nvidia",
+                AsyncMock(return_value=("вижу фото", {"provider": "nvidia"})),
+            ) as nvidia,
+        ):
+            content, debug = await chat_handler.call_ai(
+                VISION_MODEL_CHAIN[0],
+                [{"role": "user", "content": "Прочитай текст на фото"}],
+                fallback_chain=VISION_MODEL_CHAIN,
+            )
+
+        self.assertEqual(content, "вижу фото")
+        groq.assert_awaited_once()
+        nvidia.assert_awaited_once()
+        self.assertEqual(debug["fallback_model"], VISION_MODEL_CHAIN[1])
 
     async def test_expert_level_uses_gpt_oss_as_last_fallback(self):
         with (
