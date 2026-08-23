@@ -106,7 +106,6 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Очистить историю", callback_data="clear_history"),
         ],
         [
-            InlineKeyboardButton(text="Код для сайта", callback_data="webapp_login_code"),
             InlineKeyboardButton(text="Помощь", callback_data="help"),
         ],
     ])
@@ -185,9 +184,3 @@ def admin_panel_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Статистика", callback_data="admin_stats")],
     ])
 
-def webapp_code_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура под сообщением с кодом входа на сайт."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Новый код", callback_data="webapp_login_code")],
-        [InlineKeyboardButton(text="Меню", callback_data="main_menu")],
-    ])
