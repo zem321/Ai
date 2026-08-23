@@ -364,10 +364,17 @@ def _format_telegram_inline(value: str) -> str:
         value,
     )
     value = re.sub(
-        r"\[([^\]\n]+)\]\(([^)\n]+)\)",
+        r"\[([^\]\n]+)\]\(([^()\n]+(?:\([^()\n]*\)[^()\n]*)*)\)",
         lambda match: protect(
             "[" + _escape_telegram_markdown_text(match.group(1)) + "]"
             + "(" + _escape_telegram_link_url(match.group(2)) + ")"
+        ),
+        value,
+    )
+    value = re.sub(
+        r"\|\|(.+?)\|\|",
+        lambda match: protect(
+            "||" + _escape_telegram_markdown_text(match.group(1)) + "||"
         ),
         value,
     )
@@ -411,19 +418,54 @@ def _split_telegram_table_row(value: str) -> list[str]:
     return [cell.strip() for cell in value.split("|")]
 
 
-def _is_telegram_table_separator(value: str) -> bool:
-    cells = _split_telegram_table_row(value)
-    return bool(cells) and all(
-        re.fullmatch(r":?-{3,}:?", cell.strip())
-        for cell in cells
+def _plain_telegram_table_cell(value: str) -> str:
+    inline_code_re = re.compile(
+        re.escape(chr(96)) + r"([^" + re.escape(chr(96)) + r"\n]*)"
+        + re.escape(chr(96))
     )
+    value = inline_code_re.sub(r"\1", value)
+    value = re.sub(
+        r"\[([^\]\n]+)\]\(([^()\n]+(?:\([^()\n]*\)[^()\n]*)*)\)",
+        r"\1",
+        value,
+    )
+    value = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", r"\1", value)
+    value = re.sub(
+        r"(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)",
+        r"\1",
+        value,
+    )
+    value = re.sub(r"~~(.+?)~~|\|\|(.+?)\|\|", r"\1", value)
+    return value.replace("\\|", "|").strip()
 
 
-def _render_telegram_table_row(cells: list[str], header: bool = False) -> str:
-    rendered = [_format_telegram_inline(cell) for cell in cells]
-    if header:
-        rendered = ["*" + cell + "*" for cell in rendered]
-    return " \\| ".join(rendered)
+def _render_telegram_table(rows: list[list[str]]) -> list[str]:
+    plain_rows = [
+        [_plain_telegram_table_cell(cell) for cell in row]
+        for row in rows
+    ]
+    column_count = max((len(row) for row in plain_rows), default=0)
+    if not column_count:
+        return []
+
+    normalized = [
+        row + [""] * (column_count - len(row))
+        for row in plain_rows
+    ]
+    widths = [
+        max(len(row[column]) for row in normalized)
+        for column in range(column_count)
+    ]
+    body = [
+        " | ".join(cell.ljust(widths[column]) for column, cell in enumerate(row))
+        for row in normalized
+    ]
+    separator = "-+-".join("-" * width for width in widths)
+    if len(body) > 1:
+        body.insert(1, separator)
+
+    fence = chr(96) * 3
+    return [fence] + [_escape_telegram_code(line) for line in body] + [fence]
 
 
 def _render_telegram_markdown(value: str) -> str:
@@ -431,7 +473,6 @@ def _render_telegram_markdown(value: str) -> str:
     rendered: list[str] = []
     fence = chr(96) * 3
     in_code = False
-    in_table = False
     index = 0
 
     while index < len(lines):
@@ -454,24 +495,17 @@ def _render_telegram_markdown(value: str) -> str:
             and "|" in line
             and _is_telegram_table_separator(lines[index + 1])
         ):
-            rendered.append(
-                _render_telegram_table_row(
-                    _split_telegram_table_row(line),
-                    header=True,
-                )
-            )
-            in_table = True
+            table_rows = [_split_telegram_table_row(line)]
             index += 2
+            while (
+                index < len(lines)
+                and "|" in lines[index]
+                and lines[index].strip()
+            ):
+                table_rows.append(_split_telegram_table_row(lines[index]))
+                index += 1
+            rendered.extend(_render_telegram_table(table_rows))
             continue
-
-        if in_table and "|" in line and stripped:
-            rendered.append(
-                _render_telegram_table_row(_split_telegram_table_row(line))
-            )
-            index += 1
-            continue
-
-        in_table = False
 
         heading = re.match(r"^\s{0,3}#{1,6}\s*(.+?)\s*$", line)
         if heading:
@@ -485,6 +519,15 @@ def _render_telegram_markdown(value: str) -> str:
         if quote:
             rendered.append(
                 ">" + _format_telegram_inline(quote.group(1))
+            )
+            index += 1
+            continue
+
+        task = re.match(r"^\s*[-+*]\s+\[([ xX])\]\s+(.+)$", line)
+        if task:
+            marker = "☑" if task.group(1).lower() == "x" else "☐"
+            rendered.append(
+                marker + " " + _format_telegram_inline(task.group(2))
             )
             index += 1
             continue
@@ -503,6 +546,11 @@ def _render_telegram_markdown(value: str) -> str:
                 ordered.group(1) + "\\. "
                 + _format_telegram_inline(ordered.group(2))
             )
+            index += 1
+            continue
+
+        if re.fullmatch(r"\s{0,3}([-*_])(?:\s*\1){2,}\s*", line):
+            rendered.append("──────────")
             index += 1
             continue
 
