@@ -12,7 +12,7 @@ REASONING_LEVELS = {
     },
     "expert": {
         "title": "🛠 Эксперт",
-        "model_id": "z-ai/glm-5.2",
+        "model_id": "nvidia/nemotron-3-ultra-550b-a55b",
     },
 }
 
@@ -24,6 +24,7 @@ DEFAULT_MODEL = REASONING_LEVELS[DEFAULT_REASONING_LEVEL]["model_id"]
 # всегда отправлялся в Groq, а не попадал в NVIDIA по умолчанию.
 LEGACY_MODEL_ALIASES = {
     "qwen/qwen3.6-27b": REASONING_LEVELS["balanced"]["model_id"],
+    "z-ai/glm-5.2": REASONING_LEVELS["expert"]["model_id"],
 }
 
 
@@ -44,7 +45,7 @@ MODEL_FALLBACK_CHAINS = {
     REASONING_LEVELS["fast"]["model_id"]: (
         REASONING_LEVELS["fast"]["model_id"],
         "gemini/gemini-3.5-flash-lite",
-        "groq/llama-3.1-8b-instant",
+        "groq/openai/gpt-oss-20b",
     ),
     REASONING_LEVELS["balanced"]["model_id"]: (
         REASONING_LEVELS["balanced"]["model_id"],
@@ -58,12 +59,12 @@ MODEL_FALLBACK_CHAINS = {
     ),
 }
 
-# Лёгкая vision-модель описывает фото перед передачей текстовым моделям.
-VISION_BRIDGE_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
-DIRECT_VISION_MODELS = frozenset({
+# Для задач с фото сначала используется Qwen, затем мультимодальный Nemotron.
+VISION_MODEL_CHAIN = (
     REASONING_LEVELS["balanced"]["model_id"],
-    VISION_BRIDGE_MODEL,
-})
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+)
+DIRECT_VISION_MODELS = frozenset(VISION_MODEL_CHAIN)
 
 # Полный внутренний список нужен для проверки исходящих API-запросов.
 MODELS = {
@@ -73,10 +74,10 @@ MODELS = {
     "groq/qwen/qwen3.6-27b": "Qwen 3.6 27B",
     "gemini/gemini-3.6-flash": "Gemini 3.6 Flash",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B A12B",
-    "z-ai/glm-5.2": "GLM-5.2",
-    "groq/llama-3.1-8b-instant": "Llama 3.1 8B Instant",
+    "nvidia/nemotron-3-ultra-550b-a55b": "Nemotron 3 Ultra 550B A55B",
+    "groq/openai/gpt-oss-20b": "GPT-OSS 20B",
     "groq/openai/gpt-oss-120b": "GPT-OSS 120B",
-    VISION_BRIDGE_MODEL: "Nemotron Nano 12B VL",
+    VISION_MODEL_CHAIN[1]: "Nemotron 3 Nano Omni 30B A3B",
 }
 
 
