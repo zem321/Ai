@@ -27,7 +27,7 @@ from handlers.chat_handler import (
     MAX_HISTORY,
     SYSTEM_PROMPT,
     TEXT_EXTENSIONS,
-    VISION_BRIDGE_MODEL,
+    VISION_MODEL_CHAIN,
     VISION_BRIDGE_SYSTEM_PROMPT,
     call_ai,
     extract_text_bounded,
@@ -1443,7 +1443,7 @@ async def _api_chat_for_user(
 
     # Мультимодальным моделям (см. DIRECT_VISION_MODELS) фото передаём
     # напрямую. Остальным — как в Telegram/VK-версии: сначала Llama Vision
-    # (VISION_BRIDGE_MODEL) описывает изображение текстом, затем выбранная
+    # (VISION_MODEL_CHAIN) описывает изображение текстом, затем выбранная
     # текстовая модель отвечает уже по этому описанию.
     uses_vision_bridge = bool(image_attachments) and not model_accepts_images(model_id)
 
@@ -1475,7 +1475,11 @@ async def _api_chat_for_user(
                 try:
                     async with _ai_semaphore:
                         description, _bridge_debug = await asyncio.wait_for(
-                            call_ai(VISION_BRIDGE_MODEL, bridge_messages),
+                            call_ai(
+                                VISION_MODEL_CHAIN[0],
+                                bridge_messages,
+                                fallback_chain=VISION_MODEL_CHAIN,
+                            ),
                             timeout=AI_TIMEOUT_SECONDS,
                         )
                 except asyncio.TimeoutError:
