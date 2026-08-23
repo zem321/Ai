@@ -117,7 +117,7 @@ TELEGRAM_SYSTEM_PROMPT = (
     + "\n\nФОРМАТ ОТВЕТА В TELEGRAM:\n"
     "- Используй Rich Markdown Telegram: # заголовки, - списки, 1. нумерацию, > цитаты, "
     "таблицы через |, **жирный**, *курсив*, ~~зачёркивание~~, ==выделение==, "
-    "||spoiler||, __подчёркивание в Rich Markdown__, код, ссылки, сноски [^id], "
+    "||spoiler||, __жирный__, код, ссылки, сноски [^id], "
     "формулы $$...$$ и блоки ```.\n"
     "- Не используй MarkdownV2-экранирование обратными слэшами и не добавляй "
     "пояснения о правилах разметки.\n"
@@ -360,31 +360,6 @@ async def _edit_ai_reply(message: Message, text: str, **kwargs):
                 fallback_exc,
             )
             return await message.edit_text(text, **kwargs)
-
-
-async def _answer_ai_reply(message: Message, text: str, **kwargs):
-    try:
-        return await message.answer_rich(
-            InputRichMessage(markdown=text),
-            **kwargs,
-        )
-    except (TelegramBadRequest, AttributeError) as exc:
-        logger.warning(
-            "Telegram Rich Markdown rejected for reply: %s",
-            exc,
-        )
-        try:
-            return await message.answer(
-                text,
-                parse_mode="MarkdownV2",
-                **kwargs,
-            )
-        except TelegramBadRequest as fallback_exc:
-            logger.warning(
-                "Telegram MarkdownV2 fallback rejected for reply: %s",
-                fallback_exc,
-            )
-            return await message.answer(text, **kwargs)
 
 
 async def send_ai_reply(status_msg: Message, reply: str):
