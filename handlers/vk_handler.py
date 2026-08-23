@@ -237,7 +237,6 @@ class VKConfig:
         other_secrets = {
             os.getenv("BOT_TOKEN", ""),
             *configured_provider_secrets(),
-            os.getenv("LOGIN_CODE_PEPPER", ""),
             os.getenv("DATABASE_URL", ""),
         }
         if token in other_secrets:
@@ -446,7 +445,6 @@ def main_menu_keyboard() -> str:
                 _button("Выбрать уровень", "models"),
                 _button("Очистить историю", "clear"),
             ],
-            [_button("Код для сайта", "site_code")],
             [_button("Помощь", "help")],
         ]
     )
@@ -1398,9 +1396,6 @@ class VKBot:
                 keyboard=main_menu_keyboard(),
             )
             return True
-        if command == "site_code":
-            await self._send_site_code(vk_user_id, peer_id)
-            return True
         if command in {"admin_approve", "admin_reject"}:
             await self._handle_admin_decision(
                 vk_user_id,
@@ -1427,7 +1422,6 @@ class VKBot:
             "/models": {"cmd": "models"},
             "/levels": {"cmd": "models"},
             "/clear": {"cmd": "clear"},
-            "/code": {"cmd": "site_code"},
         }
         payload = mapping.get(command)
         if payload is not None:
@@ -1457,30 +1451,7 @@ class VKBot:
                 f"{db.VK_CHAT_HISTORY_RETENTION_HOURS} часов после "
                 "последнего сообщения; /clear удаляет её сразу.\n\n"
                 "Команды: /start, /menu, /chat, /image, /edit, /levels, "
-                "/clear, /code."
-            ),
-            keyboard=main_menu_keyboard(),
-        )
-
-    async def _send_site_code(self, vk_user_id: int, peer_id: int) -> None:
-        try:
-            code = await db.create_login_code(db.vk_user_key(vk_user_id))
-        except Exception:
-            logger.exception(
-                "Не удалось создать код входа для VK user_id=%s",
-                vk_user_id,
-            )
-            await self.send_message(
-                peer_id,
-                "Не удалось создать код. Попробуй позже.",
-            )
-            return
-        await self.send_message(
-            peer_id,
-            (
-                "Код для входа на сайт:\n\n"
-                f"{code}\n\n"
-                "Код одноразовый и действует 10 минут. Никому его не сообщай."
+                "/clear."
             ),
             keyboard=main_menu_keyboard(),
         )
@@ -2831,3 +2802,4 @@ def setup_vk_callback_routes(app: web.Application) -> VKCallbackChannel | None:
     app.on_startup.append(_start_callback)
     app.on_cleanup.append(_stop_callback)
     return channel
+
