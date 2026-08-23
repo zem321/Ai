@@ -121,6 +121,9 @@ TELEGRAM_SYSTEM_PROMPT = (
     "формулы $$...$$ и блоки ```.\n"
     "- Не используй MarkdownV2-экранирование обратными слэшами и не добавляй "
     "пояснения о правилах разметки.\n"
+    "- Используй только корректный синтаксис Rich Markdown: [текст](https://example.com), "
+    "![описание](https://example.com/image.jpg), таблицы с разделителями | и закрывай каждый "
+    "блок ``` отдельной строкой. Не ставь обратный слэш перед Markdown-символами."\n
     "- Не оборачивай обычный ответ целиком в кодовый блок."
 )
 
@@ -337,10 +340,50 @@ async def edit_error(status_msg: Message, title: str, error: Exception):
         reply_markup=cancel_keyboard(),
     )
 
+RICH_MARKDOWN_ESCAPED_CHAR_RE = re.compile(
+    r"\\(?=[\\_*{}\[\]()#+\-.!|>~=$]|"
+    + re.escape(chr(96)) + r")"
+)
+
+
+def _normalize_telegram_rich_markdown(value: str) -> str:
+    lines = value.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    rendered: list[str] = []
+    fence = chr(96) * 3
+    in_code = False
+
+    for line in lines:
+        if line.lstrip().startswith(fence):
+            rendered.append(line)
+            in_code = not in_code
+            continue
+
+        if not in_code:
+            line = RICH_MARKDOWN_ESCAPED_CHAR_RE.sub("", line)
+            line = re.sub(
+                r"(!?\[[^\]\n]+\])\(\[[^\]\n]+\]\((https?://[^)\s]+)\)\)",
+                r"\1(\2)",
+                line,
+            )
+            line = re.sub(
+                r"<(\[[^\]\n]+\]\((https?://[^)\s]+)\))>",
+                r"\1",
+                line,
+            )
+
+        rendered.append(line)
+
+    if in_code:
+        rendered.append(fence)
+
+    return "\n".join(rendered)
+
+
 async def _edit_ai_reply(message: Message, text: str, **kwargs):
+    formatted = _normalize_telegram_rich_markdown(text)
     try:
         return await message.edit_text(
-            rich_message=InputRichMessage(markdown=text),
+            rich_message=InputRichMessage(markdown=formatted),
             **kwargs,
         )
     except (TelegramBadRequest, AttributeError) as exc:
@@ -350,7 +393,7 @@ async def _edit_ai_reply(message: Message, text: str, **kwargs):
         )
         try:
             return await message.edit_text(
-                text,
+                formatted,
                 parse_mode="MarkdownV2",
                 **kwargs,
             )
