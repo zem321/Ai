@@ -348,7 +348,7 @@ async def _answer_ai_reply(message: Message, text: str, **kwargs):
     try:
         return await message.answer(
             text,
-            parse_mode="MarkdownV2",
+            parse_mode="Markdown",
             **kwargs,
         )
     except TelegramBadRequest as exc:
