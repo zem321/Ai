@@ -418,6 +418,14 @@ def _split_telegram_table_row(value: str) -> list[str]:
     return [cell.strip() for cell in value.split("|")]
 
 
+def _is_telegram_table_separator(value: str) -> bool:
+    cells = _split_telegram_table_row(value)
+    return bool(cells) and all(
+        re.fullmatch(r":?-{3,}:?", cell.strip())
+        for cell in cells
+    )
+
+
 def _plain_telegram_table_cell(value: str) -> str:
     inline_code_re = re.compile(
         re.escape(chr(96)) + r"([^" + re.escape(chr(96)) + r"\n]*)"
