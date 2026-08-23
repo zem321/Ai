@@ -328,15 +328,17 @@ async def edit_error(status_msg: Message, title: str, error: Exception):
         reply_markup=cancel_keyboard(),
     )
 
-TELEGRAM_MARKDOWN_V2_SPECIAL_RE = re.compile(r"([\\_*\[\]()~`>#+\-=|{}.!])")
+TELEGRAM_MARKDOWN_V2_SPECIAL_RE = re.compile(
+    r"([\\_*\[\]()~>#+\-=|{}.!]|" + re.escape(chr(96)) + r")"
+)
 
 
 def _escape_telegram_markdown_text(value: str) -> str:
-    return TELEGRAM_MARKDOWN_V2_SPECIAL_RE.sub(r"\\\\\1", value)
+    return TELEGRAM_MARKDOWN_V2_SPECIAL_RE.sub(r"\\\1", value)
 
 
 def _escape_telegram_code(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("`", "\\`")
+    return value.replace("\\", "\\\\").replace(chr(96), "\\" + chr(96))
 
 
 def _escape_telegram_link_url(value: str) -> str:
@@ -347,25 +349,30 @@ def _format_telegram_inline(value: str) -> str:
     tokens: dict[str, str] = {}
 
     def protect(rendered: str) -> str:
-        token = f"\ue000{len(tokens)}\ue001"
+        token = chr(0xE000) + str(len(tokens)) + chr(0xE001)
         tokens[token] = rendered
         return token
 
-    value = re.sub(
-        r"`([^`\\n]*)`",
-        lambda match: protect("`" + _escape_telegram_code(match.group(1)) + "`"),
-        value,
+    inline_code_re = re.compile(
+        re.escape(chr(96)) + r"([^" + re.escape(chr(96)) + r"\n]*)"
+        + re.escape(chr(96))
     )
-    value = re.sub(
-        r"\\[([^\\]\\n]+)\\]\\(([^)\\n]+)\\)",
+    value = inline_code_re.sub(
         lambda match: protect(
-            "[" + _escape_telegram_markdown_text(match.group(1)) + "]"
-            "(" + _escape_telegram_link_url(match.group(2)) + ")"
+            chr(96) + _escape_telegram_code(match.group(1)) + chr(96)
         ),
         value,
     )
     value = re.sub(
-        r"\\*\\*(.+?)\\*\\*|__(.+?)__",
+        r"\[([^\]\n]+)\]\(([^)\n]+)\)",
+        lambda match: protect(
+            "[" + _escape_telegram_markdown_text(match.group(1)) + "]"
+            + "(" + _escape_telegram_link_url(match.group(2)) + ")"
+        ),
+        value,
+    )
+    value = re.sub(
+        r"\*\*(.+?)\*\*|__(.+?)__",
         lambda match: protect(
             "*" + _escape_telegram_markdown_text(
                 match.group(1) or match.group(2)
@@ -374,7 +381,7 @@ def _format_telegram_inline(value: str) -> str:
         value,
     )
     value = re.sub(
-        r"(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)|(?<!_)_([^_\\n]+)_(?!_)",
+        r"(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)",
         lambda match: protect(
             "_" + _escape_telegram_markdown_text(
                 match.group(1) or match.group(2)
@@ -416,27 +423,32 @@ def _render_telegram_table_row(cells: list[str], header: bool = False) -> str:
     rendered = [_format_telegram_inline(cell) for cell in cells]
     if header:
         rendered = ["*" + cell + "*" for cell in rendered]
-    return " \\\\| ".join(rendered)
+    return " \\| ".join(rendered)
 
 
 def _render_telegram_markdown(value: str) -> str:
-    lines = value.replace("\\r\\n", "\\n").replace("\\r", "\\n").split("\\n")
+    lines = value.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     rendered: list[str] = []
+    fence = chr(96) * 3
     in_code = False
     in_table = False
     index = 0
+
     while index < len(lines):
         line = lines[index]
         stripped = line.strip()
-        if stripped.startswith("```"):
-            rendered.append("```")
+
+        if stripped.startswith(fence):
+            rendered.append(fence)
             in_code = not in_code
             index += 1
             continue
+
         if in_code:
             rendered.append(_escape_telegram_code(line))
             index += 1
             continue
+
         if (
             index + 1 < len(lines)
             and "|" in line
@@ -451,41 +463,57 @@ def _render_telegram_markdown(value: str) -> str:
             in_table = True
             index += 2
             continue
+
         if in_table and "|" in line and stripped:
             rendered.append(
                 _render_telegram_table_row(_split_telegram_table_row(line))
             )
             index += 1
             continue
+
         in_table = False
-        heading = re.match(r"^\\s{0,3}#{1,6}\\s*(.+?)\\s*$", line)
+
+        heading = re.match(r"^\s{0,3}#{1,6}\s*(.+?)\s*$", line)
         if heading:
-            rendered.append("*" + _format_telegram_inline(heading.group(1)) + "*")
+            rendered.append(
+                "*" + _format_telegram_inline(heading.group(1)) + "*"
+            )
             index += 1
             continue
-        quote = re.match(r"^\\s*>+\\s?(.*)$", line)
+
+        quote = re.match(r"^\s*>+\s?(.*)$", line)
         if quote:
-            rendered.append(">" + _format_telegram_inline(quote.group(1)))
+            rendered.append(
+                ">" + _format_telegram_inline(quote.group(1))
+            )
             index += 1
             continue
-        unordered = re.match(r"^\\s*[-+*]\\s+(.+)$", line)
+
+        unordered = re.match(r"^\s*[-+*]\s+(.+)$", line)
         if unordered:
-            rendered.append("• " + _format_telegram_inline(unordered.group(1)))
+            rendered.append(
+                "• " + _format_telegram_inline(unordered.group(1))
+            )
             index += 1
             continue
-        ordered = re.match(r"^\\s*(\\d+)[.)]\\s+(.+)$", line)
+
+        ordered = re.match(r"^\s*(\d+)[.)]\s+(.+)$", line)
         if ordered:
             rendered.append(
-                ordered.group(1) + "\\\\. "
+                ordered.group(1) + "\\. "
                 + _format_telegram_inline(ordered.group(2))
             )
             index += 1
             continue
+
         rendered.append(_format_telegram_inline(line))
         index += 1
+
     if in_code:
-        rendered.append("```")
-    return "\\n".join(rendered)
+        rendered.append(fence)
+
+    return "\n".join(rendered)
+
 
 async def _edit_ai_reply(message: Message, text: str, **kwargs):
     formatted = _render_telegram_markdown(text)
