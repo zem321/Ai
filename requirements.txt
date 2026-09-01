@@ -4,9 +4,9 @@ aiofiles==25.1.0 \
     --hash=sha256:a8d728f0a29de45dc521f18f07297428d56992a742f0cd2701ba86e44d23d5b2 \
     --hash=sha256:abe311e527c862958650f9438e859c1fa7568a141b22abcd015e120e86a85695
     # via aiogram
-aiogram==3.30.0 \
-    --hash=sha256:04a5c43d0acedaf907ffa9a1b6c651cd5fde35b5bca82f521e57d77a57e63bc6 \
-    --hash=sha256:98c22665271912d258178cec591f78ee93a085a3423dd3b2e11c2851d4552470
+aiogram==3.31.0 \
+    --hash=sha256:d889493c5917a867fc9da81fd6e6b3ae438e98bfe1b004fcdafe7400461a6c1b \
+    --hash=sha256:f2c5064fe52d88898c86af62261c405440a014216e45dd99b2c6555a5602ce30
     # via -r requirements.in
 aiohappyeyeballs==2.7.1 \
     --hash=sha256:065665c041c42a5938ed220bdcd7230f22527fbec085e1853d2402c8a3615d9d \
@@ -1107,4 +1107,3 @@ yarl==1.24.5 \
     --hash=sha256:ff405d91509d88e8d44129cd87b18d70acd1f0c1aeabd7bc3c46792b1fe2acba \
     --hash=sha256:ffcd54362564dc1a30fb74d8b8a6e5a6b11ebd5e27266adc3b7427a21a6c9104
     # via aiohttp
-
